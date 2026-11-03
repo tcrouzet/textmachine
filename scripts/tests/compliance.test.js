@@ -6,7 +6,7 @@ const ts = require('typescript-eslint');
 
 const root = path.resolve(__dirname,'../..');
 const rules = Object.fromEntries(['no-unsafe-assignment','no-unsafe-member-access','no-unsafe-call','no-unsafe-return',
-    'no-unsafe-argument','no-require-imports','no-redundant-type-constituents'].map(name=>['@typescript-eslint/'+name,'error']));
+    'no-unsafe-argument','no-require-imports','no-redundant-type-constituents','restrict-plus-operands'].map(name=>['@typescript-eslint/'+name,'error']));
 
 test('plugin modules pass the type-aware rules reported by the Obsidian review',async()=>{
     const eslint = new ESLint({cwd:root,overrideConfigFile:true,overrideConfig:[{

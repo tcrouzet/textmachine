@@ -15,7 +15,7 @@ async function fixture(initialSecrets = {}) {
         register() {}
     }
     let secret = JSON.stringify({email:'reader@example.com',clientId:'123-test.apps.googleusercontent.com',refreshToken:'old',scope:'https://www.googleapis.com/auth/gmail.readonly'});
-    const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},Plugin,PluginSettingTab:class {},Modal:class {},Notice:class {},getLanguage:()=> 'en'};
+    const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},Plugin,PluginSettingTab:class {},Modal:class {},Notice:class {},getLanguage:()=> 'en',requireApiVersion:()=>false};
     const context = {module:{exports:{}},AbortController,URL,setTimeout,clearTimeout,structuredClone,window:{setTimeout,clearTimeout},
         MutationObserver:class {observe() {} disconnect() {}},
         document:{body:{},querySelectorAll:()=>[]},CSS:{escape:value=>value},
@@ -848,7 +848,7 @@ test('cancelling image generation prevents any late note or status write',async(
 });
 
 test('settings definitions are searchable without IO and redraw uses the declarative API when available',async()=>{
-    const {p}=await fixture();
+    const {p,obsidian}=await fixture();
     p.codex={...p.codex,findCodex:()=>assert.fail('Definitions must not discover Codex')};
     p.request=()=>assert.fail('Definitions must not request a network resource');
     const tab=p.settingsTab;
@@ -858,6 +858,12 @@ test('settings definitions are searchable without IO and redraw uses the declara
         assert.ok(rows.some(row=>row.name===p.i18n.t(key) && row.searchable!==false),key);
     }
     let updates=0;
+    let legacyRenders=0;
+    tab.update=()=>assert.fail('Obsidian before 1.13 must not use update()');
+    tab.renderLegacy=()=>{legacyRenders++;};
+    tab.redraw();
+    assert.equal(legacyRenders,1);
+    obsidian.requireApiVersion=version=>{assert.equal(version,'1.13.0');return true;};
     tab.update=()=>{updates++;};
     tab.renderLegacy=()=>assert.fail('Modern settings must use update()');
     tab.redraw();

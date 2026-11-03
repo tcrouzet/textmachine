@@ -70,9 +70,7 @@ function dateFromDocument(doc: Document, structured?: Record<string,unknown>) {
 function pageDocument(html: string, url: string) {
     const doc = parseHTML(html);
     doc.querySelectorAll('base').forEach(node => node.remove());
-    const base = doc.createElement('base');
-    base.href = url;
-    (doc.head || doc.documentElement).prepend(base);
+    (doc.head || doc.documentElement).createEl('base',{attr:{href:url},prepend:true});
     return doc;
 }
 

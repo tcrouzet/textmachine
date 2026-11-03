@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, ButtonComponent, Notice, addIcon, setIcon, requestUrl, Modal, TFolder, TFile, getLanguage } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, ButtonComponent, Notice, addIcon, setIcon, requestUrl, requireApiVersion, Modal, TFolder, TFile, getLanguage } from 'obsidian';
 import { shell } from 'electron';
 import { BrowserWindow } from '@electron/remote';
 import { randomUUID } from 'node:crypto';
@@ -28,7 +28,7 @@ import textMachineIcon from '../icon.svg';
 const {t} = i18n;
 
 function destructive(button: ButtonComponent) {
-    if (typeof button.setDestructive==='function') return button.setDestructive();
+    if (requireApiVersion('1.13.0')) return button.setDestructive();
     button.buttonEl.addClass('mod-warning');
     return button;
 }
@@ -879,7 +879,7 @@ export class GmailSettings extends PluginSettingTab {
     }
 
     redraw() {
-        if (typeof this.update === 'function') {
+        if (requireApiVersion('1.13.0')) {
             this.update();
         } else this.renderLegacy();
     }

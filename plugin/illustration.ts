@@ -6,7 +6,7 @@ export async function createIllustration(data: ArrayBuffer): Promise<{data: Arra
         const image=new Image();
         image.src=url;
         await image.decode();
-        const canvas=document.createElement('canvas');
+        const canvas=createEl('canvas');
         canvas.width=1600;
         canvas.height=1200;
         const context=canvas.getContext('2d');

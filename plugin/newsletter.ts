@@ -218,7 +218,8 @@ function renderNewsletter(template: string, result: Newsletter, articles: Articl
     };
     let markdown = render(template,values).replace(/\n{3,}/g,'\n\n').trim();
     if (!/^#\s+\S/.test(markdown)) throw new Error(t('newsletterTemplateInvalid'));
-    if (image && typeof values.image==='string' && !markdown.includes(values.image)) markdown = markdown.replace(/^(#[^\n]*)(?:\n|$)/,(_match: string,heading: string)=>heading+'\n\n'+values.image+'\n\n');
+    const imageMarkdown=values.image;
+    if (image && typeof imageMarkdown==='string' && !markdown.includes(imageMarkdown)) markdown = markdown.replace(/^(#[^\n]*)(?:\n|$)/,(_match: string,heading: string)=>heading+'\n\n'+imageMarkdown+'\n\n');
     return markdown+'\n';
 }
 

@@ -186,7 +186,7 @@ class GmailClient {
         do {
             const query = new URLSearchParams({ labelIds: labelId, q: 'is:unread', maxResults: '500' });
             if (pageToken) query.set('pageToken', pageToken);
-            const page = await this.get('messages?' + query);
+            const page = await this.get('messages?' + query.toString());
             if (!page || (page.messages !== undefined && !Array.isArray(page.messages))) {
                 throw new Error(t('invalidMessages'));
             }
