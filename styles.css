@@ -78,3 +78,41 @@
 .vertical-tab-nav-item[data-setting-id="text-machine"] .vertical-tab-nav-item-icon {
     display: flex;
 }
+
+.text-machine-activity {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+    margin-block: var(--size-4-4);
+}
+
+.text-machine-spinner {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    animation: text-machine-spin 1s linear infinite;
+}
+
+@keyframes text-machine-spin {
+    to { transform: rotate(360deg); }
+}
+
+.text-machine-run-log {
+    max-height: 40vh;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    font-size: var(--font-ui-small);
+}
+
+.text-machine-live-output {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: inherit;
+    background: var(--background-secondary);
+    padding: var(--size-4-3);
+    border-radius: var(--radius-s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .text-machine-spinner { animation: none; }
+}

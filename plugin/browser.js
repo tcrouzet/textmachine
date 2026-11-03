@@ -1,4 +1,5 @@
 const { t } = require('./i18n');
+const {isPdf} = require('./articles');
 const { lookup } = require('node:dns').promises;
 const { isIP } = require('node:net');
 const { randomUUID } = require('node:crypto');
@@ -29,6 +30,8 @@ async function publicUrl(value) {
 
 async function loadPage(url, signal, isBlocked, BrowserWindow) {
     if (signal?.aborted) throw new Error(t('pluginDisabled'));
+    const pdfPage = target => ({status:415,url:target,html:'',contentType:'application/pdf'});
+    if (isPdf(url)) return pdfPage(url);
     if (!await publicUrl(url)) return {status:404, url, html:''};
     if (signal?.aborted) throw new Error(t('pluginDisabled'));
     const win = new BrowserWindow({show:false, webPreferences:{
@@ -40,8 +43,18 @@ async function loadPage(url, signal, isBlocked, BrowserWindow) {
     session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.setPermissionCheckHandler(() => false);
     session.on('will-download', event => event.preventDefault());
-    let status = 200;
+    let status = 200, pdfUrl = '';
+    session.webRequest.onHeadersReceived((details,callback) => {
+        const header = name => Object.entries(details.responseHeaders || {}).find(([key])=>key.toLowerCase() === name)?.[1].join(';') || '';
+        const pdf = isPdf(details.url,header('content-type'),header('content-disposition'));
+        if (pdf && details.resourceType === 'mainFrame') pdfUrl = details.url;
+        callback({cancel:pdf});
+    });
     session.webRequest.onBeforeRequest((details, callback) => {
+        if (isPdf(details.url)) {
+            if (details.resourceType === 'mainFrame') pdfUrl = details.url;
+            callback({cancel:true});return;
+        }
         if (details.url === 'about:blank') { callback({cancel:false}); return; }
         if (isBlocked(details.url)) { callback({cancel:true}); return; }
         void publicUrl(details.url).then(allowed => {
@@ -57,6 +70,7 @@ async function loadPage(url, signal, isBlocked, BrowserWindow) {
     try {
         const userAgent = web.getUserAgent().replace(/\s(?:Electron|obsidian)\/\S+/gi, '');
         await win.loadURL(url, {userAgent});
+        if (pdfUrl) return pdfPage(pdfUrl);
         if (status >= 400) return {status, url:web.getURL(), html:''};
         await web.executeJavaScript(`new Promise(resolve => {
             let quiet;
@@ -70,7 +84,7 @@ async function loadPage(url, signal, isBlocked, BrowserWindow) {
         return {status, url:web.getURL(), html};
     } catch {
         if (signal?.aborted) throw new Error(t('pluginDisabled'));
-        return {status:status >= 400 ? status : 404, url, html:''};
+        return pdfUrl ? pdfPage(pdfUrl) : {status:status >= 400 ? status : 404, url, html:''};
     } finally {
         clearTimeout(timer);
         signal?.removeEventListener('abort', close);

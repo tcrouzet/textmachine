@@ -2,6 +2,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 require('../../plugin/i18n').setLocale('en');
 const {publicationDate, parseBlocked, isBlocked, crawl} = require('../../plugin/crawler');
+const {isPdf} = require('../../plugin/articles');
 const {publicAddress, publicUrl} = require('../../plugin/browser');
 const article = {url:'https://example.com/article', title:'Article', date:'', source:'User', status:'', publish:'', content:'', image:''};
 
@@ -9,9 +10,9 @@ test('site refusals are persisted and suppress future pages on that host', async
     const data = [];
     let calls = 0;
     const load = async url => {calls++; return {url, status:403, html:''};};
-    assert.equal((await crawl(article, data, undefined, load)).status, '404');
+    assert.equal((await crawl(article, data, undefined, load)).status, 'forbidden');
     assert.deepEqual(data, ['example.com']);
-    assert.equal((await crawl({...article,url:'https://www.example.com/another'}, data, undefined, load)).status, '404');
+    assert.equal((await crawl({...article,url:'https://www.example.com/another'}, data, undefined, load)).status, 'forbidden');
     assert.equal(calls, 1);
     assert.equal(isBlocked('https://example.com.evil.test/article',data), false);
     assert.equal(isBlocked('https://notexample.com/article',data), false);
@@ -61,4 +62,29 @@ test('browser rejects local addresses and non-web URLs before opening a page', a
     for (const url of ['file:///tmp/test','javascript:alert(1)','http://127.1/','http://[::1]/','https://user:pass@example.com/','http://8.8.8.8:1234/']) {
         assert.equal(await publicUrl(url), false, url);
     }
+});
+
+test('PDFs never enter article extraction or block their hosting domain',async()=>{
+    let calls = 0;
+    const blocked = [];
+    const load = async()=>{calls++;throw new Error('PDF must not be requested');};
+    assert.equal((await crawl({...article,url:'https://example.com/report.pdf'},blocked,undefined,load)).status,'forbidden');
+    assert.equal(calls,0);
+    for (const page of [
+        {status:200,url:'https://example.com/hidden',contentType:'application/pdf',html:''},
+        {status:415,url:'https://example.com/final.pdf',html:''},
+        {status:200,url:'https://example.com/hidden',html:'%PDF-1.7 binary document'},
+    ]) {
+        assert.equal((await crawl(article,blocked,undefined,async()=>page)).status,'forbidden');
+        assert.deepEqual(blocked,[]);
+    }
+});
+
+
+test('PDF MIME types and download filenames are recognized without excluding HTML about PDF',()=>{
+    assert.equal(isPdf('https://example.com/download','Application/PDF; charset=binary'),true);
+    assert.equal(isPdf('https://example.com/download','application/octet-stream','attachment; filename="paper.pdf"'),true);
+    assert.equal(isPdf('https://example.com/download','application/octet-stream',"inline; filename*=UTF-8''paper%2Epdf"),true);
+    assert.equal(isPdf('https://example.com/articles/pdf-readers','text/html'),false);
+    assert.equal(isPdf('https://example.com/download','text/html','inline; filename="paper.pdf.html"'),false);
 });

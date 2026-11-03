@@ -19,6 +19,20 @@ function sourceOf(message) {
     return t('userSource');
 }
 
+function isPdf(value, contentType = '', disposition = '') {
+    if (/^application\/(?:x-)?pdf(?:\s*;|\s*$)/i.test(contentType.trim())) return true;
+    try {disposition = decodeURIComponent(disposition);} catch { /* Keep the original filename. */ }
+    if (/filename\*?\s*=\s*(?:utf-8''|")?[^;]*\.pdf(?:"|;|$)/i.test(disposition.trim())) return true;
+    try {
+        const url = new URL(value);
+        let path = url.pathname;
+        try {path = decodeURIComponent(path);} catch { /* Keep the original path. */ }
+        return /\.pdf$/i.test(path) || [...url.searchParams].some(([key,value])=>
+            /^(?:format|output)$/i.test(key) && /^pdf$/i.test(value)
+            || /^(?:file|filename|document|attachment)$/i.test(key) && /\.pdf$/i.test(value));
+    } catch {return false;}
+}
+
 function articleUrl(value, title = '') {
     let url;
     try {
@@ -110,7 +124,7 @@ function messageArticles(message) {
         title: articleTitle(link),
         url: link.url,
         source: sourceOf(message),
-        status: '',
+        status: isPdf(link.url) ? 'forbidden' : '',
         publish: '',
         content: '',
         image: '',
@@ -134,6 +148,25 @@ function isExcluded(article, exclusions) {
     });
 }
 
+function assignIds(data) {
+    if (!data.articles.length && data.nextId === undefined) return data;
+    let next = data.nextId ?? 1;
+    if (!Number.isSafeInteger(next) || next < 1) throw new Error(t('invalidDataFile'));
+    const assigned = new Set();
+    for (const article of data.articles) {
+        if (article.id === undefined) continue;
+        if (!Number.isSafeInteger(article.id) || article.id < 1 || assigned.has(article.id)) throw new Error(t('invalidDataFile'));
+        assigned.add(article.id);
+        next = Math.max(next,article.id+1);
+    }
+    for (const article of data.articles) {
+        if (article.id === undefined) article.id = next++;
+    }
+    if (!Number.isSafeInteger(next)) throw new Error(t('invalidDataFile'));
+    data.nextId = next;
+    return data;
+}
+
 function parseData(text) {
     let data;
     try { data = JSON.parse(text); } catch { throw new Error(t('invalidDataFile')); }
@@ -151,12 +184,19 @@ function parseData(text) {
         }
         try { new URL(article.url); } catch { throw new Error(t('invalidDataFile')); }
     }
-    return data;
+    return assignIds(data);
+}
+
+function withIds(text) {
+    const data = parseData(text), before = JSON.parse(text);
+    return data.nextId === before.nextId && data.articles.every((article,index)=>article.id === before.articles[index].id)
+        ? text : JSON.stringify(data,null,2)+'\n';
 }
 
 function mergeArticles(text, incoming) {
     const data = parseData(text);
-    const newArticles = parseData(JSON.stringify({version:1, articles:incoming})).articles;
+    const records = incoming.map(article=>{const copy = {...article};delete copy.id;return copy;});
+    const newArticles = parseData(JSON.stringify({version:1,nextId:data.nextId,articles:records})).articles;
     const urls = new Map(), titles = new Map();
     const articles = [];
     let count = 0;
@@ -184,7 +224,7 @@ function mergeArticles(text, incoming) {
         articles.push({ ...article });
         if (index >= data.articles.length) count++;
     }
-    return { text: JSON.stringify({ ...data, articles }, null, 2) + '\n', count, added: count > 0 };
+    return { text: JSON.stringify(assignIds({ ...data, articles }), null, 2) + '\n', count, added: count > 0 };
 }
 
-module.exports = { articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, parseData, mergeArticles };
+module.exports = { isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, parseData, withIds, mergeArticles };

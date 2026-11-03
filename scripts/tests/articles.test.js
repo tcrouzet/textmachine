@@ -1,7 +1,7 @@
 require('../../plugin/i18n').setLocale('fr');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, parseData, mergeArticles } = require('../../plugin/articles');
+const { isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, parseData, withIds, mergeArticles } = require('../../plugin/articles');
 const message = (from, extra = []) => ({id: '123', internalDate: '1700000000000', payload: {headers: [{name: 'From', value: from}, ...extra]}, bodies: []});
 
 test('classifies sender addresses, not spoofed display names, and retains uncertainty', () => {
@@ -100,4 +100,40 @@ test('renames legacy used and preserves its value and custom article fields', ()
     assert.equal(saved.articles[0].note, 'Keep');
     assert.equal(Object.hasOwn(saved.articles[0], 'used'), false);
     for (const field of ['publish','content','image']) assert.equal(saved.articles[0][field], '');
+});
+
+test('PDF links are retained as forbidden metadata without loading their content',()=>{
+    for (const url of ['https://example.com/report.pdf','https://example.com/report.PDF?download=1',
+        'https://example.com/report%2Epdf#page=2','https://example.com/download?filename=report.pdf',
+        'https://example.com/download?format=pdf',
+        'https://www.google.com/url?url=https%3A%2F%2Fexample.com%2Freport.pdf']) {
+        assert.ok(isPdf(articleUrl(url)),url);
+    }
+    assert.equal(articleUrl('https://example.com/articles/about-pdf'),'https://example.com/articles/about-pdf');
+    const m = message('reader@example.com');
+    m.bodies = [{type:'text/plain',text:'https://example.com/report.pdf https://example.com/article'}];
+    assert.deepEqual(messageArticles(m).map(article=>({url:article.url,status:article.status,content:article.content})),[
+        {url:'https://example.com/report.pdf',status:'forbidden',content:''},{url:'https://example.com/article',status:'',content:''},
+    ]);
+});
+
+
+test('IDs are persisted once, preserved by deduplication and never reused after removal',()=>{
+    const original = {version:1,notes:'Keep',articles:[{date:'',title:'First',url:'https://example.com/first',source:'User',custom:'Keep'}]};
+    const firstText = withIds(JSON.stringify(original));
+    const first = JSON.parse(firstText);
+    assert.equal(first.articles[0].id,1);
+    assert.equal(first.articles[0].custom,'Keep');
+    assert.equal(first.nextId,2);
+    assert.equal(withIds(firstText),firstText);
+    const merged = JSON.parse(mergeArticles(firstText,[{...original.articles[0],id:99},{date:'',title:'Second',url:'https://example.com/second',source:'User'}]).text);
+    assert.equal(merged.articles[0].id,1);
+    assert.ok(merged.articles[1].id > 1);
+    const previousMax = Math.max(...merged.articles.map(article=>article.id));
+    merged.articles = [merged.articles[0]];
+    const final = JSON.parse(mergeArticles(JSON.stringify(merged),[{date:'',title:'Third',url:'https://example.com/third',source:'User'}]).text);
+    assert.ok(final.articles[1].id > previousMax);
+    assert.equal(final.notes,'Keep');
+    for (const id of ['1',-1,0,null]) assert.throws(()=>withIds(JSON.stringify({...original,articles:[{...original.articles[0],id}]})),/textmachine.json/);
+    assert.throws(()=>withIds(JSON.stringify({...original,articles:[{...original.articles[0],id:1},{...original.articles[0],id:1}]})),/textmachine.json/);
 });

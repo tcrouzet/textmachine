@@ -14,7 +14,7 @@ test('English and French catalogs cover every used key with matching placeholder
         assert.deepEqual(parameters(fr[key]), parameters(en[key]), key);
     }
     const used = new Set();
-    for (const file of ['plugin/main.ts', 'plugin/gmail.js', 'plugin/articles.js', 'plugin/crawler.js', 'plugin/browser.js', 'plugin/ai/config.js', 'plugin/ai/settings.js', 'plugin/ai/codex.js']) {
+    for (const file of ['plugin/main.ts', 'plugin/gmail.js', 'plugin/articles.js', 'plugin/crawler.js', 'plugin/browser.js', 'plugin/ai/config.js', 'plugin/ai/settings.js', 'plugin/ai/codex.js', 'plugin/ai/generate.js', 'plugin/ai/stream.js', 'plugin/ai/image.js', 'plugin/newsletter.js']) {
         const source = fs.readFileSync(path.join(__dirname, '../..', file), 'utf8');
         for (const match of source.matchAll(/\bt\('([^']+)'/g)) {
             assert.ok(Object.hasOwn(en, match[1]), `${file}: ${match[1]}`);

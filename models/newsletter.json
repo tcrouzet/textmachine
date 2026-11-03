@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Newsletter TextMachine",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title",
+    "chapeau",
+    "paragraphs",
+    "lead",
+    "image",
+    "groups",
+    "discard"
+  ],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Titre de la newsletter, sans date ni mention de TextMachine."
+    },
+    "chapeau": {
+      "type": "string",
+      "description": "Introduction de moins de 25 mots."
+    },
+    "paragraphs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Paragraphes de l’article, avec liens et citations en Markdown. Au moins deux paragraphes si des articles sont retenus."
+    },
+    "lead": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "ID de l’article le plus prestigieux exploité et cité par un lien Markdown dans paragraphs. Privilégier les médias et sources primaires de référence. null si aucun article retenu."
+    },
+    "image": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "caption"
+          ],
+          "properties": {
+            "caption": {
+              "type": "string",
+              "description": "Légende fidèle au contenu de l’article principal ; chaîne vide si inconnue."
+            }
+          }
+        }
+      ],
+      "description": "Illustration de lead uniquement. null si cet article ne possède pas d’image adaptée ; ne pas choisir une image d’un autre article."
+    },
+    "groups": {
+      "type": "array",
+      "description": "Revue de presse regroupée par thème. Chaque ID retenu apparaît une seule fois.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "articles"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "summary"
+              ],
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "summary": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "discard": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "description": "IDs des articles écartés. Chaque ID fourni appartient à un groupe ou à discard, jamais aux deux."
+    }
+  }
+}

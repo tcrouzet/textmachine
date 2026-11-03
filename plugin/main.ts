@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice, addIcon, requestUrl, SecretComponent, Modal, TFolder, TFile, getLanguage } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, Notice, addIcon, setIcon, requestUrl, SecretComponent, Modal, TFolder, TFile, getLanguage } from 'obsidian';
 import { shell } from 'electron';
 import { BrowserWindow } from '@electron/remote';
 import { randomUUID } from 'node:crypto';
@@ -10,7 +10,13 @@ import * as browser from './browser';
 import * as ai from './ai/config';
 import * as codex from './ai/codex';
 import {renderAI} from './ai/settings';
-import {Settings, Account, Label, Progress, Action, AIProvider, errorOf} from './types';
+import {Settings, Account, Label, Progress, Action, AIProvider, Article, errorOf} from './types';
+import * as newsletter from './newsletter';
+import * as generation from './ai/generate';
+import * as imageCheck from './ai/image';
+import writerPrompt from '../prompts/writer.md';
+import newsletterTemplate from '../models/newsletter.md';
+import imagePrompt from '../prompts/image.md';
 import textMachineIcon from '../icon.svg';
 const {t} = i18n;
 
@@ -23,6 +29,10 @@ export default class TextMachine extends Plugin {
     crawler = crawler;
     ai = ai;
     codex = codex;
+    newsletter = newsletter;
+    generate = generation.generate;
+    request = requestUrl;
+    requestAI = generation.requestStream;
     renderAI = renderAI;
     labels: Label[] = [];
     busy = false;
@@ -38,6 +48,7 @@ export default class TextMachine extends Plugin {
     aiController: AbortController | null = null;
     crawlController: AbortController | null = null;
     runDialog: TextMachineRun | null = null;
+    folderIconStyle?: HTMLStyleElement;
     loadPage = (url: string, signal: AbortSignal, blocked: (url: string) => boolean) => browser.loadPage(url, signal, blocked, BrowserWindow);
 
     async onload() {
@@ -91,11 +102,39 @@ export default class TextMachine extends Plugin {
         this.makeClient();
         addIcon('text-machine', textMachineIcon);
         this.addSettingTab(new GmailSettings(this.app, this));
+        this.app.workspace.onLayoutReady(async () => {
+            if (this.disposed) return;
+            const style = this.folderIconStyle = document.head.createEl('style');
+            this.register(() => style.remove());
+            this.updateFolderIcon();
+            if (this.dataReady) {
+                const file = this.app.vault.getAbstractFileByPath(this.dataPath) as TFile;
+                try { await this.app.vault.process(file,text=>this.articles.withIds(text)); }
+                catch (caught) { new Notice(errorOf(caught).message); }
+            }
+        });
         this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
             if (!(file instanceof TFolder) || (this.dataReady && file.path !== this.settings.outputFolder)) return;
             menu.addItem(item => item.setTitle('Text Machine').setIcon('text-machine').setDisabled(this.busy)
                 .onClick(() => this.openTextMachine(file.path)));
         }));
+    }
+
+    updateFolderIcon() {
+        if (!this.folderIconStyle) return;
+        const path = this.settings.outputFolder;
+        this.folderIconStyle.textContent = path ? `
+            .workspace-leaf-content[data-type="file-explorer"] .nav-folder-title[data-path="${CSS.escape(path)}"] > .nav-folder-title-content::after {
+                content: "";
+                display: inline-block;
+                width: var(--icon-size);
+                height: var(--icon-size);
+                margin-inline-start: var(--size-4-2);
+                vertical-align: middle;
+                background-color: currentColor;
+                mask: url("data:image/svg+xml,${encodeURIComponent(textMachineIcon)}") center / contain no-repeat;
+            }
+        ` : '';
     }
 
     getAIKey(provider: AIProvider) {
@@ -243,7 +282,17 @@ export default class TextMachine extends Plugin {
         try {
             for (const article of articles) {
                 if (this.disposed) throw new Error(t('pluginDisabled'));
-                if (article.content && article.publish) continue;
+                if (article.status === 'forbidden') continue;
+                if (this.articles.isPdf(article.url) || article.status === '404' || this.crawler.isBlocked(article.url,blocked)) {
+                    await vault.process(log,text => {
+                        const current = this.articles.parseData(text);
+                        const saved = current.articles.find((item: Article)=>item.url === article.url);
+                        if (saved) saved.status = 'forbidden';
+                        return JSON.stringify(current,null,2) + '\n';
+                    });
+                    continue;
+                }
+                if (article.content) continue;
                 progress?.(t('crawlingArticle', {url:article.url}));
                 const before = JSON.stringify(blocked);
                 const result = await this.crawler.crawl(article, blocked, this.crawlController.signal, this.loadPage);
@@ -261,7 +310,8 @@ export default class TextMachine extends Plugin {
                     const saved = current.articles.find((item: {url:string}) => item.url === article.url);
                     if (saved) {
                         for (const key of ['publish', 'content', 'image']) saved[key] ||= result[key];
-                        if (result.status === '404' || saved.status === '404') saved.status = result.status === '404' ? '404' : '';
+                        if (result.status === 'forbidden') saved.status = 'forbidden';
+                        else if (saved.status === '404') saved.status = '';
                     }
                     return JSON.stringify(current, null, 2) + '\n';
                 });
@@ -274,8 +324,9 @@ export default class TextMachine extends Plugin {
         if (!this.dataReady) throw new Error(t('createFolderFirst'));
         if (!this.account.scope?.split(' ').includes(this.gmail.SCOPE)) throw new Error(t('readPermissionMissing'));
         const log = this.app.vault.getAbstractFileByPath(this.dataPath) as TFile;
-        this.articles.parseData(await this.app.vault.read(log));
+        await this.app.vault.process(log,text=>this.articles.withIds(text));
         const labelId = this.settings.labelId;
+        const blocked = await this.readBlocked();
         let added = 0, links = 0, skipped = 0;
         try {
             for await (const id of this.client.unreadMessages(labelId)) {
@@ -283,7 +334,8 @@ export default class TextMachine extends Plugin {
                 const message = await this.client.message(id);
                 if (!message.labelIds.includes('UNREAD') || !message.labelIds.includes(labelId)) continue;
                 const entry = this.articles.messageArticles(message)
-                    .filter(article => !this.articles.isExcluded(article, this.settings.excludedSources));
+                    .filter(article => !this.articles.isExcluded(article, this.settings.excludedSources))
+                    .map(article=>this.crawler.isBlocked(article.url,blocked) ? {...article,status:'forbidden'} : article);
                 if (this.disposed) throw new Error(t('pluginDisabled'));
                 let result!: ReturnType<typeof articles.mergeArticles>;
                 await this.app.vault.process(log, current => {
@@ -306,6 +358,92 @@ export default class TextMachine extends Plugin {
         return t('importComplete', { added, links, skipped, path: log.path });
     }
 
+    async writeNewsletter(progress?: Progress) {
+        if (!this.dataReady) throw new Error(t('createFolderFirst'));
+        const vault = this.app.vault;
+        const log = vault.getAbstractFileByPath(this.dataPath) as TFile;
+        const day = this.newsletter.day();
+        const folder = vault.getAbstractFileByPath(this.settings.outputFolder) as TFolder;
+        const notes = folder.children.filter((file): file is TFile => file instanceof TFile && /^text-machine-\d{4}-\d{2}-\d{2}(?:-\d+)?\.md$/.test(file.name));
+        const todayNotes = await Promise.all(notes.filter(file=>file.name.startsWith('text-machine-'+day)).map(file=>vault.read(file)));
+        await vault.process(log,text=>this.articles.withIds(text));
+        const data = await vault.read(log);
+        const pending: Article[] = this.newsletter.availableArticles(data,this.settings.excludedSources,day,todayNotes);
+        const brief: Article[] = this.newsletter.briefArticles(data,this.settings.excludedSources,day);
+        if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
+        let template = newsletterTemplate;
+        const templatePath = this.manifest.dir + '/models/newsletter.md';
+        if (await vault.adapter.exists(templatePath)) template = await vault.adapter.read(templatePath);
+        if (!template.trim()) throw new Error(t('newsletterTemplateInvalid'));
+        const controller = this.aiController = new AbortController();
+        const check = () => {if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));};
+        try {
+            let result: ReturnType<typeof newsletter.parseNewsletter> = {title:'',chapeau:'',paragraphs:[],lead:null,image:null,groups:[],used:[],discard:[]};
+            if (pending.length) {
+                let prompt = writerPrompt;
+                const promptPath = this.manifest.dir + '/prompts/writer.md';
+                if (await vault.adapter.exists(promptPath)) prompt = await vault.adapter.read(promptPath);
+                if (!prompt.trim()) throw new Error(t('writerPromptEmpty'));
+                const connection = this.getAIConnection();
+                const oldNotes = notes.filter(file=>!file.name.startsWith('text-machine-'+day))
+                    .sort((a,b)=>b.stat.mtime-a.stat.mtime).slice(0,5);
+                const previous = await Promise.all(oldNotes.map(async file=>({name:file.name,content:await vault.read(file)})));
+                progress?.(t('newsletterReadingContext'));
+                const response = await generation.requestWithSignal({url:'https://tcrouzet.substack.com/feed',throw:false},this.request,controller.signal);
+                check();
+                if (response.status !== 200) throw new Error(t('newsletterFeedFailed'));
+                const recent = this.newsletter.readFeed(response.text);
+                const input = this.newsletter.writerRequest(prompt,pending,previous,recent);
+                progress?.(t('newsletterWriting'));
+                const text = connection.provider === 'codex'
+                    ? await this.codex.generate(await this.codex.findCodex(),input.system,input.input,connection.model,controller.signal,progress,this.newsletter.schema)
+                    : await this.generate(connection,input.system,input.input,this.requestAI,controller.signal,progress);
+                check();
+                result = this.newsletter.parseNewsletter(text,pending);
+                if (result.image) {
+                    progress?.(t('newsletterCheckingImage'));
+                    try {
+                        const imageUrl = result.image.url;
+                        if (!await this.browser.publicUrl(imageUrl)) result.image = null;
+                        else {
+                            const lead = pending.find(article=>article.url === result.lead)!;
+                            let prompt = imagePrompt;
+                            const path = this.manifest.dir + '/prompts/image.md';
+                            if (await vault.adapter.exists(path)) prompt = await vault.adapter.read(path);
+                            const request = imageCheck.request(result,lead,prompt);
+                            const response = connection.provider === 'codex'
+                                ? await this.codex.generate(await this.codex.findCodex(),request.system,request.input,connection.model,controller.signal,undefined,request.schema,imageUrl)
+                                : await this.generate(connection,request.system,request.input,this.requestAI,controller.signal,undefined,imageUrl);
+                            check();
+                            result = imageCheck.apply(result,response);
+                        }
+                    } catch {
+                        check();
+                        result.image = null;
+                    }
+                    if (!result.image) progress?.(t('newsletterImageOmitted'));
+                }
+                if (!result.used.length && (!brief.length || pending.some(article=>article.status === 'used'))) {
+                    await vault.process(log,current=>this.newsletter.applyStatuses(current,pending.filter(article=>article.status === ''),result,day));
+                    new Notice(t('newsletterNoArticles'));
+                    return null;
+                }
+            }
+            const markdown = this.newsletter.renderNewsletter(template,result,pending,brief);
+            const path = this.settings.outputFolder + '/text-machine-' + day + '.md';
+            const existing = vault.getAbstractFileByPath(path);
+            check();
+            let note: TFile;
+            if (existing instanceof TFile) {await vault.modify(existing,markdown);note = existing;}
+            else note = await vault.create(path,markdown);
+            try {await vault.process(log,current=>this.newsletter.applyStatuses(current,pending,result,day,brief));}
+            catch {throw new Error(t('newsletterStatusFailed',{path}));}
+            try {await this.app.workspace.getLeaf(false).openFile(note);}
+            catch {new Notice(t('newsletterCreated',{path}));}
+            return note;
+        } finally {if (this.aiController === controller) this.aiController = null;}
+    }
+
     onunload() {
         this.disposed = true;
         this.aiController?.abort();
@@ -323,6 +461,10 @@ class TextMachineRun extends Modal {
     error = '';
     result = '';
     statusEl?: HTMLElement;
+    logEl?: HTMLElement;
+    outputEl?: HTMLElement;
+    aiText = '';
+    notePath = '';
 
     constructor(app: App, plugin: TextMachine, folderPath: string) {
         super(app);
@@ -334,7 +476,7 @@ class TextMachineRun extends Modal {
 
     onClose() {
         this.closed = true;
-        if (this.working) this.plugin.auth?.abort();
+        if (this.working) {this.plugin.auth?.abort();this.plugin.aiController?.abort();}
         this.plugin.runDialog = null;
     }
 
@@ -343,6 +485,8 @@ class TextMachineRun extends Modal {
         if (p.busy || this.closed) return;
         p.busy = true;
         this.working = true;
+        this.aiText = '';
+        this.outputEl = undefined;
         this.error = '';
         this.render();
         let success = false;
@@ -371,8 +515,30 @@ class TextMachineRun extends Modal {
             return;
         }
         await this.perform(async () => {
-            this.result = await p.importUnread(message => { this.statusEl?.setText(message); });
+            const progress: Progress = (message,stream) => this.showProgress(message,stream);
+            const collected = await p.importUnread(progress);
+            if (this.closed || p.disposed) return;
+            const note = await p.writeNewsletter(progress);
+            this.result = collected;
+            this.notePath = note?.path || '';
         }, false);
+    }
+
+    showProgress(message: string, stream = false) {
+        if (this.closed || !this.logEl) return;
+        const follow = this.logEl.scrollHeight-this.logEl.scrollTop-this.logEl.clientHeight <= 1;
+        if (stream) {
+            this.aiText += message;
+            const preview = this.plugin.newsletter.preview(this.aiText);
+            if (preview) {
+                this.outputEl ||= this.logEl.createEl('pre',{cls:'text-machine-live-output'});
+                this.outputEl.setText(preview);
+            }
+        } else {
+            this.statusEl?.setText(message);
+            this.logEl.createEl('p',{text:message});
+        }
+        if (follow) this.logEl.scrollTop = this.logEl.scrollHeight;
     }
 
     render() {
@@ -380,11 +546,16 @@ class TextMachineRun extends Modal {
         el.empty();
         if (this.error) el.createEl('p', {text:this.error, attr:{role:'alert'}});
         if (this.working) {
-            this.statusEl = el.createEl('p', {text:p.isConnected ? t('readingUnread') : t('finishInBrowser'), attr:{role:'status'}});
+            const activity = el.createDiv('text-machine-activity');
+            const spinner = activity.createSpan({cls:'text-machine-spinner',attr:{'aria-hidden':'true'}});
+            setIcon(spinner,'loader-circle');
+            this.statusEl = activity.createSpan({text:p.isConnected ? t('readingUnread') : t('finishInBrowser'),attr:{role:'status'}});
+            this.logEl = el.createDiv({cls:'text-machine-run-log',attr:{role:'log','aria-label':t('activityLog'),'aria-live':'off',tabindex:'0'}});
             return;
         }
         if (this.result) {
             el.createEl('p', {text:this.result, attr:{role:'status'}});
+            if (this.notePath) el.createEl('p',{text:t('newsletterCreated',{path:this.notePath}),attr:{role:'status'}});
             return;
         }
         if (!p.isConnected) {
@@ -404,6 +575,7 @@ class TextMachineRun extends Modal {
                 new FolderPicker(this.app, this.folderPath, async folder => {
                     await p.ensureData(folder);
                     p.settings.outputFolder = folder;
+                    p.updateFolderIcon();
                     await p.saveData(p.settings);
                     void this.advance();
                 }).open();
@@ -644,6 +816,7 @@ class GmailSettings extends PluginSettingTab {
                 new FolderPicker(this.app, p.settings.outputFolder, async folder => {
                     const log = await p.ensureData(folder);
                     p.settings.outputFolder = folder;
+                    p.updateFolderIcon();
                     await p.saveData(p.settings);
                     this.result = t('journalReady', { path: log.path });
                     this.error = '';
@@ -668,6 +841,9 @@ class GmailSettings extends PluginSettingTab {
                 .addButton(button => button.setButtonText(t('openLog')).setDisabled(!connected || p.busy || !p.dataReady)
                     .onClick(() => this.run(t('openingLog'), async () => {
                         const file = this.app.vault.getAbstractFileByPath(p.dataPath) as TFile;
+                        await this.app.vault.process(file,text=>{
+                            try { return p.articles.withIds(text); } catch { return text; }
+                        });
                         let text = await this.app.vault.read(file);
                         try { text = JSON.stringify(JSON.parse(text), null, 2); } catch { /* Display malformed files as-is for inspection. */ }
                         const viewer = new Modal(this.app);

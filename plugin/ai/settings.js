@@ -10,7 +10,7 @@ function renderAI(container, plugin, tab, Setting, SecretComponent) {
         catch { tab.aiError = t('aiSaveFailed'); redraw(); }
     };
     const loadModels = async () => {
-        if (tab.aiLoading || !tab.codexPath) return;
+        if (tab.aiLoading || !tab.codexPath || plugin.busy) return;
         tab.aiLoading = true;
         tab.aiError = '';
         redraw();
@@ -61,11 +61,11 @@ function renderAI(container, plugin, tab, Setting, SecretComponent) {
                     dropdown.addOption(selected,selected + ' (' + t('aiUnavailable') + ')');
                     dropdown.selectEl.lastElementChild.disabled = true;
                 }
-                dropdown.setValue(selected).setDisabled(!!tab.aiLoading).onChange(value => save(async () => {
+                dropdown.setValue(selected).setDisabled(!!tab.aiLoading || plugin.busy).onChange(value => save(async () => {
                     plugin.settings.codexModel = value;
                     await plugin.saveData(plugin.settings);
                 }));
-            }).addButton(button => button.setButtonText(t('aiReload')).setDisabled(!!tab.aiLoading).onClick(loadModels));
+            }).addButton(button => button.setButtonText(t('aiReload')).setDisabled(!!tab.aiLoading || plugin.busy).onClick(loadModels));
     }
     const choices = [...models];
     if (tab.codexPath || plugin.settings.aiModel === CODEX_MODEL) choices.push({value:CODEX_MODEL,label:tab.codexPath ? 'Codex' : 'Codex (' + t('aiUnavailable') + ')'});

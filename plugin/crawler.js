@@ -1,4 +1,5 @@
 const { t } = require('./i18n');
+const {isPdf} = require('./articles');
 
 const {domainOf} = require('./domains');
 
@@ -119,14 +120,16 @@ function extractPage(html, url) {
 }
 
 async function crawl(article, blocked, signal, load) {
-    if (isBlocked(article.url, blocked)) return {...article, status:'404'};
+    if (article.status === 'forbidden' || isPdf(article.url)) return {...article,status:'forbidden'};
+    if (isBlocked(article.url, blocked)) return {...article, status:'forbidden'};
     const page = await load(article.url, signal, url => isBlocked(url, blocked));
     if (signal?.aborted) throw new Error(t('pluginDisabled'));
+    if (isPdf(page.url,page.contentType) || page.html?.trimStart().startsWith('%PDF-')) return {...article,status:'forbidden'};
     const extracted = page.status >= 200 && page.status < 300 && page.html ? extractPage(page.html, page.url) : null;
     if (extracted?.content) return {...article, ...extracted, status:article.status === '404' ? '' : article.status};
     block(blocked, article.url);
     if (page.url !== article.url) block(blocked, page.url);
-    return {...article, status:'404'};
+    return {...article, status:'forbidden'};
 }
 
 module.exports = {publicationDate, parseBlocked, isBlocked, block, extractPage, crawl};

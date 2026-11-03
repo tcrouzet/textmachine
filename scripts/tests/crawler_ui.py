@@ -26,9 +26,18 @@ class FixtureProxy(BaseHTTPRequestHandler):
     def do_GET(self):
         denied = urlsplit(self.path).hostname == '9.9.9.9'
         (blocked_requests if denied else requests).append(self.path)
-        content = ('<title>Access denied</title>' if denied else html).encode()
+        path = urlsplit(self.path).path
+        if path == '/redirect-pdf':
+            self.send_response(302)
+            self.send_header('Location', 'http://8.8.8.8/report.pdf')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        pdf = path in ['/by-mime', '/by-filename', '/hidden-pdf']
+        content = b'%PDF-1.7\n%%EOF' if pdf else ('<title>Access denied</title>' if denied else html).encode()
         self.send_response(403 if denied else 200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Type', 'application/octet-stream' if path == '/by-filename' else 'application/pdf' if pdf else 'text/html; charset=utf-8')
+        if path == '/by-filename': self.send_header('Content-Disposition', "inline; filename*=UTF-8''report.pdf")
         self.send_header('Content-Length', str(len(content)))
         self.end_headers()
         self.wfile.write(content)
@@ -128,6 +137,21 @@ try:
             assert dated['publish'] == expected, (metadata, dated)
         denied = page.evaluate("""async () => app.plugins.plugins['text-machine'].loadPage('http://127.0.0.1/article', new AbortController().signal, () => false)""")
         assert denied['status'] == 404
+        before_pdf = list(requests)
+        direct_pdf = page.evaluate("""async () => app.plugins.plugins['text-machine'].loadPage('http://8.8.8.8/report.pdf', new AbortController().signal, () => false)""")
+        assert direct_pdf['contentType'] == 'application/pdf'
+        assert requests == before_pdf
+        for route in ['by-mime','by-filename','redirect-pdf']:
+            excluded = page.evaluate("""async route => {
+                const p = app.plugins.plugins['text-machine'];
+                const blocked = [];
+                const result = await p.crawler.crawl({url:'http://8.8.8.8/'+route,content:''},blocked,new AbortController().signal,p.loadPage);
+                return {result,blocked,windows:require('@electron/remote').BrowserWindow.getAllWindows().length};
+            }""", route)
+            assert excluded['result']['status'] == 'forbidden', (route, excluded)
+            assert excluded['blocked'] == [], (route, excluded)
+            assert excluded['windows'] == initial_windows, (route, excluded)
+        assert 'http://8.8.8.8/report.pdf' not in requests
         imported = page.evaluate("""async () => {
             const p = app.plugins.plugins['text-machine'];
             p.settings.outputFolder = 'Data';
@@ -137,10 +161,10 @@ try:
             p.client = {
                 unreadMessages:async function* () {yield 'message-1';},
                 message:async () => ({id:'message-1', internalDate:'1700000000000', labelIds:['UNREAD','Label_1'],payload:{headers:[]},
-                    bodies:[{type:'text/plain',text:'http://8.8.8.8/article http://9.9.9.9/denied http://9.9.9.9/another'}]}),
+                    bodies:[{type:'text/plain',text:'http://8.8.8.8/article http://9.9.9.9/denied http://9.9.9.9/another http://8.8.8.8/report.pdf http://8.8.8.8/hidden-pdf'}]}),
                 markRead:async id => {
                     const data = JSON.parse(await app.vault.read(app.vault.getAbstractFileByPath(p.dataPath)));
-                    if (data.articles.length !== 3) throw new Error('Messages must be saved before marking read');
+                    if (data.articles.length !== 5) throw new Error('Messages must be saved before marking read');
                     if (data.articles.some(article => article.content)) throw new Error('Mark read must precede crawling');
                     window.markedMessage = id;
                 },
@@ -149,9 +173,9 @@ try:
             return JSON.parse(await app.vault.read(app.vault.getAbstractFileByPath(p.dataPath)));
         }""")
         assert page.evaluate('window.markedMessage') == 'message-1'
-        assert len(imported['articles']) == 3, imported
+        assert len(imported['articles']) == 5, imported
         assert imported['articles'][0]['content'] and imported['articles'][0]['status'] == '', imported
-        assert all(article['status'] == '404' for article in imported['articles'][1:]), imported
+        assert all(article['status']=='forbidden' for article in imported['articles'][1:]), imported
         assert all('used' not in article for article in imported['articles']), imported
         assert blocked_requests == ['http://9.9.9.9/denied'], blocked_requests
         saved_blocks = json.loads((vault / 'Data/blocked.json').read_text())
@@ -174,12 +198,13 @@ try:
             await p.importUnread();
         }""")
         retried = json.loads((vault / 'Data/textmachine.json').read_text())['articles'][0]
-        assert retried['publish'] == '2026-11-02T08:00:00Z', retried
+        assert retried['publish'] == '', retried
         assert retried['content'] == 'My existing article text', retried
-        assert len(requests) == len(before_requests[0]) + 1
+        assert requests == before_requests[0]
         assert blocked_requests == before_requests[1]
 
-        print('Import persisted articles before marking mail read, crawled content, stored 404 and skipped blocked hosts on repeated runs.', flush=True)
+        print('Import persisted articles before marking mail read, crawled content, retained inaccessible articles as forbidden and skipped blocked hosts on repeated runs.', flush=True)
+        print('PDF exclusion verified: URL, MIME, download filename and redirection; PDF metadata retained as forbidden, no PDF domain blocked and no browser window leaked.', flush=True)
         print('Readability extracted rendered article text, date and image; detected challenge and paywall; inert parsing verified.', flush=True)
         print('Chromium rendered JavaScript, denied Node access and local URLs, and closed the article window.', flush=True)
         browser.close()

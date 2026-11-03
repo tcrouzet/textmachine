@@ -5,7 +5,7 @@ const {tmpdir} = require('node:os');
 const path = require('node:path');
 require('../../plugin/i18n').setLocale('en');
 const {defaults, models, CODEX_MODEL, getConnection} = require('../../plugin/ai/config');
-const {listModels} = require('../../plugin/ai/codex');
+const {listModels,generate} = require('../../plugin/ai/codex');
 
 const settings = values => ({...defaults,...values});
 test('same model catalog and provider priorities as Finition', () => {
@@ -38,7 +38,31 @@ async function fakeCodex(t, mode) {
             let result;
             if (message.method === 'initialize') result = {};
             else if (message.method === 'account/read') result = {requiresOpenaiAuth:true,account:mode === 'login' ? null : {type:'chatgpt'}};
-            else if (message.method === 'model/list') {
+            else if (message.method === 'config/read') result = {config:{mcp_servers:{fixture:{enabled:true}}}};
+            else if (message.method === 'thread/start') {
+                if (message.params.sandbox !== 'read-only' || message.params.config.mcp_servers.fixture.enabled !== false) process.exit(3);
+                result = {thread:{id:'thread-1',ephemeral:true},sandbox:{type:mode === 'unsafe' ? 'workspaceWrite' : 'readOnly'},approvalPolicy:'never'};
+            } else if (message.method === 'turn/start') {
+                if (message.params.sandboxPolicy.networkAccess !== false) process.exit(4);
+                if (mode === 'image' && !message.params.input.some(item=>item.type==='image' && item.url==='https://example.com/image.jpg')) process.exit(6);
+                if (mode === 'schema' && !message.params.outputSchema?.properties?.groups) process.exit(5);
+                process.stdout.write(JSON.stringify({method:'item/started',params:{threadId:'thread-1',item:{id:'thinking',type:'reasoning'}}})+'\\n');
+                process.stdout.write(JSON.stringify({method:'item/started',params:{threadId:'thread-1',item:{id:'commentary',type:'agentMessage',phase:'commentary'}}})+'\\n');
+                process.stdout.write(JSON.stringify({method:'item/agentMessage/delta',params:{threadId:'thread-1',itemId:'commentary',delta:'Preparing newsletter'}})+'\\n');
+                process.stdout.write(JSON.stringify({method:'item/completed',params:{threadId:'thread-1',item:{id:'commentary',type:'agentMessage',phase:'commentary',text:'Preparing newsletter'}}})+'\\n');
+                process.stdout.write(JSON.stringify({method:'item/agentMessage/delta',params:{threadId:'thread-1',itemId:'answer',delta:'Generated newsletter'}})+'\\n');
+                const complete = ()=>{
+                    process.stdout.write(JSON.stringify({method:'item/completed',params:{threadId:'thread-1',item:{type:mode === 'tools' ? 'commandExecution' : 'agentMessage',text:'Generated newsletter'}}})+'\\n');
+                    process.stdout.write(JSON.stringify({method:'turn/completed',params:{threadId:'thread-1',turn:{status:'completed'}}})+'\\n');
+                };
+                if (mode === 'slow') {
+                    require('node:fs').writeFileSync(__filename+'.ready','ready');
+                    const waiting = setInterval(()=>{
+                        if (require('node:fs').existsSync(__filename+'.continue')) {clearInterval(waiting);complete();}
+                    },10);
+                } else setTimeout(complete,10);
+                result = {};
+            } else if (message.method === 'model/list') {
                 if (mode === 'cancel') return;
                 result = message.params.cursor ? {data:[{model:'second',displayName:'Second'}],nextCursor:mode === 'cycle' ? 'next' : null}
                     : {data:[{model:'first',displayName:'First'},{hidden:true}],nextCursor:'next'};
@@ -65,4 +89,34 @@ test('Codex model discovery can be cancelled', async t => {
     const pending = listModels(executable,controller.signal);
     setTimeout(()=>controller.abort(),50);
     await assert.rejects(pending,/cancelled/);
+});
+
+test('Codex generation uses an ephemeral read-only thread without file or network tools',async t=>{
+    const feedback = [];
+    assert.equal(await generate(await fakeCodex(t,'generation'),'Writer prompt','Collected articles','fixture-model',undefined,(text,partial)=>feedback.push({text,partial})), 'Generated newsletter');
+    assert.deepEqual(feedback,[{text:'The AI is preparing its response…',partial:undefined},{text:'Preparing newsletter',partial:undefined},{text:'Generated newsletter',partial:true}]);
+    await assert.rejects(generate(await fakeCodex(t,'tools'),'Writer','Articles','fixture-model'),/without tools/);
+    await assert.rejects(generate(await fakeCodex(t,'unsafe'),'Writer','Articles','fixture-model'),/without tools/);
+});
+
+
+test('Codex generation can finish beyond two minutes', {timeout:5000}, async t=>{
+    const executable = await fakeCodex(t,'slow');
+    t.mock.timers.enable({apis:['setTimeout']});
+    const pending = generate(executable,'Writer','Articles','fixture');
+    while (!(await fs.stat(executable+'.ready').catch(()=>null))) await new Promise(resolve=>setImmediate(resolve));
+    t.mock.timers.tick(180000);
+    await fs.writeFile(executable+'.continue','continue');
+    assert.equal(await pending,'Generated newsletter');
+});
+
+
+test('Codex generation receives the newsletter JSON schema as its output constraint',async t=>{
+    const schema = require('../../models/newsletter.json');
+    assert.equal(await generate(await fakeCodex(t,'schema'),'Writer','Articles','fixture',undefined,undefined,schema),'Generated newsletter');
+});
+
+
+test('Codex receives the actual image URL as an image input for visual verification',async t=>{
+    assert.equal(await generate(await fakeCodex(t,'image'),'Inspect image','Context','fixture',undefined,undefined,require('../../plugin/ai/image').schema,'https://example.com/image.jpg'),'Generated newsletter');
 });

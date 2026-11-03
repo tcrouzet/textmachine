@@ -40,7 +40,7 @@ try:
         print('Plugin:', page.evaluate('JSON.stringify({loaded:!!app.plugins.plugins["text-machine"],secretStorage:!!app.secretStorage})'), flush=True)
         print('Load result:', page.evaluate('async () => { await app.plugins.setEnable(true); await app.plugins.loadManifests(); await app.plugins.loadPlugin("text-machine"); return !!app.plugins.plugins["text-machine"]; }'), flush=True)
         assert page.evaluate('!!app.plugins.plugins["text-machine"]')
-        page.evaluate("() => { const p = app.plugins.plugins['text-machine']; p.codex = {...p.codex, findCodex:async () => null}; }")
+        page.evaluate("() => { const p = app.plugins.plugins['text-machine']; p.codex = {...p.codex, findCodex:async () => null}; p.writeNewsletter = async () => null; }")
         page.evaluate('() => { app.setting.open(); app.setting.openTabById("text-machine"); }')
         page.get_by_role('button', name='Connecter', exact=True).wait_for()
         icon = page.locator('.vertical-tab-nav-item[data-setting-id="text-machine"] .vertical-tab-nav-item-icon')
@@ -231,6 +231,16 @@ try:
         log = (vault / 'Research/Veille/textmachine.json').read_text()
         assert '<!--' not in log
         saved = json.loads(log)
+        page.evaluate("""async () => {
+            const p = app.plugins.plugins['text-machine'];
+            await app.vault.process(app.vault.getAbstractFileByPath(p.dataPath), text => {
+                const data = JSON.parse(text);
+                delete data.nextId;
+                for (const article of data.articles) delete article.id;
+                return JSON.stringify(data, null, 2) + '\\n';
+            });
+        }""")
+        assert all('id' not in article for article in json.loads((vault / 'Research/Veille/textmachine.json').read_text())['articles'])
         page.get_by_role('button', name='Visualiser le JSON', exact=True).click()
         viewer = page.locator('.text-machine-json')
         viewer.wait_for()
@@ -239,7 +249,8 @@ try:
         assert (vault / 'Research/Veille/textmachine.json').read_text() == log
         assert saved['version'] == 1
         assert len(saved['articles']) == 1
-        assert saved['articles'][0] == {'date':'2023-11-14','title':'Article & science','url':'https://example.com/article','source':'Google Alerts','status':'','publish':'2023-11-13','content':'Fixture article content','image':'https://example.com/cover.jpg'}
+        assert saved['nextId'] == 2
+        assert saved['articles'][0] == {'id':1,'date':'2023-11-14','title':'Article & science','url':'https://example.com/article','source':'Google Alerts','status':'','publish':'2023-11-13','content':'Fixture article content','image':'https://example.com/cover.jpg'}
         assert 'My existing notes' in log
         assert 'unsubscribe' not in log and 'tracker.invalid' not in log and 'footer-special' not in log and '/related' not in log
         assert not page.evaluate('!!window.mailScriptRan')
