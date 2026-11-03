@@ -32,6 +32,10 @@ async function fakeCodex(t, mode) {
     const executable = path.join(dir,'codex');
     await fs.writeFile(executable, `#!${process.execPath}\nconst readline = require('node:readline');
         const mode = ${JSON.stringify(mode)};
+        const invalidSchema = value => value && typeof value === 'object' && (
+            value.type === 'object' && (value.additionalProperties !== false
+                || !Array.isArray(value.required) || Object.keys(value.properties || {}).some(key=>!value.required.includes(key)))
+            || Object.values(value).some(invalidSchema));
         readline.createInterface({input:process.stdin}).on('line', line => {
             const message = JSON.parse(line);
             if (message.id === undefined) return;
@@ -46,6 +50,28 @@ async function fakeCodex(t, mode) {
                 if (message.params.sandboxPolicy.networkAccess !== false) process.exit(4);
                 if (mode === 'image' && !message.params.input.some(item=>item.type==='image' && item.url==='https://example.com/image.jpg')) process.exit(6);
                 if (mode === 'schema' && !message.params.outputSchema?.properties?.groups) process.exit(5);
+                const failure = message.params.outputSchema && invalidSchema(message.params.outputSchema)
+                    ? {message:"Invalid schema for response_format: required is missing title",codexErrorInfo:'badRequest'}
+                    : mode === 'quota' ? {message:'private-fixture-value',codexErrorInfo:'usageLimitExceeded'}
+                        : mode === 'context' ? {message:'private-fixture-value',codexErrorInfo:'contextWindowExceeded'}
+                            : mode === 'unauthorized' ? {message:'private-fixture-value',codexErrorInfo:'unauthorized'}
+                            : mode === 'unknown' ? {message:'private-fixture-value',codexErrorInfo:null} : null;
+                if (mode === 'rpc-schema') {
+                    process.stdout.write(JSON.stringify({id:message.id,error:{code:-32602,message:'Invalid schema: private-fixture-value'}})+'\\n');
+                    return;
+                }
+                if (failure) {
+                    process.stdout.write(JSON.stringify({id:message.id,result:{}})+'\\n');
+                    if (mode !== 'context') process.stdout.write(JSON.stringify({method:'error',params:{threadId:'thread-1',error:failure,willRetry:false}})+'\\n');
+                    process.stdout.write(JSON.stringify({method:'turn/completed',params:{threadId:'thread-1',turn:{status:'failed',...(mode === 'context' ? {error:failure} : {})}}})+'\\n');
+                    return;
+                }
+                if (mode === 'transient') process.stdout.write(JSON.stringify({method:'error',params:{threadId:'thread-1',error:{message:'Temporary issue'},willRetry:true}})+'\\n');
+                if (mode === 'empty' || mode === 'interrupted') {
+                    process.stdout.write(JSON.stringify({id:message.id,result:{}})+'\\n');
+                    process.stdout.write(JSON.stringify({method:'turn/completed',params:{threadId:'thread-1',turn:{status:mode==='empty' ? 'completed' : 'interrupted'}}})+'\\n');
+                    return;
+                }
                 process.stdout.write(JSON.stringify({method:'item/started',params:{threadId:'thread-1',item:{id:'thinking',type:'reasoning'}}})+'\\n');
                 process.stdout.write(JSON.stringify({method:'item/started',params:{threadId:'thread-1',item:{id:'commentary',type:'agentMessage',phase:'commentary'}}})+'\\n');
                 process.stdout.write(JSON.stringify({method:'item/agentMessage/delta',params:{threadId:'thread-1',itemId:'commentary',delta:'Preparing newsletter'}})+'\\n');
@@ -117,6 +143,40 @@ test('Codex generation receives the newsletter JSON schema as its output constra
 });
 
 
+test('Codex accepts separate strict schemas for selection, summaries and article writing',async t=>{
+    const newsletter=require('../../plugin/newsletter');
+    const articles=[{id:41,title:'AI and books',url:'https://example.com/article',source:'User',publish:'',content:'An article about books and AI.'}];
+    const requests=[newsletter.selectionRequest('{{articles}}',articles,'français'),newsletter.summaryRequest('{{articles}}',articles,'français'),
+        newsletter.writerRequest('{{articles}}',articles,[],[],'français')];
+    for (const request of requests) {
+        assert.equal(await generate(await fakeCodex(t,'generation'),request.system,request.input,'fixture',undefined,undefined,request.schema),'Generated newsletter');
+    }
+});
+
 test('Codex receives the actual image URL as an image input for visual verification',async t=>{
-    assert.equal(await generate(await fakeCodex(t,'image'),'Inspect image','Context','fixture',undefined,undefined,require('../../plugin/ai/image').schema,'https://example.com/image.jpg'),'Generated newsletter');
+    assert.equal(await generate(await fakeCodex(t,'image'),'Inspect image','Context','fixture',undefined,undefined,undefined,'https://example.com/image.jpg'),'Generated newsletter');
+});
+
+test('Codex reports schema, quota and context failures without exposing raw server messages',async t=>{
+    for (const [mode,expected] of [['rpc-schema',/JSON schema/],['quota',/usage limit/],['context',/context window/],['unauthorized',/codex login/],['unknown',/failed/]]) {
+        await assert.rejects(generate(await fakeCodex(t,mode),'Writer','Articles','fixture'),error=>{
+            assert.match(error.message,expected);
+            assert.ok(!error.message.includes('private-fixture-value'));
+            assert.ok(!error.message.includes('incomplete'));
+            return true;
+        });
+    }
+});
+
+test('a nested optional field is rejected as a schema failure before generation',async t=>{
+    const schema = structuredClone(require('../../models/newsletter.json'));
+    const review = schema.properties.groups.items.properties.articles.items;
+    review.required = review.required.filter(key=>key !== 'title');
+    await assert.rejects(generate(await fakeCodex(t,'schema'),'Writer','Articles','fixture',undefined,undefined,schema),/JSON schema/);
+});
+
+test('Codex distinguishes empty and interrupted turns and waits through recoverable errors',async t=>{
+    await assert.rejects(generate(await fakeCodex(t,'empty'),'Writer','Articles','fixture'),/without a final response/);
+    await assert.rejects(generate(await fakeCodex(t,'interrupted'),'Writer','Articles','fixture'),/cancelled/);
+    assert.equal(await generate(await fakeCodex(t,'transient'),'Writer','Articles','fixture'),'Generated newsletter');
 });

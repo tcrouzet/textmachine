@@ -1,10 +1,12 @@
-const { t } = require('./i18n');
+import { t } from './i18n';
+import {Article, Database, FeedEntry, Message, record} from './types';
+import {parseHTML} from './html';
 
-function header(message, name) {
+function header(message: Message, name: string) {
     return message.payload.headers?.find(h => h.name.toLowerCase() === name)?.value || '';
 }
 
-function sourceOf(message) {
+function sourceOf(message: Message) {
     const from = header(message, 'from');
     const address = (from.match(/<([^<>]+)>/)?.[1] || from).trim().toLowerCase();
     const body = (message.bodies || []).map(part => part.text).join('\n');
@@ -19,7 +21,7 @@ function sourceOf(message) {
     return t('userSource');
 }
 
-function isPdf(value, contentType = '', disposition = '') {
+function isPdf(value: string, contentType = '', disposition = '') {
     if (/^application\/(?:x-)?pdf(?:\s*;|\s*$)/i.test(contentType.trim())) return true;
     try {disposition = decodeURIComponent(disposition);} catch { /* Keep the original filename. */ }
     if (/filename\*?\s*=\s*(?:utf-8''|")?[^;]*\.pdf(?:"|;|$)/i.test(disposition.trim())) return true;
@@ -33,14 +35,14 @@ function isPdf(value, contentType = '', disposition = '') {
     } catch {return false;}
 }
 
-function articleUrl(value, title = '') {
+function articleUrl(value: string, title = '') {
     let url;
     try {
         url = new URL(value);
         for (let depth = 0; depth < 3; depth++) {
             if (/(^|\.)google\.(?:com|[a-z]{2}|com\.[a-z]{2}|co\.[a-z]{2})$/i.test(url.hostname)
                 && ['/url', '/scholar_url'].includes(url.pathname)) {
-                const target = url.searchParams.get('url') || url.searchParams.get('q');
+                const target: string | null = url.searchParams.get('url') || url.searchParams.get('q');
                 if (!target) return null;
                 url = new URL(target);
             } else break;
@@ -61,9 +63,9 @@ function articleUrl(value, title = '') {
     return url.href.replace(/\|/g, '%7C');
 }
 
-function alertTargets(urls) {
+function alertTargets(urls: string[]) {
     let found = false;
-    const targets = new Set();
+    const targets = new Set<string>();
     for (const value of urls) {
         let url;
         try { url = new URL(value); } catch { continue; }
@@ -76,24 +78,21 @@ function alertTargets(urls) {
     return found ? targets : null;
 }
 
-function extractLinks(message) {
-    const links = new Map();
-    const rawUrls = [];
-    const add = (raw, title = '') => {
+function extractLinks(message: Message) {
+    const links = new Map<string,{url: string; title: string}>();
+    const rawUrls: string[] = [];
+    const add = (raw: string, title = '') => {
         const url = articleUrl(raw, title);
         if (url && !links.has(url)) links.set(url, { url, title: title.trim() || url });
     };
-    // HTML is parsed in an inert template: no scripts, images or tracking requests run.
     let hasHtmlLinks = false;
     for (const body of message.bodies.filter(body => body.type === 'text/html')) {
-        const template = document.createElement('template');
-        template.innerHTML = body.text;
-        const anchors = template.content.querySelectorAll('a[href]');
+        const anchors = parseHTML(body.text).querySelectorAll('a[href]');
         hasHtmlLinks ||= anchors.length > 0;
         for (const anchor of anchors) {
-            rawUrls.push(anchor.getAttribute('href'));
+            rawUrls.push(anchor.getAttribute('href') || '');
             if (anchor.closest('footer, nav, [role=contentinfo], [role=navigation]')) continue;
-            add(anchor.getAttribute('href'), anchor.textContent.replace(/\s+/g, ' '));
+            add(anchor.getAttribute('href') || '', (anchor.textContent || '').replace(/\s+/g, ' '));
         }
     }
     for (const body of hasHtmlLinks ? [] : message.bodies.filter(body => body.type === 'text/plain')) {
@@ -108,7 +107,7 @@ function extractLinks(message) {
     return [...links.values()].filter(link => !targets || targets.has(link.url));
 }
 
-function articleTitle(link) {
+function articleTitle(link: {url: string; title: string}) {
     if (!/^https?:\/\//i.test(link.title)) return link.title;
     const url = new URL(link.url);
     let slug = url.pathname.split('/').filter(Boolean).pop() || url.hostname;
@@ -117,7 +116,7 @@ function articleTitle(link) {
     return /[a-zA-Z]{3}/.test(title) ? title : url.hostname;
 }
 
-function messageArticles(message) {
+function messageArticles(message: Message): Omit<Article,'id'>[] {
     const date = new Date(Number(message.internalDate));
     return extractLinks(message).map(link => ({
         date: Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10),
@@ -131,7 +130,17 @@ function messageArticles(message) {
     }));
 }
 
-function isExcluded(article, exclusions) {
+function feedArticles(entries: FeedEntry[], feed: string, date: string): Omit<Article,'id'>[] {
+    return entries.flatMap(entry=>{
+        let url;
+        try { url = articleUrl(new URL(entry.url,feed).href,entry.title); } catch { return []; }
+        if (!url || !entry.url) return [];
+        return [{date:entry.publish?.slice(0,10) || date,title:articleTitle({url,title:entry.title || url}),url,
+            source:'RSS: '+new URL(feed).hostname,status:isPdf(url) ? 'forbidden' : '',publish:entry.publish || '',content:'',image:''}];
+    });
+}
+
+function isExcluded(article: Pick<Article,'url' | 'source'>, exclusions: string) {
     const host = new URL(article.url).hostname.toLowerCase().replace(/^www\./, '');
     const source = article.source.trim().toLowerCase();
     return exclusions.split(/[\n,]/).some(value => {
@@ -148,11 +157,11 @@ function isExcluded(article, exclusions) {
     });
 }
 
-function assignIds(data) {
+function assignIds(data: Database) {
     if (!data.articles.length && data.nextId === undefined) return data;
     let next = data.nextId ?? 1;
     if (!Number.isSafeInteger(next) || next < 1) throw new Error(t('invalidDataFile'));
-    const assigned = new Set();
+    const assigned = new Set<number>();
     for (const article of data.articles) {
         if (article.id === undefined) continue;
         if (!Number.isSafeInteger(article.id) || article.id < 1 || assigned.has(article.id)) throw new Error(t('invalidDataFile'));
@@ -167,38 +176,42 @@ function assignIds(data) {
     return data;
 }
 
-function parseData(text) {
-    let data;
-    try { data = JSON.parse(text); } catch { throw new Error(t('invalidDataFile')); }
+function parseData(text: string): Database {
+    let data: Record<string,unknown>;
+    try { data = record(JSON.parse(text)); } catch { throw new Error(t('invalidDataFile')); }
     if (!data || data.version !== 1 || !Array.isArray(data.articles)
-        || data.articles.some(article => !article || ['date', 'title', 'url', 'source'].some(key => typeof article[key] !== 'string')
-            || !article.title.trim() || !/^https?:\/\//i.test(article.url))) {
+        || data.articles.some((value: unknown) => {const article=record(value);return ['date', 'title', 'url', 'source'].some(key => typeof article[key] !== 'string')
+            || typeof article.title!=='string' || !article.title.trim() || typeof article.url!=='string' || !/^https?:\/\//i.test(article.url);})) {
         throw new Error(t('invalidDataFile'));
     }
-    for (const article of data.articles) {
+    for (const value of data.articles as unknown[]) {
+        const article = record(value);
         article.status ??= article.used ?? '';
         delete article.used;
         for (const key of ['status', 'publish', 'content', 'image']) {
             article[key] ??= '';
             if (typeof article[key] !== 'string') throw new Error(t('invalidDataFile'));
         }
-        try { new URL(article.url); } catch { throw new Error(t('invalidDataFile')); }
+        if (article.imageCaption !== undefined && typeof article.imageCaption !== 'string') throw new Error(t('invalidDataFile'));
+        if (article.usedAt !== undefined && typeof article.usedAt !== 'string') throw new Error(t('invalidDataFile'));
+        try { new URL(String(article.url)); } catch { throw new Error(t('invalidDataFile')); }
     }
-    return assignIds(data);
+    return assignIds(data as unknown as Database);
 }
 
-function withIds(text) {
-    const data = parseData(text), before = JSON.parse(text);
-    return data.nextId === before.nextId && data.articles.every((article,index)=>article.id === before.articles[index].id)
+function withIds(text: string) {
+    const data = parseData(text), before = record(JSON.parse(text));
+    const articles = before.articles as unknown[];
+    return data.nextId === before.nextId && data.articles.every((article,index)=>article.id === record(articles[index]).id)
         ? text : JSON.stringify(data,null,2)+'\n';
 }
 
-function mergeArticles(text, incoming) {
+function mergeArticles(text: string, incoming: Omit<Article,'id'>[]) {
     const data = parseData(text);
-    const records = incoming.map(article=>{const copy = {...article};delete copy.id;return copy;});
+    const records = incoming.map(article=>{const copy: Partial<Article> = {...article};delete copy.id;return copy;});
     const newArticles = parseData(JSON.stringify({version:1,nextId:data.nextId,articles:records})).articles;
-    const urls = new Map(), titles = new Map();
-    const articles = [];
+    const urls = new Map<string,number>(), titles = new Map<string,number>();
+    const articles: Article[] = [];
     let count = 0;
     for (const [index, article] of [...data.articles, ...newArticles].entries()) {
         const url = new URL(articleUrl(article.url) || article.url);
@@ -209,12 +222,13 @@ function mergeArticles(text, incoming) {
         const existing = urls.get(urlKey) ?? titles.get(titleKey);
         if (existing !== undefined) {
             const kept = articles[existing];
-            for (const [key, value] of Object.entries(article)) {
-                if (!Object.hasOwn(kept, key)) kept[key] = value;
+            for (const [key, value] of Object.entries(record(article))) {
+                if (key!=='imageCaption' && !Object.hasOwn(kept, key)) Object.assign(kept,{[key]:value});
             }
-            for (const key of ['status', 'publish', 'content', 'image']) {
+            for (const key of ['status', 'publish', 'content', 'image'] as const) {
                 if (!kept[key] && article[key]) kept[key] = article[key];
             }
+            if (!kept.imageCaption && kept.image===article.image && article.imageCaption) kept.imageCaption = article.imageCaption;
             urls.set(urlKey, existing);
             titles.set(titleKey, existing);
             continue;
@@ -227,4 +241,4 @@ function mergeArticles(text, incoming) {
     return { text: JSON.stringify(assignIds({ ...data, articles }), null, 2) + '\n', count, added: count > 0 };
 }
 
-module.exports = { isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, parseData, withIds, mergeArticles };
+export { isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, feedArticles, parseData, withIds, mergeArticles };

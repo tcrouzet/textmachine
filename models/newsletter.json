@@ -26,7 +26,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Paragraphes de l’article, avec liens et citations en Markdown. Au moins deux paragraphes si des articles sont retenus."
+      "description": "Paragraphes de l’article de synthèse, avec liens et citations en Markdown. Au moins deux paragraphes si des articles sont retenus."
     },
     "lead": {
       "anyOf": [
@@ -38,7 +38,7 @@
           "type": "null"
         }
       ],
-      "description": "ID de l’article le plus prestigieux exploité et cité par un lien Markdown dans paragraphs. Privilégier les médias et sources primaires de référence. null si aucun article retenu."
+      "description": "ID d’une source retenue. Le choix des articles et l’angle éditorial sont indépendants de l’illustration."
     },
     "image": {
       "anyOf": [
@@ -54,12 +54,12 @@
           "properties": {
             "caption": {
               "type": "string",
-              "description": "Légende fidèle au contenu de l’article principal ; chaîne vide si inconnue."
+              "description": "Texte alternatif de l’illustration originale, dans la langue de la newsletter."
             }
           }
         }
       ],
-      "description": "Illustration de lead uniquement. null si cet article ne possède pas d’image adaptée ; ne pas choisir une image d’un autre article."
+      "description": "Illustration originale produite séparément à partir du texte final, puis associée à la newsletter par le plugin."
     },
     "groups": {
       "type": "array",
@@ -82,12 +82,17 @@
               "additionalProperties": false,
               "required": [
                 "id",
+                "title",
                 "summary"
               ],
               "properties": {
                 "id": {
                   "type": "integer",
                   "minimum": 1
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Titre de l’article dans la langue demandée. Reprendre le titre original si aucune traduction n’est nécessaire."
                 },
                 "summary": {
                   "type": "string"

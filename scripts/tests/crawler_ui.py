@@ -103,6 +103,39 @@ try:
         assert 'setTimeout' not in extracted['content'], extracted
         assert extracted['publish'] == '2026-11-02T08:00:00Z', extracted
         assert extracted['image'] == 'http://8.8.8.8/cover.jpg', extracted
+        captions = page.evaluate("""() => {
+            const c = app.plugins.plugins['text-machine'].crawler;
+            const html = '<figure><img src="/other.jpg"><figcaption>Wrong image.</figcaption></figure>'
+                + '<figure><img src="/portrait.jpg?w=640"><figcaption>A writer at work. <span class="credit">Photo: Jane Example / Agency.</span></figcaption></figure>';
+            return {
+                original:c.extractImageCaption(html,'https://example.com/article','https://example.com/portrait.jpg?w=1200'),
+                absent:c.extractImageCaption(html,'https://example.com/article','https://example.com/missing.jpg'),
+                alt:c.extractImageCaption('<img src="/portrait.jpg" alt="Not an original caption">','https://example.com/article','https://example.com/portrait.jpg'),
+                unrelated:c.extractImageCaption('<div><img src="/portrait.jpg"><figure><img src="/other.jpg"><figcaption>Unrelated caption.</figcaption></figure></div>','https://example.com/article','https://example.com/portrait.jpg'),
+                structured:c.extractImageCaption('<script type="application/ld+json">{"image":{"@type":"ImageObject","url":"/portrait.jpg","caption":"A writer at work.","creditText":"Photo: Jane Example / Agency."}}</script>','https://example.com/article','https://example.com/portrait.jpg'),
+            };
+        }""")
+        assert captions['original'] == 'A writer at work. Photo: Jane Example / Agency.'
+        assert captions['structured'] == captions['original']
+        assert captions['absent'] == '' and captions['alt'] == ''
+        assert captions['unrelated'] == ''
+        print('Original image captions and credits verified: matching image only, resized URLs, JSON-LD and no invented caption from alt text.', flush=True)
+        feeds = page.evaluate("""() => {
+            const p=app.plugins.plugins['text-machine'];
+            const xml='<rss><channel>'+Array.from({length:6},(_,i)=>'<item><title>Story '+i+'</title><link>/story-'+i+'</link><pubDate>Tue, 03 Nov 2026 10:00:00 GMT</pubDate><description>&lt;p&gt;An RSS summary.&lt;/p&gt;</description></item>').join('')+'</channel></rss>';
+            const entries=p.newsletter.readFeed(xml,Infinity,'https://publisher.example/rss');
+            const atom=p.newsletter.readFeed('<feed xmlns="http://www.w3.org/2005/Atom"><entry><title type="html">An &lt;b&gt;Atom&lt;/b&gt; story</title><link rel="self" href="/api/entry"/><link rel="alternate" href="/real-story"/><published>2026-11-03T11:00:00Z</published><content type="html">&lt;p&gt;An Atom summary.&lt;/p&gt;</content></entry></feed>',Infinity,'https://publisher.example/atom');
+            return {entries,author:p.newsletter.readFeed(xml),records:p.articles.feedArticles(entries,'https://publisher.example/rss','2026-11-03'),atom};
+        }""")
+        assert len(feeds['entries']) == 6 and len(feeds['author']) == 5
+        assert feeds['entries'][0]['url'] == 'https://publisher.example/story-0'
+        assert feeds['entries'][0]['publish'] == '2026-11-03T10:00:00.000Z'
+        assert feeds['entries'][0]['content'] == 'An RSS summary.'
+        assert all(article['content'] == '' for article in feeds['records'])
+        assert feeds['atom'][0]['title'] == 'An Atom story'
+        assert feeds['atom'][0]['url'] == 'https://publisher.example/real-story'
+        assert feeds['atom'][0]['content'] == 'An Atom summary.'
+        print('RSS and Atom verified: all include entries, five author entries, relative article URLs, publication dates, inert text and summaries excluded from verified content.', flush=True)
         assert page.evaluate("""() => {
             const crawler = app.plugins.plugins['text-machine'].crawler;
             return crawler.extractPage('<title>Just a moment...</title><main>Checking your browser</main>', 'https://example.com/article').blocked;

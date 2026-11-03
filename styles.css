@@ -7,11 +7,6 @@
     margin-block: var(--size-4-6);
 }
 
-.text-machine-settings .text-machine-section h3 {
-    padding-bottom: var(--size-4-3);
-    border-bottom: var(--border-width) solid var(--background-modifier-border);
-}
-
 .text-machine-settings .text-machine-note {
     color: var(--text-muted);
     font-size: var(--font-ui-small);
@@ -115,4 +110,14 @@
 
 @media (prefers-reduced-motion: reduce) {
     .text-machine-spinner { animation: none; }
+}
+.workspace-leaf-content[data-type="file-explorer"] .nav-folder-title.text-machine-folder > .nav-folder-title-content::after {
+    content: "";
+    display: inline-block;
+    width: var(--icon-size);
+    height: var(--icon-size);
+    margin-inline-start: var(--size-4-2);
+    vertical-align: middle;
+    background-color: currentColor;
+    mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22100%22%20height%3D%22100%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%221.8%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%0A%20%20%3Cpath%20d%3D%22M7%2010V2h10v8M10%205h4M10%208h4%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M3%2010h18M2%209v2m20-2v2M5%2010l-3%209v3h20v-3l-3-9%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M7%2014h1m3%200h1m3%200h1M6%2017h1m3%200h1m3%200h1m3%200h1M8%2020h8%22%2F%3E%0A%3C%2Fsvg%3E") center / contain no-repeat;
 }

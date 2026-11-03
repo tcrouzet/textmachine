@@ -1,9 +1,10 @@
-const {t} = require('../i18n');
-const models = require('./models.json');
+import {t} from '../i18n';
+import models from './models.json';
+import {Settings, AIProvider, Connection} from '../types';
 const CODEX_MODEL = '__codex__';
 const defaults = {aiModel:models[0].value, codexModel:'', localAIServer:'', localAIModel:''};
 
-function getConnection(settings, secrets) {
+function getConnection(settings: Settings, secrets: (provider: AIProvider)=>string): Connection {
     if (settings.aiModel === CODEX_MODEL) return {provider:'codex', apiKey:'', model:settings.codexModel.trim()};
     if (settings.localAIServer.trim()) {
         let url;
@@ -21,4 +22,4 @@ function getConnection(settings, secrets) {
     return {provider, apiKey, model:settings.aiModel};
 }
 
-module.exports = {models, CODEX_MODEL, defaults, getConnection};
+export {models, CODEX_MODEL, defaults, getConnection};

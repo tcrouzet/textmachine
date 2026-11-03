@@ -1,7 +1,7 @@
 require('../../plugin/i18n').setLocale('fr');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, parseData, withIds, mergeArticles } = require('../../plugin/articles');
+const { isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, feedArticles, parseData, withIds, mergeArticles } = require('../../plugin/articles');
 const message = (from, extra = []) => ({id: '123', internalDate: '1700000000000', payload: {headers: [{name: 'From', value: from}, ...extra]}, bodies: []});
 
 test('classifies sender addresses, not spoofed display names, and retains uncertainty', () => {
@@ -37,6 +37,21 @@ test('stores structured articles with empty status and no Markdown escaping', ()
     assert.equal(mergeArticles(first.text, entry).count, 0);
 });
 
+test('RSS links become article records without trusting feed summaries as crawled content',()=>{
+    const records = feedArticles([
+        {title:'A story',url:'/story?utm_source=feed',publish:'2026-11-01T10:00:00.000Z',content:'Unverified summary'},
+        {title:'Research PDF',url:'/report.pdf'},
+        {title:'Invalid',url:'javascript:alert(1)'},{title:'Homepage',url:'https://publisher.example/'},{title:'Missing URL'},
+    ],'https://publisher.example/rss.xml','2026-11-03');
+    assert.equal(records.length,2);
+    assert.equal(records[0].url,'https://publisher.example/story');
+    assert.equal(records[0].source,'RSS: publisher.example');
+    assert.equal(records[0].date,'2026-11-01');
+    assert.equal(records[0].content,'');
+    assert.equal(records[1].status,'forbidden');
+    assert.equal(records[1].date,'2026-11-03');
+});
+
 test('rejects French Google navigation, social sites, images and home pages', () => {
     for (const url of ['https://www.google.fr/alerts/feedback?ffu=https://example.com/article',
         'https://www.google.co.uk/alerts/edit', 'http://news.google.com/news/story?ncl=x',
@@ -63,6 +78,15 @@ test('deduplicates URL or title and preserves status and custom fields', () => {
     assert.equal(saved.articles[0].summary, 'My summary');
     assert.equal(saved.articles[1].status, '');
     assert.equal(mergeArticles(result.text, []).text, result.text);
+});
+
+test('deduplication never attaches a caption to a different image',()=>{
+    const original = {date:'',title:'Same news',url:'https://example.com/article',source:'User',image:'https://example.com/original.jpg'};
+    const base = JSON.stringify({version:1,articles:[original]});
+    const mismatched = mergeArticles(base,[{...original,image:'https://example.com/other.jpg',imageCaption:'Other photographer.'}]).text;
+    assert.equal(JSON.parse(mismatched).articles[0].imageCaption,undefined);
+    const matched = mergeArticles(mismatched,[{...original,imageCaption:'Original photographer.'}]).text;
+    assert.equal(JSON.parse(matched).articles[0].imageCaption,'Original photographer.');
 });
 
 test('refuses broken or unsupported JSON instead of replacing it', () => {

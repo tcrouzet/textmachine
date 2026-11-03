@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sélection des articles",
+  "description": "Chaque ID fourni apparaît exactement une fois dans selected ou discard, jamais dans les deux listes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "selected",
+    "discard"
+  ],
+  "properties": {
+    "selected": {
+      "type": "array",
+      "description": "IDs des articles retenus pour les résumés et la rédaction.",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "discard": {
+      "type": "array",
+      "description": "IDs des articles écartés lors de la sélection.",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    }
+  }
+}

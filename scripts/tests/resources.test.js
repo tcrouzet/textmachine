@@ -14,7 +14,7 @@ test('public resources include the newsletter template and matching JSON schema'
     assert.ifError(result.error);
     assert.equal(result.status,0,result.stderr);
     const catalog = JSON.parse(fs.readFileSync(path.join(output,'text-machine-resources.json'),'utf8'));
-    for (const name of ['models/newsletter.md','models/newsletter.json']) {
+    for (const name of ['models/newsletter.md','models/newsletter.json','models/selection.json','models/writer.json','models/bref.json','models/resume.json','prompts/sélection.md','prompts/resume.md','prompts/writer.md','prompts/bref.md','prompts/image.md']) {
         const resource = catalog.files.find(file=>file.path===name);
         assert.ok(resource,name);
         const bytes = fs.readFileSync(path.join(output,resource.asset));

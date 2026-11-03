@@ -61,7 +61,24 @@ try:
             }""", theme)
 
         icon.locator('..').screenshot(path=str(temporary / 'settings-icon.png'))
-        page.get_by_role('heading', name='Intelligence artificielle', exact=True).wait_for()
+        page.locator('.setting-item-heading .setting-item-name').filter(has_text='Intelligence artificielle').wait_for()
+        assert page.evaluate("() => app.setting.pluginTabs.find(tab => tab.id === 'text-machine').getSettingDefinitions().flatMap(item => item.items || [item]).some(row => row.name === 'Langue de la newsletter')")
+        language = page.get_by_role('textbox', name='Langue de la newsletter', exact=True)
+        assert language.input_value() == 'français'
+        assert '{{language}}' in page.locator('.setting-item').filter(has_text='Langue de la newsletter').inner_text()
+        language.fill('español')
+        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).newsletterLanguage === 'español'")
+        feed = page.get_by_role('textbox', name='Author feed', exact=True)
+        assert feed.input_value() == ''
+        assert '{{AuthorFeed}}' in page.locator('.setting-item').filter(has_text='Author feed').inner_text()
+        feed.fill('https://example.substack.com')
+        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).authorFeeds === 'https://example.substack.com'")
+        include = page.get_by_role('textbox', name='Include feeds', exact=True)
+        assert include.input_value() == ''
+        include.fill('https://one.example/feed https://two.example/rss.xml')
+        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).includeFeeds === 'https://one.example/feed https://two.example/rss.xml'")
+        include.fill('')
+        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).includeFeeds === ''")
         assert page.get_by_role('combobox', name='Modèle par défaut', exact=True).is_enabled()
         assert page.get_by_role('textbox', name='Serveur local', exact=True).is_enabled()
         page.evaluate("""() => {
@@ -373,7 +390,7 @@ try:
             i18n.setLocale('en-US');
             app.setting.openTabById('text-machine');
         }""")
-        page.get_by_role('heading', name='3. Choose where to store your data', exact=True).wait_for()
+        page.locator('.setting-item-heading .setting-item-name').filter(has_text='3. Choose where to store your data').wait_for()
         page.get_by_role('button', name='Create folder', exact=True).click()
         page.get_by_role('heading', name='Data folder', exact=True).wait_for()
         assert page.get_by_role('textbox', name='New folder name', exact=True).input_value() == 'TextMachine'
@@ -425,7 +442,9 @@ try:
         }""")
         assert page.evaluate("""() => {
             const p = app.plugins.plugins['text-machine'];
-            return p.settings.aiModel === '__codex__' && p.settings.codexModel === 'codex-fixture'
+            return p.settings.newsletterLanguage === 'español' && p.settings.aiModel === '__codex__' && p.settings.codexModel === 'codex-fixture'
+                && p.settings.authorFeeds === 'https://example.substack.com'
+                && p.settings.includeFeeds === ''
                 && p.settings.localAIServer === 'http://localhost:11434' && p.settings.localAIModel === 'local-fixture'
                 && p.getAIKey('anthropic') === 'fixture-anthropic-only' && p.getAIKey('openai') === 'fixture-openai-only';
         }""")
