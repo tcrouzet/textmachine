@@ -1,0 +1,80 @@
+.text-machine-settings .text-machine-intro {
+    color: var(--text-muted);
+    margin-bottom: var(--size-4-8);
+}
+
+.text-machine-settings .text-machine-section {
+    margin-block: var(--size-4-6);
+}
+
+.text-machine-settings .text-machine-section h3 {
+    padding-bottom: var(--size-4-3);
+    border-bottom: var(--border-width) solid var(--background-modifier-border);
+}
+
+.text-machine-settings .text-machine-note {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.text-machine-settings .text-machine-feedback {
+    padding: var(--size-4-3) var(--size-4-4);
+    background: var(--background-secondary);
+    border-left: var(--size-2-2) solid var(--interactive-accent);
+    border-radius: var(--radius-s);
+    overflow-wrap: anywhere;
+}
+
+.text-machine-settings .text-machine-feedback p {
+    margin: 0;
+}
+
+.text-machine-settings .text-machine-error {
+    border-left-color: var(--text-error);
+}
+
+.text-machine-settings .setting-item {
+    flex-wrap: wrap;
+    gap: var(--size-4-3);
+}
+
+.text-machine-settings .setting-item-info {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.text-machine-settings .setting-item-control {
+    flex-wrap: wrap;
+    gap: var(--size-4-2);
+    max-width: 100%;
+}
+
+.text-machine-settings :is(input, select) {
+    max-width: 100%;
+}
+
+.text-machine-folders {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+    max-height: 40vh;
+    overflow-y: auto;
+    margin-block: var(--size-4-4);
+}
+
+.text-machine-folders button {
+    justify-content: flex-start;
+    flex-shrink: 0;
+}
+
+.text-machine-json {
+    max-height: 60vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+
+.vertical-tab-nav-item[data-setting-id="text-machine"] .vertical-tab-nav-item-icon {
+    display: flex;
+}

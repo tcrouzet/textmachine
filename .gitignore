@@ -1,0 +1,31 @@
+
+# Don't include the compiled main.js file in the repo.
+# They should be uploaded to GitHub releases instead.
+/main.js
+!main.ts
+
+# Exclude sourcemaps
+*.map
+
+# obsidian
+data.json
+
+# Exclude macOS Finder (System Explorer) View States
+.DS_Store
+
+_doc.md
+AGENTS.md
+temp
+
+# Installed linguistic data and local caches
+/data/
+/oauth-client.json
+
+# Python environments and generated caches
+/venv/
+/.venv/
+__pycache__/
+*.py[cod]
+
+# Installed JavaScript dependencies
+/node_modules/

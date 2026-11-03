@@ -1,0 +1,66 @@
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const {spawnSync} = require('node:child_process');
+
+for (const rejected of [false, true]) test(rejected ? 'failed remote reset leaves the local main and existing tags in place' : 'reset stays on main, removes old history and tags, and preserves ignored local files', t => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(),'textmachine-reset-test-'));
+    t.after(()=>fs.rmSync(temporary,{recursive:true,force:true}));
+    const repository = path.join(temporary,'project'), remote = path.join(temporary,'remote.git');
+    fs.mkdirSync(repository);
+    const env = {...process.env,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'};
+    const run = (...args) => {
+        const result = spawnSync(args[0],args.slice(1),{cwd:repository,env,encoding:'utf8',timeout:20000});
+        assert.ifError(result.error);
+        assert.equal(result.status,0,result.stdout+'\n'+result.stderr);
+        return result.stdout.trim();
+    };
+    run('git','init','--bare',remote);
+    run('git','init','-b','main');
+    run('git','config','user.name','Reset test');
+    run('git','config','user.email','test@example.invalid');
+    run('git','config','commit.gpgsign','false');
+    fs.writeFileSync(path.join(repository,'_doc.md'),'Local document');
+    fs.writeFileSync(path.join(repository,'source.txt'),'Before');
+    run('git','add','.');
+    run('git','commit','-m','Old history');
+    const old = run('git','rev-parse','HEAD');
+    run('git','remote','add','origin',remote);
+    run('git','tag','0.0.1');
+    run('git','push','origin','main','0.0.1');
+    fs.writeFileSync(path.join(repository,'.gitignore'),'_doc.md\noauth-client.json\nmain.js\n');
+    fs.writeFileSync(path.join(repository,'oauth-client.json'),'Local configuration');
+    fs.writeFileSync(path.join(repository,'main.js'),'Generated plugin');
+    fs.writeFileSync(path.join(repository,'source.txt'),'Current source');
+    fs.mkdirSync(path.join(repository,'scripts'));
+    const script = path.join(repository,'scripts/reset-github.sh');
+    fs.copyFileSync(path.resolve(__dirname,'../reset-github.sh'),script);
+    if (rejected) fs.writeFileSync(path.join(remote,'hooks/pre-receive'),'#!/bin/sh\nexit 1\n',{mode:0o755});
+    const result = spawnSync('bash',[script],{cwd:repository,env,encoding:'utf8',timeout:20000});
+    assert.ifError(result.error);
+    if (rejected) {
+        assert.notEqual(result.status,0);
+        assert.equal(run('git','rev-parse','HEAD'),old);
+        assert.equal(run('git','--git-dir',remote,'rev-parse','main'),old);
+        assert.equal(run('git','tag','-l'),'0.0.1');
+        assert.equal(run('git','--git-dir',remote,'tag','-l'),'0.0.1');
+        assert.equal(fs.readFileSync(path.join(repository,'_doc.md'),'utf8'),'Local document');
+        return;
+    }
+    assert.equal(result.status,0,result.stdout+'\n'+result.stderr);
+    assert.equal(run('git','branch','--show-current'),'main');
+    assert.equal(run('git','rev-list','--count','HEAD'),'1');
+    assert.equal(run('git','--git-dir',remote,'rev-list','--count','main'),'1');
+    assert.equal(run('git','--git-dir',remote,'rev-parse','main'),run('git','rev-parse','HEAD'));
+    assert.equal(run('git','tag','-l'),'');
+    assert.equal(run('git','--git-dir',remote,'tag','-l'),'');
+    assert.equal(run('git','--git-dir',remote,'show','main:source.txt'),'Current source');
+    assert.equal(run('git','--git-dir',remote,'ls-tree','--name-only','main','_doc.md','oauth-client.json','main.js'),'');
+    assert.equal(fs.readFileSync(path.join(repository,'_doc.md'),'utf8'),'Local document');
+    assert.equal(fs.readFileSync(path.join(repository,'oauth-client.json'),'utf8'),'Local configuration');
+    assert.equal(run('git','status','--porcelain'),'');
+    const ancestry = spawnSync('git',['merge-base','--is-ancestor',old,'HEAD'],{cwd:repository,env});
+    assert.equal(ancestry.status,1);
+});

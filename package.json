@@ -1,0 +1,29 @@
+{
+  "name": "text-machine",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "test": "node --require ./scripts/tests/register.cjs --test scripts/tests/*.test.js",
+    "check": "npm run typecheck",
+    "resources": "jiti scripts/package-resources.ts",
+    "dev": "node scripts/esbuild.config.mjs",
+    "build": "node scripts/esbuild.config.mjs production",
+    "lint": "eslint --config scripts/eslint.config.mjs . --max-warnings=0",
+    "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.plugin.json",
+    "test:release": "jiti scripts/check-release.ts"
+  },
+  "main": "main.js",
+  "engines": {
+    "node": "26.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.19.0",
+    "eslint": "^9.0.0",
+    "globals": "^15.0.0",
+    "jiti": "^2.0.0",
+    "obsidian": "latest",
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}
