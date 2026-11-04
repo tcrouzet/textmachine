@@ -124,6 +124,7 @@ function messageArticles(message: Message): Omit<Article,'id'>[] {
         url: link.url,
         source: sourceOf(message),
         status: isPdf(link.url) ? 'forbidden' : '',
+        usedAt: '',
         publish: '',
         content: '',
         image: '',
@@ -136,7 +137,7 @@ function feedArticles(entries: FeedEntry[], feed: string, date: string): Omit<Ar
         try { url = articleUrl(new URL(entry.url,feed).href,entry.title); } catch { return []; }
         if (!url || !entry.url) return [];
         return [{date:entry.publish?.slice(0,10) || date,title:articleTitle({url,title:entry.title || url}),url,
-            source:'RSS: '+new URL(feed).hostname,status:isPdf(url) ? 'forbidden' : '',publish:entry.publish || '',content:'',image:''}];
+            source:'RSS: '+new URL(feed).hostname,status:isPdf(url) ? 'forbidden' : '',usedAt:'',publish:entry.publish || '',content:'',image:''}];
     });
 }
 
@@ -186,14 +187,19 @@ function parseData(text: string): Database {
     }
     for (const value of data.articles as unknown[]) {
         const article = record(value);
-        article.status ??= article.used ?? '';
+        const legacyUsed=typeof article.used==='string' ? article.used : '';
+        article.status ??= legacyUsed;
+        if (article.used!==undefined && article.used!==0 && article.used!==1 && typeof article.used!=='string') throw new Error(t('invalidDataFile'));
+        const wasUsed=article.status==='used' || article.used===1 || !['','404','forbidden','discard'].includes(legacyUsed);
+        // Preserve undated legacy usage without inventing a publication date.
+        if (wasUsed && !article.usedAt) article.usedAt='unknown';
+        if (article.status==='used') article.status='';
         delete article.used;
-        for (const key of ['status', 'publish', 'content', 'image']) {
+        for (const key of ['status', 'usedAt', 'publish', 'content', 'image']) {
             article[key] ??= '';
             if (typeof article[key] !== 'string') throw new Error(t('invalidDataFile'));
         }
         if (article.imageCaption !== undefined && typeof article.imageCaption !== 'string') throw new Error(t('invalidDataFile'));
-        if (article.usedAt !== undefined && typeof article.usedAt !== 'string') throw new Error(t('invalidDataFile'));
         try { new URL(String(article.url)); } catch { throw new Error(t('invalidDataFile')); }
     }
     return assignIds(data as unknown as Database);
@@ -202,7 +208,10 @@ function parseData(text: string): Database {
 function withIds(text: string) {
     const data = parseData(text), before = record(JSON.parse(text));
     const articles = before.articles as unknown[];
-    return data.nextId === before.nextId && data.articles.every((article,index)=>article.id === record(articles[index]).id)
+    return data.nextId === before.nextId && data.articles.every((article,index)=>{
+        const stored=record(articles[index]);
+        return article.id===stored.id && !Object.hasOwn(stored,'used') && article.usedAt===stored.usedAt && article.status===stored.status;
+    })
         ? text : JSON.stringify(data,null,2)+'\n';
 }
 

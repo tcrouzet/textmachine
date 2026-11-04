@@ -12,7 +12,9 @@
 ## Revue de presse
 
 {{#groups}}
+{{#heading}}
 ### {{title}}
+{{/heading}}
 
 {{#articles}}
 #### {{title}}

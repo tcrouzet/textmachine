@@ -1,5 +1,13 @@
 import json, pathlib, shutil, socket, subprocess, tempfile, time
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
+
+def assert_full_width(field):
+    layout = field.evaluate("""el => {
+        const row=el.closest('.setting-item'), style=getComputedStyle(row), box=el.getBoundingClientRect();
+        return {width:box.width, available:row.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight),
+            below:box.top>=row.querySelector('.setting-item-info').getBoundingClientRect().bottom};
+    }""")
+    assert abs(layout['width']-layout['available']) <= 2 and layout['below'], layout
 
 root = pathlib.Path(__file__).resolve().parents[2]
 temporary = pathlib.Path(tempfile.mkdtemp(prefix='textmachine-obsidian-'))
@@ -68,15 +76,22 @@ try:
         assert '{{language}}' in page.locator('.setting-item').filter(has_text='Langue de la newsletter').inner_text()
         language.fill('español')
         page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).newsletterLanguage === 'español'")
-        feed = page.get_by_role('textbox', name='Author feed', exact=True)
+        references = page.get_by_role('textbox', name='Sources de référence', exact=True)
+        assert_full_width(references)
+        assert references.input_value() == ''
+        references.fill('theguardian.com\nbbc.co.uk')
+        page.wait_for_function(r"async () => (await app.plugins.plugins['text-machine'].loadData()).referenceSources === 'theguardian.com\nbbc.co.uk'")
+        feed = page.get_by_role('textbox', name='Author feeds', exact=True)
+        assert_full_width(feed)
         assert feed.input_value() == ''
-        assert '{{AuthorFeed}}' in page.locator('.setting-item').filter(has_text='Author feed').inner_text()
-        feed.fill('https://example.substack.com')
-        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).authorFeeds === 'https://example.substack.com'")
+        assert '{{AuthorFeed}}' in page.locator('.setting-item').filter(has_text='Author feeds').inner_text()
+        feed.fill('https://example.substack.com\nhttps://other.example/feed')
+        page.wait_for_function(r"async () => (await app.plugins.plugins['text-machine'].loadData()).authorFeeds === 'https://example.substack.com\nhttps://other.example/feed'")
         include = page.get_by_role('textbox', name='Include feeds', exact=True)
+        assert_full_width(include)
         assert include.input_value() == ''
-        include.fill('https://one.example/feed https://two.example/rss.xml')
-        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).includeFeeds === 'https://one.example/feed https://two.example/rss.xml'")
+        include.fill('https://one.example/feed\nhttps://two.example/rss.xml')
+        page.wait_for_function(r"async () => (await app.plugins.plugins['text-machine'].loadData()).includeFeeds === 'https://one.example/feed\nhttps://two.example/rss.xml'")
         include.fill('')
         page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).includeFeeds === ''")
         assert page.get_by_role('combobox', name='Modèle par défaut', exact=True).is_enabled()
@@ -213,6 +228,8 @@ try:
         page.get_by_role('button', name='Choisir ce dossier', exact=True).click()
         page.get_by_text('Fichier prêt : Research/textmachine.json.', exact=True).wait_for()
         assert (vault / 'Research/textmachine.json').exists()
+        expect(page.get_by_role('textbox', name='Sites bloqués', exact=True)).to_have_value('')
+        expect(page.get_by_role('textbox', name='Sites bloqués', exact=True)).to_have_attribute('placeholder', 'Aucun site bloqué.')
         page.get_by_role('button', name='Changer de dossier…', exact=True).click()
         assert page.get_by_role('button', name='Nouveau dossier', exact=True).count() == 0
         assert page.get_by_role('textbox', name='Nom du nouveau dossier', exact=True).input_value() == 'TextMachine'
@@ -276,10 +293,27 @@ try:
             const p = app.plugins.plugins['text-machine'];
             await app.vault.create(p.blockedPath, JSON.stringify({version:1,blocked:[{url:'https://blocked.example',scope:'site',reason:'403'}]}));
         }""")
-        page.get_by_role('button', name='Voir blocked.json', exact=True).click()
-        assert json.loads(page.locator('.text-machine-json').inner_text()) == ['blocked.example']
-        page.keyboard.press('Escape')
-        page.get_by_role('textbox', name='Sources exclues', exact=True).fill('example.com')
+        blocked_before = (vault / 'Research/Veille/blocked.json').read_text()
+        settings()
+        blocked = page.get_by_role('textbox', name='Sites bloqués', exact=True)
+        expect(blocked).to_have_value('blocked.example')
+        assert not blocked.is_editable()
+        assert blocked.is_enabled()
+        assert_full_width(blocked)
+        assert (vault / 'Research/Veille/blocked.json').read_text() == blocked_before
+        assert 'Le plugin ne peut pas lire ces sites.' in page.locator('.setting-item').filter(has=blocked).inner_text()
+        assert 'connexion à un compte' in page.locator('.setting-item').filter(has=blocked).inner_text()
+        assert 'abonnement' in page.locator('.setting-item').filter(has=blocked).inner_text()
+        assert 'filtrage' in page.locator('.setting-item').filter(has=blocked).inner_text()
+        exclusions = page.get_by_role('textbox', name='Sources exclues', exact=True)
+        newsletter = page.locator('.text-machine-section').filter(has=page.get_by_role('textbox', name='Sources de référence', exact=True))
+        assert newsletter.locator('.setting-item-heading .setting-item-name').all_text_contents() == ['Newsletter', 'Sources']
+        assert newsletter.get_by_role('textbox', name='Sources exclues', exact=True).count() == 1
+        assert newsletter.get_by_role('textbox', name='Sites bloqués', exact=True).count() == 1
+        assert newsletter.get_by_role('textbox', name='Include feeds', exact=True).count() == 1
+        assert newsletter.get_by_role('textbox', name='Author feeds', exact=True).count() == 1
+        assert_full_width(exclusions)
+        exclusions.fill('example.com')
         page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).excludedSources === 'example.com'")
         page.get_by_role('button', name='Réinitialiser le JSON', exact=True).click()
         page.get_by_role('button', name='Annuler', exact=True).click()
@@ -391,6 +425,7 @@ try:
             app.setting.openTabById('text-machine');
         }""")
         page.locator('.setting-item-heading .setting-item-name').filter(has_text='3. Choose where to store your data').wait_for()
+        assert page.get_by_role('textbox', name='Reference sources', exact=True).input_value() == 'theguardian.com\nbbc.co.uk'
         page.get_by_role('button', name='Create folder', exact=True).click()
         page.get_by_role('heading', name='Data folder', exact=True).wait_for()
         assert page.get_by_role('textbox', name='New folder name', exact=True).input_value() == 'TextMachine'
@@ -442,8 +477,9 @@ try:
         }""")
         assert page.evaluate("""() => {
             const p = app.plugins.plugins['text-machine'];
-            return p.settings.newsletterLanguage === 'español' && p.settings.aiModel === '__codex__' && p.settings.codexModel === 'codex-fixture'
-                && p.settings.authorFeeds === 'https://example.substack.com'
+            return p.settings.newsletterLanguage === 'español' && p.settings.referenceSources === ['theguardian.com','bbc.co.uk'].join(String.fromCharCode(10))
+                && p.settings.aiModel === '__codex__' && p.settings.codexModel === 'codex-fixture'
+                && p.settings.authorFeeds === ['https://example.substack.com','https://other.example/feed'].join(String.fromCharCode(10))
                 && p.settings.includeFeeds === ''
                 && p.settings.localAIServer === 'http://localhost:11434' && p.settings.localAIModel === 'local-fixture'
                 && p.getAIKey('anthropic') === 'fixture-anthropic-only' && p.getAIKey('openai') === 'fixture-openai-only';

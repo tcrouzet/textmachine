@@ -9,7 +9,7 @@ const png=fs.readFileSync(path.join(__dirname,'fixtures/illustration.png'));
 const response=()=>({status:200,json:{data:[{b64_json:png.toString('base64')}]}});
 
 test('image generation sends the final article to OpenAI and returns a validated 4:3 PNG',async()=>{
-    const data=await image.generate('fixture','Black and white BD mind map. Final article.',async options=>{
+    const data=await image.generate('fixture','Black and white humorous cartoon without text. Final article.',async options=>{
         assert.equal(options.url,'https://api.openai.com/v1/images/generations');
         assert.equal(options.headers.Authorization,'Bearer fixture');
         const body=JSON.parse(options.body);
@@ -17,7 +17,7 @@ test('image generation sends the final article to OpenAI and returns a validated
         assert.equal(body.size,'1600x1200');
         assert.equal(body.n,1);
         assert.equal(body.output_format,'png');
-        assert.equal(body.prompt,'Black and white BD mind map. Final article.');
+        assert.equal(body.prompt,'Black and white humorous cartoon without text. Final article.');
         return response();
     });
     assert.deepEqual(Buffer.from(data),png);

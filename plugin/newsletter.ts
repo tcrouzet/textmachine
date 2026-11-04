@@ -1,15 +1,16 @@
 import {t} from './i18n';
 import {parseData, isExcluded, isPdf} from './articles';
-import schema from '../models/newsletter.json';
 import selectionSchema from '../models/selection.json';
 import writerSchema from '../models/writer.json';
+import publisherSchema from '../models/publisher.json';
 import summarySchema from '../models/resume.json';
 import briefSchema from '../models/bref.json';
 import {Article, FeedEntry, record, array} from './types';
 import {parseHTML} from './html';
+import {domainOf} from './domains';
 
 interface SourceSummary {id: number; title?: string; summary: string}
-interface SourceGroup {title: string; articles: SourceSummary[]}
+export interface SourceGroup {title: string; articles: SourceSummary[]}
 interface Editorial {title: string; chapeau: string; paragraphs: string[]}
 interface RawNewsletter extends Editorial {lead: number | null; image: null; groups: SourceGroup[]; discard: number[]}
 interface Newsletter extends Editorial {
@@ -21,14 +22,26 @@ interface Newsletter extends Editorial {
 }
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((item: unknown)=>typeof item==='string');
 
+function referenceInstructions(articles: Article[], sources: string) {
+    const domains=new Set(sources.split(/[\s,;]+/).filter(Boolean).flatMap(source=>{
+        try {const domain=domainOf(source);return domain.includes('.') ? [domain] : [];}
+        catch {return [];}
+    }));
+    if (!domains.size) return '';
+    const ids=articles.filter(article=>{
+        try {return domains.has(domainOf(article.url));} catch {return false;}
+    }).map(article=>article.id);
+    return ids.length ? '\n\n'+t('referenceSourcesContract',{ids:ids.join(', ')}) : '';
+}
+
 function day(date = new Date()) {
     return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
 
 function availableArticles(text: string, exclusions = '', date = day(), todayNotes: string[] = []) {
     return parseData(text).articles.filter(article => article.content.trim() && !isPdf(article.url) && !isExcluded(article,exclusions)
-        && (article.status === '' || (article.status === 'used' && (article.usedAt === date
-            || (!article.usedAt && todayNotes.some(note=>note.includes(']('+article.url+')') || note.includes(']('+article.url+' ')))))));
+        && article.status === '' && (!article.usedAt || article.usedAt === date
+            || (article.usedAt==='unknown' && todayNotes.some(note=>note.includes(']('+article.url+')') || note.includes(']('+article.url+' ')))));
 }
 
 function briefArticles(text: string, exclusions = '', date = day()) {
@@ -70,11 +83,11 @@ function renderPrompt(prompt: string, values: Record<string,string>) {
     });
 }
 
-function selectionRequest(prompt: string, articles: Article[], language: string) {
+function selectionRequest(prompt: string, articles: Article[], language: string, referenceSources = '', previous: {name: string; content: string}[] = []) {
     const schema = structuredClone(selectionSchema);
     const ids = articles.map(article=>article.id);
     for (const key of ['selected','discard'] as const) Object.assign(schema.properties[key].items,{enum:ids});
-    return {input:articleInput(prompt,articles,language,{now:new Date().toString()}),system:t('selectionContract')+'\n\n'+JSON.stringify({jsonSchema:schema}),schema};
+    return {input:articleInput(prompt,articles,language,{now:new Date().toString(),previousNewsletters:JSON.stringify(previous)}),system:t('selectionContract')+referenceInstructions(articles,referenceSources)+'\n\n'+JSON.stringify({jsonSchema:schema}),schema};
 }
 
 function parseSelection(text: string, articles: Article[]) {
@@ -90,34 +103,43 @@ function parseSelection(text: string, articles: Article[]) {
     return {selected:articles.filter(article=>selected.includes(article.id)),discard:result.discard as number[]};
 }
 
-function summaryRequest(prompt: string, articles: Article[], language: string) {
-    const responseSchema = structuredClone(summarySchema);
-    Object.assign(responseSchema.properties.groups.items.properties.articles.items.properties.id,{enum:articles.map(article=>article.id)});
-    return {input:articleInput(prompt,articles,language),system:t('summaryContract')+'\n\n'+JSON.stringify({jsonSchema:responseSchema}),schema:responseSchema};
+function summaryRequest(prompt: string, article: Pick<Article,'title' | 'content'>, language: string) {
+    if (!/\{\{\s*article\s*\}\}/.test(prompt)) throw new Error(t('writerArticlesMissing',{variable:'{{article}}'}));
+    const schema = structuredClone(summarySchema);
+    return {input:renderPrompt(prompt,{language:language.trim() || 'français',article:JSON.stringify({title:article.title,content:article.content})}),
+        system:t('summaryContract')+'\n\n'+JSON.stringify({jsonSchema:schema}),schema};
 }
 
-function parseSummaries(text: string, articles: Article[]): SourceGroup[] {
+function parseSummary(text: string): string {
     let result: Record<string,unknown>;
     try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {throw new Error(t('newsletterSummariesInvalid'));}
-    const known=new Set(articles.map(article=>article.id));
-    if (!result || Object.keys(result).length!==1 || !Array.isArray(result.groups)
-        || result.groups.some((value: unknown)=>{const group=record(value);return Object.keys(group).length!==2 || typeof group.title!=='string' || !group.title.trim()
-            || !Array.isArray(group.articles) || !group.articles.length || group.articles.some((value: unknown)=>{const article=record(value);return Object.keys(article).length!==3
-                || typeof article.id!=='number' || !known.has(article.id) || typeof article.title!=='string' || !article.title.trim()
-                || typeof article.summary!=='string' || !article.summary.trim() || /!\[|<img\b/i.test(article.summary);});})) throw new Error(t('newsletterSummariesInvalid'));
-    const groups=result.groups as SourceGroup[];
-    const ids=groups.flatMap(group=>group.articles.map(article=>article.id));
-    if (ids.length!==known.size || new Set(ids).size!==known.size) throw new Error(t('newsletterSummariesInvalid'));
-    return groups;
+    if (Object.keys(result).length!==1 || typeof result.summary!=='string' || !result.summary.trim()
+        || result.summary.trim().split(/\s+/u).length>30 || /!\[|<img\b/i.test(result.summary)) throw new Error(t('newsletterSummariesInvalid'));
+    return result.summary.trim();
 }
 
-function parseEditorial(text: string): Editorial {
+function parseEditorial(text: string): Pick<Editorial,'paragraphs'> {
     let result: Record<string,unknown>;
     try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {throw new Error(t('newsletterInvalid'));}
-    if (!result || Object.keys(result).length!==3 || typeof result.title!=='string' || !result.title.trim()
-        || typeof result.chapeau!=='string' || !result.chapeau.trim() || !strings(result.paragraphs) || result.paragraphs.length<2
+    if (Object.keys(result).length!==1 || !strings(result.paragraphs) || result.paragraphs.length<2
         || result.paragraphs.some(paragraph=>!paragraph.trim() || /!\[|<img\b/i.test(paragraph))) throw new Error(t('newsletterInvalid'));
-    return result as unknown as Editorial;
+    return {paragraphs:result.paragraphs};
+}
+
+function publisherRequest(prompt: string, paragraphs: string[], language: string) {
+    if (!prompt.trim()) throw new Error(t('newsletterPromptEmpty',{file:'publisher.md'}));
+    if (!/\{\{\s*article\s*\}\}/.test(prompt)) throw new Error(t('publisherArticleMissing',{variable:'{{article}}'}));
+    const schema=structuredClone(publisherSchema);
+    return {system:t('publisherContract')+'\n\n'+JSON.stringify({jsonSchema:schema}),schema,
+        input:renderPrompt(prompt,{language:language.trim() || 'français',article:paragraphs.join('\n\n')})};
+}
+
+function parsePublisher(text: string): Pick<Editorial,'title' | 'chapeau'> {
+    let result: Record<string,unknown>;
+    try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {throw new Error(t('newsletterInvalid'));}
+    if (Object.keys(result).length!==2 || typeof result.title!=='string' || !result.title.trim()
+        || typeof result.chapeau!=='string' || !result.chapeau.trim()) throw new Error(t('newsletterInvalid'));
+    return {title:result.title,chapeau:result.chapeau};
 }
 
 function articleInput(prompt: string, articles: Article[], language: string, values: Record<string,string> = {}) {
@@ -129,7 +151,7 @@ function articleInput(prompt: string, articles: Article[], language: string, val
     });
 }
 
-function writerRequest(prompt: string, articles: Article[], previous: {name: string; content: string}[], feed: FeedEntry[], language = 'français') {
+function writerRequest(prompt: string, articles: Article[], previous: {name: string; content: string}[], feed: FeedEntry[], language = 'français', referenceSources = '') {
     if (!prompt.trim()) throw new Error(t('writerPromptEmpty'));
     const values = {
         previousNewsletters:JSON.stringify(previous),
@@ -138,7 +160,7 @@ function writerRequest(prompt: string, articles: Article[], previous: {name: str
     };
     const editorialSchema = structuredClone(writerSchema);
     return {
-        system:t('writerContract') + '\n\n' + JSON.stringify({jsonSchema:editorialSchema}),schema:editorialSchema,
+        system:t('writerContract') + referenceInstructions(articles,referenceSources) + '\n\n' + JSON.stringify({jsonSchema:editorialSchema}),schema:editorialSchema,
         input:articleInput(prompt,articles,language,values),
     };
 }
@@ -160,7 +182,7 @@ function parseNewsletter(text: string, articles: Article[]): Newsletter {
         || !Array.isArray(raw.groups) || !Array.isArray(raw.discard)) invalid();
     for (const value of array(raw.groups)) {
         const group=record(value);
-        if (!shape(group,['title','articles']) || !nonempty(group.title) || !Array.isArray(group.articles) || !group.articles.length
+        if (!shape(group,['title','articles']) || !string(group.title) || !Array.isArray(group.articles) || !group.articles.length
             || group.articles.some((value: unknown)=>{const article=record(value);return (!shape(value,['id','summary']) && !shape(value,['id','title','summary']))
                 || !known(article.id) || !nonempty(article.summary) || (Object.hasOwn(article,'title') && !nonempty(article.title));})) invalid();
     }
@@ -197,7 +219,7 @@ function renderNewsletter(template: string, result: Newsletter, articles: Articl
         paragraphs_before_image:result.paragraphs.slice(0,2).join('\n\n'),
         image:image ? (image.generated ? `![${escape(image.caption)}](${image.url})` : `[![${escape(image.caption)}](${link(image.url)})](${link(image.source)})`) : '',
         paragraphs_after_image:result.paragraphs.slice(2).join('\n\n'),
-        groups:result.groups.map(group=>({title:escape(group.title),articles:group.articles.map(article=>({
+        groups:result.groups.map(group=>({title:escape(group.title),heading:group.title.trim() ? [{title:escape(group.title)}] : [],articles:group.articles.map(article=>({
             title:escape(article.title || source.get(article.url)!.title),summary:article.summary,domain:domain(article.url),url:link(article.url),
         }))})),
     };
@@ -226,14 +248,13 @@ function renderNewsletter(template: string, result: Newsletter, articles: Articl
 function applyStatuses(text: string, snapshot: Article[], result: Pick<Newsletter,'used' | 'discard'>, date = day(), brief: Article[] = []) {
     const data = parseData(text);
     const original = new Map([...snapshot,...brief].map(article => [article.id,article]));
-    const used = new Set(result.used), discarded = new Set(result.discard);
+    const generated = result.used.length>0 || brief.length>0, discarded = new Set(result.discard);
     for (const article of data.articles) {
         const before = original.get(article.id);
         if (!before || article.url !== before.url || article.status !== before.status || article.usedAt !== before.usedAt
             || article.content !== before.content || article.title !== before.title) continue;
-        if (before.status === 'forbidden') {article.usedAt = date;continue;}
-        if (used.has(article.url)) {article.status = 'used';article.usedAt = date;}
-        else if (discarded.has(article.url)) {article.status = 'discard';delete article.usedAt;}
+        if (generated) article.usedAt = date;
+        else if (discarded.has(article.url) && !article.usedAt) article.status = 'discard';
     }
     return JSON.stringify(data,null,2) + '\n';
 }
@@ -296,4 +317,4 @@ function readFeed(xml: string, limit = 5, base = ''): FeedEntry[] {
     });
 }
 
-export {schema, day, availableArticles, briefArticles, briefRequest, parseBrief, selectionRequest, parseSelection, summaryRequest, parseSummaries, parseEditorial, renderPrompt, writerRequest, parseNewsletter, renderNewsletter, applyStatuses, feedUrl, feedUrls, readFeed, preview};
+export {day, availableArticles, briefArticles, briefRequest, parseBrief, selectionRequest, parseSelection, summaryRequest, parseSummary, parseEditorial, publisherRequest, parsePublisher, renderPrompt, writerRequest, parseNewsletter, renderNewsletter, applyStatuses, feedUrl, feedUrls, readFeed, preview};

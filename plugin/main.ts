@@ -15,9 +15,10 @@ import * as newsletter from './newsletter';
 import * as generation from './ai/generate';
 import * as imageGeneration from './ai/image';
 import {correctNewsletterPunctuation} from './punctuation';
-import {validateRewrite} from './ai/rewrite';
+import {rewriteRequest,parseRewrite} from './ai/rewrite';
 import {createIllustration} from './illustration';
 import writerPrompt from '../prompts/writer.md';
+import publisherPrompt from '../prompts/publisher.md';
 import newsletterTemplate from '../models/newsletter.md';
 import imagePrompt from '../prompts/image.md';
 import rewriterPrompt from '../prompts/rewriter.md';
@@ -64,19 +65,19 @@ export default class TextMachine extends Plugin {
     crawlController: AbortController | null = null;
     runDialog: TextMachineRun | null = null;
     folderIconDocuments = new Set<Document>();
-    loadPage = (url: string, signal: AbortSignal | undefined, blocked: (url: string) => boolean) => browser.loadPage(url, signal, blocked, BrowserWindow);
+    loadPage = (url: string, signal: AbortSignal | undefined, blocked: (url: string) => boolean) => browser.retrievePage(url, signal, blocked, BrowserWindow);
 
     async onload() {
         i18n.setLocale(getLanguage());
         this.gmail = gmail;
         this.articles = articles;
         this.crawler = crawler;
-        this.loadPage = (url, signal, blocked) => browser.loadPage(url, signal, blocked, BrowserWindow);
+        this.loadPage = (url, signal, blocked) => browser.retrievePage(url, signal, blocked, BrowserWindow);
         this.ai = ai;
         this.codex = codex;
         this.renderAI = renderAI;
         const {newsletterFeed:legacyFeed,...storedSettings} = record(await this.loadData());
-        const defaults: Settings = {...this.ai.defaults, secretKey:'',labelId:'',outputFolder:'',excludedSources:'',newsletterLanguage:'français',includeFeeds:'',
+        const defaults: Settings = {...this.ai.defaults, secretKey:'',labelId:'',outputFolder:'',excludedSources:'',newsletterLanguage:'français',referenceSources:'',includeFeeds:'',
             authorFeeds:typeof legacyFeed==='string' ? legacyFeed : '',anthropicSecretId:undefined,openaiSecretId:undefined};
         this.settings = {...storedSettings,...defaults};
         for (const key of Object.keys(defaults) as (keyof Settings)[]) {
@@ -463,6 +464,17 @@ export default class TextMachine extends Plugin {
         if (!template.trim()) throw new Error(t('newsletterTemplateInvalid'));
         const controller = this.aiController = new AbortController();
         const check = () => {if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));};
+        const saveSnapshot = async (name: string, text: string) => {
+            check();
+            const path=this.settings.outputFolder+'/'+name+'-'+day+'.md';
+            const file=vault.getAbstractFileByPath(path);
+            try {
+                if (file instanceof TFile) await vault.modify(file,text.trim()+'\n');
+                else if (!file) await vault.create(path,text.trim()+'\n');
+                else throw new Error();
+            } catch {throw new Error(t('newsletterSnapshotFailed',{path}));}
+            check();
+        };
         const readPrompt = async (name: string, fallback: string) => {
             const path=this.manifest.dir+'/prompts/'+name;
             const prompt=await vault.adapter.exists(path) ? await vault.adapter.read(path) : fallback;
@@ -479,32 +491,44 @@ export default class TextMachine extends Plugin {
         };
         try {
             let result: ReturnType<typeof newsletter.parseNewsletter> = {title:'',chapeau:'',paragraphs:[],lead:null,image:null,groups:[],used:[],discard:[]};
+            let draft: {lead: number; groups: newsletter.SourceGroup[]; discard: number[]} | null = null;
             let generated: Awaited<ReturnType<typeof createIllustration>> | null = null;
             let authorPosts: ReturnType<typeof newsletter.readFeed> | undefined;
             if (pending.length) {
                 const prompt=await readPrompt('writer.md',writerPrompt);
+                const selectionTemplate=await readPrompt('sélection.md',selectionPrompt);
                 const oldNotes=notes.filter(file=>!file.name.startsWith('text-machine-'+day))
                     .sort((a,b)=>b.stat.mtime-a.stat.mtime).slice(0,5);
-                const previous=/\{\{\s*previousNewsletters\s*\}\}/.test(prompt)
+                const previous=[prompt,selectionTemplate].some(text=>/\{\{\s*previousNewsletters\s*\}\}/.test(text))
                     ? await Promise.all(oldNotes.map(async file=>({name:file.name,content:await vault.read(file)}))) : [];
                 progress?.(t('newsletterReadingContext'));
                 if (/\{\{\s*(?:recentPosts|AuthorFeed)\s*\}\}/.test(prompt)) authorPosts=await this.readAuthorFeeds(controller.signal);
                 check();
                 progress?.(t('newsletterSelecting'));
-                const selectionRequest=this.newsletter.selectionRequest(await readPrompt('sélection.md',selectionPrompt),pending,language);
+                const selectionRequest=this.newsletter.selectionRequest(selectionTemplate,pending,language,this.settings.referenceSources,previous);
                 const selection=this.newsletter.parseSelection(await respond(selectionRequest),pending);
                 result.discard=selection.discard.map((id: number)=>pending.find(article=>article.id===id)!.url);
                 if (selection.selected.length) {
-                    progress?.(t('newsletterSummarizing'));
-                    const summaryRequest=this.newsletter.summaryRequest(await readPrompt('resume.md',summaryPrompt),selection.selected,language);
-                    const groups=this.newsletter.parseSummaries(await respond(summaryRequest),selection.selected);
+                    const summaryTemplate=await readPrompt('resume.md',summaryPrompt);
+                    const groups: newsletter.SourceGroup[] = [{title:'',articles:[]}];
+                    for (const [index,article] of selection.selected.entries()) {
+                        check();
+                        progress?.(t('newsletterSummarizing',{current:index+1,total:selection.selected.length,title:article.title}));
+                        const request=this.newsletter.summaryRequest(summaryTemplate,article,language);
+                        const summary=this.newsletter.parseSummary(await respond(request));
+                        groups[0].articles.push({id:article.id,summary});
+                    }
                     progress?.(t('newsletterWriting'));
-                    const request=this.newsletter.writerRequest(prompt,selection.selected,previous,authorPosts || [],language);
+                    const request=this.newsletter.writerRequest(prompt,selection.selected,previous,authorPosts || [],language,this.settings.referenceSources);
                     const editorial=this.newsletter.parseEditorial(await respond(request,progress));
-                    result=this.newsletter.parseNewsletter(JSON.stringify({...editorial,lead:selection.selected[0].id,image:null,groups,discard:selection.discard}),pending);
+                    result.paragraphs=editorial.paragraphs;
+                    result.used=selection.selected.map(article=>article.url);
+                    draft={lead:selection.selected[0].id,groups,discard:selection.discard};
+                    await saveSnapshot('brouillon',result.paragraphs.join('\n\n'));
+                    await saveSnapshot('revision','> '+t('newsletterRevisionPending'));
                 }
-                if (!result.used.length && (!brief.length || pending.some(article=>article.status==='used'))) {
-                    await vault.process(log,current=>this.newsletter.applyStatuses(current,pending.filter(article=>article.status===''),result,day));
+                if (!result.used.length && (!brief.length || pending.some(article=>!!article.usedAt))) {
+                    await vault.process(log,current=>this.newsletter.applyStatuses(current,pending.filter(article=>!article.usedAt),result,day));
                     new Notice(t('newsletterNoArticles'));
                     return null;
                 }
@@ -525,6 +549,7 @@ export default class TextMachine extends Plugin {
             }
             if (result.used.length && connection) {
                 const original = result.paragraphs.join('\n\n');
+                let revisedText=original, revisionError='';
                 try {
                     let prompt = rewriterPrompt;
                     const path = this.manifest.dir + '/prompts/rewriter.md';
@@ -534,16 +559,27 @@ export default class TextMachine extends Plugin {
                     const serializedPosts = JSON.stringify(authorPosts || []);
                     const system = this.newsletter.renderPrompt(prompt,{language,AuthorFeed:serializedPosts,recentPosts:serializedPosts});
                     progress?.(t('newsletterRewriting'));
-                    const response = connection.provider==='codex'
-                        ? await this.codex.generate(await this.codex.findCodex(),system,original,connection.model,controller.signal,progress)
-                        : await this.generate(connection,system,original,this.requestAI,controller.signal,progress);
-                    check();
-                    result.paragraphs = validateRewrite(original,response).trim().split(/\r?\n[ \t]*\r?\n+/);
+                    const response = await respond(rewriteRequest(system,original),progress);
+                    revisedText=response;
+                    try {
+                        const paragraphs=record(JSON.parse(response.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''))).paragraphs;
+                        if (Array.isArray(paragraphs) && paragraphs.every((item: unknown)=>typeof item==='string')) revisedText=paragraphs.join('\n\n');
+                    } catch { /* Preserve malformed responses for comparison. */ }
+                    result.paragraphs = parseRewrite(original,response);
                 } catch (caught) {
                     check();
-                    progress?.(t('newsletterRewriteFallback',{reason:errorOf(caught).message}));
+                    revisionError=t('newsletterRewriteFallback',{reason:errorOf(caught).message});
+                    progress?.(revisionError);
                     progress?.(original,true,true);
                 }
+                const fence='`'.repeat((revisedText.match(/`+/g) || []).reduce((length,run)=>Math.max(length,run.length+1),3));
+                await saveSnapshot('revision',revisionError ? '> '+revisionError+'\n\n'+fence+'\n'+revisedText+'\n'+fence : revisedText);
+            }
+            if (draft) {
+                progress?.(t('newsletterPublishing'));
+                const request=this.newsletter.publisherRequest(await readPrompt('publisher.md',publisherPrompt),result.paragraphs,language);
+                const publication=this.newsletter.parsePublisher(await respond(request,progress));
+                result=this.newsletter.parseNewsletter(JSON.stringify({...draft,...publication,paragraphs:result.paragraphs,image:null}),pending);
             }
             const illustrationName='text-machine-'+day+'.png';
             const imagePath=this.settings.outputFolder+'/illustrations/'+illustrationName;
@@ -914,6 +950,7 @@ export class GmailSettings extends PluginSettingTab {
         const source=group(t('sourceHeading'));
         const journal=group(t('folderHeading'));
         const newsletterSettings=group(t('newsletterHeading'));
+        const newsletterSources: SettingRow[]=[];
         const items: (SettingRow | SettingsGroup)[] = [{name:'TextMachine',desc:t('intro'),searchable:false,render:setting=>{
             this.containerEl.addClass('text-machine-settings');
             setting.setHeading();
@@ -1005,7 +1042,7 @@ export class GmailSettings extends PluginSettingTab {
             });
         }});
         if (p.dataReady) {
-            journal.items.push({name:t('excludedSources'),desc:t('excludedSourcesDescription'),render:setting=>{
+            newsletterSources.push({name:t('excludedSources'),desc:t('excludedSourcesDescription'),render:setting=>{
                 setting.addTextArea(text=>{
                     text.inputEl.setAttribute('aria-label',t('excludedSources'));
                     text.inputEl.rows=3;
@@ -1031,14 +1068,17 @@ export class GmailSettings extends PluginSettingTab {
                         viewer.open();
                     })));
             }});
-            journal.items.push({name:t('blockedSites'),desc:t('blockedSitesDescription'),render:setting=>{
-                setting.addButton(button=>button.setButtonText(t('viewBlocked')).setDisabled(!connected || p.busy)
-                    .onClick(()=>this.run(t('openingLog'),async()=>{
-                        const viewer=new Modal(this.app);
-                        viewer.titleEl.setText('blocked.json');
-                        viewer.contentEl.createEl('pre',{cls:'text-machine-json',text:JSON.stringify(await p.readBlocked(),null,2)});
-                        viewer.open();
-                    })));
+            newsletterSources.push({name:t('blockedSites'),desc:t('blockedSitesDescription'),render:setting=>{
+                setting.addTextArea(text=>{
+                    text.inputEl.setAttribute('aria-label',t('blockedSites'));
+                    text.inputEl.readOnly=true;
+                    text.inputEl.rows=3;
+                    text.setPlaceholder(t('blockedSitesEmpty')).setValue(t('loading'));
+                    void p.readBlocked().then((domains): void=>{text.setValue(domains.join('\n'));}).catch(caught=>{
+                        text.setValue('').setPlaceholder('');
+                        setting.descEl.createEl('p',{text:errorOf(caught).message,attr:{role:'alert'}});
+                    });
+                });
             }});
             journal.items.push({name:t('resetData'),desc:t('resetDataDescription'),render:setting=>{
                 setting.addButton(button=>destructive(button).setButtonText(t('resetData')).setDisabled(!connected || p.busy).onClick(()=>{
@@ -1065,19 +1105,39 @@ export class GmailSettings extends PluginSettingTab {
             setting.settingEl.setAttribute('role','status');
         }});
         items.push(newsletterSettings);
-        for (const [key,label,description,placeholder] of [
-            ['newsletterLanguage',t('newsletterLanguage'),t('newsletterLanguageDescription',{variable:'{{language}}'}),'français'],
-            ['includeFeeds',t('includeFeeds'),t('includeFeedsDescription'),'https://site.example/feed https://autre.example/rss'],
-            ['authorFeeds',t('authorFeeds'),t('authorFeedsDescription',{variable:'{{AuthorFeed}}'}),'https://monblog.substack.com'],
-        ] as const) newsletterSettings.items.push({name:label,desc:description,render:setting=>{
+        newsletterSources.unshift({name:t('referenceSources'),desc:t('referenceSourcesDescription'),render:setting=>{
+            setting.addTextArea(text=>{
+                text.inputEl.setAttribute('aria-label',t('referenceSources'));
+                text.inputEl.rows=3;
+                text.setPlaceholder('theguardian.com\nlemonde.fr').setValue(p.settings.referenceSources).onChange(value=>{
+                    p.settings.referenceSources=value.trim();
+                    void p.saveData(p.settings).catch(()=>{this.error=t('aiSaveFailed');this.redraw();});
+                });
+            });
+        }});
+        newsletterSettings.items.push({name:t('newsletterLanguage'),desc:t('newsletterLanguageDescription',{variable:'{{language}}'}),render:setting=>{
             setting.addText(text=>{
+                text.inputEl.setAttribute('aria-label',t('newsletterLanguage'));
+                text.setValue(p.settings.newsletterLanguage).setPlaceholder('français').onChange(value=>{
+                    p.settings.newsletterLanguage=value.trim();
+                    void p.saveData(p.settings).catch(()=>{this.error=t('aiSaveFailed');this.redraw();});
+                });
+            });
+        }});
+        for (const [key,label,description,placeholder] of [
+            ['includeFeeds',t('includeFeeds'),t('includeFeedsDescription'),'https://site.example/feed\nhttps://autre.example/rss'],
+            ['authorFeeds',t('authorFeeds'),t('authorFeedsDescription',{variable:'{{AuthorFeed}}'}),'https://monblog.substack.com\nhttps://autreblog.example/feed'],
+        ] as const) newsletterSources.push({name:label,desc:description,render:setting=>{
+            setting.addTextArea(text=>{
                 text.inputEl.setAttribute('aria-label',label);
+                text.inputEl.rows=3;
                 text.setValue(p.settings[key]).setPlaceholder(placeholder).onChange(value=>{
                     p.settings[key]=value.trim();
                     void p.saveData(p.settings).catch(()=>{this.error=t('aiSaveFailed');this.redraw();});
                 });
             });
         }});
+        newsletterSettings.items.push({name:t('newsletterSourcesHeading'),render:setting=>{setting.setHeading();}},...newsletterSources);
         items.push(p.renderAI(p,this));
         return items;
     }

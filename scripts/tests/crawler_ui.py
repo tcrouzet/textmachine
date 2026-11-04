@@ -79,7 +79,8 @@ try:
                     this.destroy = () => window.destroy();
                 }
             }
-            p.loadPage = (url,signal,blocked) => p.browser.loadPage(url,signal,blocked,ProxyWindow);
+            p.loadPage = (url,signal,blocked) => p.browser.retrievePage(url,signal,blocked,ProxyWindow,
+                async url => ({url,status:403,html:''}));
         }""", proxy.server_port)
 
         page.evaluate("() => { const p = app.plugins.plugins['text-machine']; p.codex = {...p.codex, findCodex:async () => null}; }")
@@ -89,6 +90,15 @@ try:
             document.body.dataset.node = typeof require;
         }, 100);</script></body></html>"""
         initial_windows = page.evaluate("require('@electron/remote').BrowserWindow.getAllWindows().length")
+        direct = page.evaluate("""async () => {
+            const p=app.plugins.plugins['text-machine'];
+            class NoWindow {constructor(){throw new Error('Static articles must not open Chromium');}}
+            const html='<article><h1>A public article</h1><p>'+'Useful writing about science and books. '.repeat(30)+'</p></article>';
+            return p.browser.retrievePage('https://example.com/static',undefined,()=>false,NoWindow,
+                async url=>({url,status:200,html}));
+        }""")
+        assert 'A public article' in direct['html'], direct
+        assert requests == [] and blocked_requests == []
         result = page.evaluate("""async () => {
             const p = app.plugins.plugins['text-machine'];
             return await p.loadPage('http://8.8.8.8/article', new AbortController().signal, () => false);
@@ -144,6 +154,19 @@ try:
             const crawler = app.plugins.plugins['text-machine'].crawler;
             return crawler.extractPage('<script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":false}</script><article>Subscriber preview</article>', 'https://example.com/article').blocked;
         }""")
+        access = page.evaluate("""() => {
+            const c=app.plugins.plugins['text-machine'].crawler;
+            const metadata='<script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":false,"hasPart":{"cssSelector":".subscriber-body"}}</script>';
+            const text='<p>'+'An investigation into publishing and science, with independently verified sources. '.repeat(30)+'</p>';
+            const extract=body=>c.extractPage(metadata+'<article>'+body+'</article>','https://example.com/metered');
+            return {full:extract('<div class="subscriber-body">'+text+text+'</div>'),
+                empty:extract(text+'<div class="subscriber-body"></div>'),
+                preview:extract('<p>'+'This is a subscriber preview. '.repeat(12)+'</p><p>'+'The rest of the story is unavailable. '.repeat(8)+'</p>'),
+                truncated:extract(text+'<p>You have 66.84% of this article left to read. The rest is for subscribers only.</p>'),
+                french:extract(text+'<p>Cet article est réservé aux abonnés.</p>')};
+        }""")
+        assert len(access['full']['content']) > 3000, access['full']
+        assert all(access[key].get('blocked') and not access[key].get('content') for key in ('empty','preview','truncated','french')), access
         inert_requests = []
         page.on('request', lambda request: inert_requests.append(request.url) if 'tracker.invalid' in request.url else None)
         structured = page.evaluate("""() => {
@@ -209,7 +232,7 @@ try:
         assert len(imported['articles']) == 5, imported
         assert imported['articles'][0]['content'] and imported['articles'][0]['status'] == '', imported
         assert all(article['status']=='forbidden' for article in imported['articles'][1:]), imported
-        assert all('used' not in article for article in imported['articles']), imported
+        assert all('used' not in article and article['usedAt'] == '' for article in imported['articles']), imported
         assert blocked_requests == ['http://9.9.9.9/denied'], blocked_requests
         saved_blocks = json.loads((vault / 'Data/blocked.json').read_text())
         assert saved_blocks == ['9.9.9.9'], saved_blocks
@@ -240,6 +263,7 @@ try:
         print('PDF exclusion verified: URL, MIME, download filename and redirection; PDF metadata retained as forbidden, no PDF domain blocked and no browser window leaked.', flush=True)
         print('Readability extracted rendered article text, date and image; detected challenge and paywall; inert parsing verified.', flush=True)
         print('Chromium rendered JavaScript, denied Node access and local URLs, and closed the article window.', flush=True)
+        print('HTTP-first retrieval avoided Chromium for public static content; refused empty subscriber sections, short previews and explicit truncation notices.', flush=True)
         browser.close()
 finally:
     proxy.shutdown()

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Révision du corps de l’article",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["paragraphs"],
+  "properties": {
+    "paragraphs": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"type": "string", "minLength": 1},
+      "description": "Paragraphes révisés du corps de l’article en Markdown, sans titre, chapeau, image ni résumé de la revue de presse."
+    }
+  }
+}

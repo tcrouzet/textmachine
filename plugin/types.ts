@@ -7,6 +7,7 @@ export interface Settings {
     outputFolder: string;
     excludedSources: string;
     newsletterLanguage: string;
+    referenceSources: string;
     includeFeeds: string;
     authorFeeds: string;
     aiModel: string;

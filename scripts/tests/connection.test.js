@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
+const rewriteResponse = text=>JSON.stringify({paragraphs:text.trim().split(/\r?\n[ \t]*\r?\n+/)});
 
 async function fixture(initialSecrets = {}) {
     const secrets = new Map(Object.entries(initialSecrets));
@@ -48,7 +49,7 @@ test('plugin loading persists missing article IDs without Gmail or an AI run',as
     assert.equal(data.articles[0].id,1);
     assert.equal(data.nextId,2);
     assert.equal(data.notes,'Keep notes');
-    assert.deepEqual(data.articles[0],{...article,publish:'',image:'',id:1});
+    assert.deepEqual(data.articles[0],{...article,status:'',publish:'',image:'',id:1});
     const migrated = saved;
     await layoutReady();
     assert.equal(saved,migrated);
@@ -62,6 +63,7 @@ test('the former supplementary feed becomes the author feed without losing setti
     await p.onload();
     assert.equal(p.settings.authorFeeds,'https://legacy.substack.com');
     assert.equal(p.settings.includeFeeds,'');
+    assert.equal(p.settings.referenceSources,'');
     assert.equal(p.settings.labelId,'Label_1');
     assert.ok(!Object.hasOwn(p.savedSettings,'newsletterFeed'));
     assert.equal(p.savedSettings.authorFeeds,'https://legacy.substack.com');
@@ -124,8 +126,8 @@ test('native secret references reuse existing keys and never copy values into se
 
 async function newsletterFixture() {
     const {p,obsidian} = await fixture();
-    const article = (name,extra={}) => ({date:'2026-11-03',title:name,url:'https://example.com/'+name,source:'User',status:'',publish:'2026-11-01',content:'Article about AI and books.',image:'',...extra});
-    const entries = [article('used',{id:1}),article('discard',{id:2}),article('old',{id:3,status:'used'})];
+    const article = (name,extra={}) => ({date:'2026-11-03',title:name,url:'https://example.com/'+name,source:'User',status:'',usedAt:'',publish:'2026-11-01',content:'Article about AI and books.',image:'',...extra});
+    const entries = [article('used',{id:1}),article('discard',{id:2}),article('old',{id:3,usedAt:'2000-01-01'})];
     const contents = new Map([['Data/textmachine.json',JSON.stringify({version:1,nextId:4,notes:'Keep notes',articles:entries})]]);
     const files = new Map();
     const folder = Object.assign(new obsidian.TFolder(),{path:'Data',children:[]});
@@ -160,11 +162,12 @@ async function newsletterFixture() {
             contents.set(file.path,after);
         },
         adapter:{exists:async()=>true,read:async path=>path.endsWith('/models/newsletter.md') ? require('node:fs').readFileSync(require('node:path').join(root,'models/newsletter.md'),'utf8')
+            : path.endsWith('/prompts/publisher.md') ? 'Runtime publisher in {{language}}.\n{{article}}'
             : path.endsWith('/prompts/image.md') ? 'Image caption in {{language}}'
                 : path.endsWith('/prompts/rewriter.md') ? 'Runtime rewriter {{language}}'
                     : path.endsWith('/prompts/bref.md') ? 'Runtime brief {{language}}'
                         : path.endsWith('/prompts/sélection.md') ? '{"instructions":"Runtime selection","language":"{{language}}","articles":{{articles}}}'
-                            : path.endsWith('/prompts/resume.md') ? '{"instructions":"Runtime summaries","language":"{{language}}","articles":{{articles}}}'
+                            : path.endsWith('/prompts/resume.md') ? '{"instructions":"Runtime summaries","language":"{{language}}","article":{{article}}}'
                 : '{"instructions":"My runtime prompt","language":"{{language}}","articles":{{articles}},"previousNewsletters":{{previousNewsletters}},"recentPosts":{{recentPosts}}}'},
     };
     p.app.workspace.getLeaf = ()=>({openFile:async()=>{}});
@@ -172,19 +175,20 @@ async function newsletterFixture() {
     p.generateIllustration = async()=>new ArrayBuffer(8);
     p.request = async()=>({status:200,text:'<rss/>'});
     p.getAIConnection = ()=>({provider:'openai',model:'fixture',apiKey:'fixture'});
-    const seen = [];
+    const seen = [],publisher={title:'A new newsletter',chapeau:'Books meet AI.'};
     p.generate = async (_connection,system,input)=>{
-        if (system.startsWith('Runtime rewriter')) return input;
+        if (input.startsWith('Runtime publisher')) return JSON.stringify(publisher);
+        if (system.startsWith('Runtime rewriter')) return rewriteResponse(input);
         if (system.startsWith('Runtime brief')) return JSON.stringify({titles:JSON.parse(input)});
         const context = JSON.parse(input);
         if (context.instructions==='Runtime selection') return JSON.stringify({selected:context.articles.filter(article=>article.title!=='discard').map(article=>article.id),discard:context.articles.filter(article=>article.title==='discard').map(article=>article.id)});
-        if (context.instructions==='Runtime summaries') return JSON.stringify({groups:[{title:'Books',articles:context.articles.map(article=>({id:article.id,title:article.title,summary:'Article summary.'}))}]});
+        if (context.instructions==='Runtime summaries') return JSON.stringify({summary:'Article summary.'});
         assert.ok(input.includes('My runtime prompt'));
         assert.ok(!system.includes('My runtime prompt'));
         seen.push(context);
-        return JSON.stringify({title:'A new newsletter',chapeau:'Books meet AI.',paragraphs:['First paragraph.','Second paragraph.']});
+        return JSON.stringify({paragraphs:['First paragraph.','Second paragraph.']});
     };
-    return {p,contents,files,entries,seen,failCreate:()=>{failCreate=true;},failSave:()=>{failSave=true;}};
+    return {p,contents,files,entries,seen,publisher,failCreate:()=>{failCreate=true;},failSave:()=>{failSave=true;}};
 }
 
 function withStages(p, writer, summaries) {
@@ -192,8 +196,8 @@ function withStages(p, writer, summaries) {
     return async(...args)=>{
         let context;
         try {context=JSON.parse(args[2]);} catch { /* Revisions contain plain prose. */ }
-        if (context?.instructions==='Runtime selection') return generate(...args);
-        if (context?.instructions==='Runtime summaries') return summaries ? JSON.stringify({groups:summaries(context.articles)}) : generate(...args);
+        if (args[2].startsWith('Runtime publisher') || context?.instructions==='Runtime selection') return generate(...args);
+        if (context?.instructions==='Runtime summaries') return summaries ? JSON.stringify({summary:summaries(context.article)}) : generate(...args);
         return writer(...args);
     };
 }
@@ -205,17 +209,48 @@ test('today’s note is regenerated from used articles and new articles without 
     assert.ok(contents.get(first.path).startsWith('# A new newsletter'));
     const saved = JSON.parse(contents.get(p.dataPath));
     assert.equal(saved.notes,'Keep notes');
-    assert.deepEqual(saved.articles.map(article=>article.status),['used','discard','used']);
+    assert.deepEqual(saved.articles.map(article=>article.status),['','','']);
     assert.equal(saved.articles[0].usedAt,p.newsletter.day());
     saved.nextId = 5;
     saved.articles.push({...entries[0],id:4,title:'new',url:'https://example.com/new'});
     contents.set(p.dataPath,JSON.stringify(saved));
     const second = await p.writeNewsletter();
     assert.equal(second.path,first.path);
-    assert.equal([...contents.keys()].filter(path=>path.endsWith('.md')).length,1);
+    assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,1);
     assert.deepEqual(seen[1].articles.map(article=>article.title),['used','new']);
     assert.equal(seen[1].previousNewsletters.length,0);
     assert.equal(JSON.parse(contents.get(p.dataPath)).articles[3].usedAt,p.newsletter.day());
+});
+test('a saved edition consumes every available article and the next day starts with new arrivals only',async()=>{
+    const {p,contents,entries,seen}=await newsletterFixture();
+    const generate=p.generate,selections=[];
+    p.newsletter={...p.newsletter,day:()=> '2026-11-04'};
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;
+        try {context=JSON.parse(input);} catch { /* Revisions contain plain prose. */ }
+        if (context?.instructions==='Runtime selection') selections.push(context.articles.map(article=>article.id));
+        return generate(connection,system,input,...rest);
+    };
+    const note=await p.writeNewsletter();
+    const first=JSON.parse(contents.get(p.dataPath));
+    assert.deepEqual(first.articles.map(article=>article.status),['','','']);
+    assert.ok(first.articles.every(article=>!Object.hasOwn(article,'used')));
+    assert.deepEqual(first.articles.slice(0,2).map(article=>article.usedAt),['2026-11-04','2026-11-04']);
+    assert.equal((await p.writeNewsletter()).path,note.path);
+    assert.deepEqual(selections,[[1,2],[1,2]]);
+    p.newsletter={...p.newsletter,day:()=> '2026-11-05'};
+    p.generate=async()=>{throw new Error('Consumed sources cannot start a new edition');};
+    assert.equal(await p.writeNewsletter(),null);
+    const next=JSON.parse(contents.get(p.dataPath));
+    next.nextId=5;next.articles.push({...entries[0],id:4,title:'New arrival',url:'https://example.com/new-arrival'});
+    contents.set(p.dataPath,JSON.stringify(next));
+    p.generate=generate;
+    const nextNote=await p.writeNewsletter();
+    assert.equal(nextNote.path,'Data/text-machine-2026-11-05.md');
+    assert.deepEqual(seen.at(-1).articles.map(article=>article.id),[4]);
+    const saved=JSON.parse(contents.get(p.dataPath));
+    assert.ok(!Object.hasOwn(saved.articles[3],'used'));assert.equal(saved.articles[3].usedAt,'2026-11-05');
+    assert.deepEqual(saved.articles.slice(0,3),first.articles);
 });
 
 test('selection, summaries, article, revision and illustration run separately before status changes',async()=>{
@@ -223,20 +258,209 @@ test('selection, summaries, article, revision and illustration run separately be
     const before=contents.get(p.dataPath),generate=p.generate,stages=[];
     p.generate=async(connection,system,input,...rest)=>{
         assert.equal(contents.get(p.dataPath),before);
-        if (system.startsWith('Runtime rewriter')) stages.push('revision');
+        if (input.startsWith('Runtime publisher')) stages.push('publisher');
+        else if (system.startsWith('Runtime rewriter')) stages.push('revision');
         else {
             const context=JSON.parse(input);
             stages.push(context.instructions);
-            if (context.instructions!=='Runtime selection') assert.deepEqual(context.articles.map(article=>article.id),[1]);
+            if (context.instructions==='Runtime summaries') assert.deepEqual(Object.keys(context.article),['title','content']);
+            else if (context.instructions!=='Runtime selection') assert.deepEqual(context.articles.map(article=>article.id),[1]);
             if (context.instructions==='My runtime prompt') assert.ok(!Object.hasOwn(context,'summaries'));
         }
         return generate(connection,system,input,...rest);
     };
     p.generateIllustration=async()=>{assert.equal(contents.get(p.dataPath),before);stages.push('image');return new ArrayBuffer(8);};
     const note=await p.writeNewsletter();
-    assert.deepEqual(stages,['Runtime selection','Runtime summaries','My runtime prompt','revision','image']);
+    assert.deepEqual(stages,['Runtime selection','Runtime summaries','My runtime prompt','revision','publisher','image']);
     assert.ok(contents.get(note.path).includes('Article summary.'));
-    assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.status),['used','discard','used']);
+    assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.status),['','','']);
+});
+test('each summary receives one title and text, and the plugin preserves original titles and source order',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    const data=JSON.parse(contents.get(p.dataPath));
+    data.nextId=5;
+    data.articles.push({...entries[0],id:4,title:'Another selected source',url:'https://example.com/another',content:'A separate account with different facts.'});
+    contents.set(p.dataPath,JSON.stringify(data));
+    const generate=p.generate,seen=[],progress=[];
+    let active=0;
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;
+        try {context=JSON.parse(input);} catch { /* Revisions and publication contain prose. */ }
+        if (context?.instructions!=='Runtime summaries') return generate(connection,system,input,...rest);
+        assert.equal(active,0);active++;
+        try {
+            assert.deepEqual(Object.keys(context.article),['title','content']);
+            const article=context.article;
+            seen.push(article.title);
+            assert.equal(article.content,data.articles.find(row=>row.title===article.title).content);
+            const schema=JSON.parse(system.split('\n\n').at(-1)).jsonSchema;
+            assert.deepEqual(schema.required,['summary']);
+            assert.deepEqual(Object.keys(schema.properties),['summary']);
+            await new Promise(resolve=>setImmediate(resolve));
+            return JSON.stringify({summary:'Summary for '+article.title});
+        } finally {active--;}
+    };
+    const note=await p.writeNewsletter(message=>progress.push(message));
+    assert.deepEqual(seen,['used','Another selected source']);
+    const markdown=contents.get(note.path);
+    assert.ok(markdown.includes('#### used'));
+    assert.ok(markdown.includes('#### Another selected source'));
+    assert.ok(!/^### /m.test(markdown));
+    assert.ok(markdown.indexOf('Summary for used')<markdown.indexOf('Summary for Another selected source'));
+    assert.ok(progress.some(message=>message.includes('1/2')));
+    assert.ok(progress.some(message=>message.includes('2/2')));
+});
+test('a failed, invalid or cancelled second summary cannot save a partial edition or consume articles',async()=>{
+    for (const failure of ['error','extra-field','too-long','cancel']) {
+        const {p,contents,entries}=await newsletterFixture();
+        const data=JSON.parse(contents.get(p.dataPath));data.nextId=5;
+        data.articles.push({...entries[0],id:4,title:'Second selected source',url:'https://example.com/second'});
+        const before=JSON.stringify(data);contents.set(p.dataPath,before);
+        const path='Data/text-machine-'+p.newsletter.day()+'.md';
+        await p.app.vault.create(path,'# Existing edition');
+        const generate=p.generate,seen=[];
+        p.generate=async(connection,system,input,...rest)=>{
+            const context=JSON.parse(input);
+            assert.ok(['Runtime selection','Runtime summaries'].includes(context.instructions));
+            if (context.instructions==='Runtime summaries') {
+                const article=context.article;seen.push(article.title);
+                if (article.title==='Second selected source') {
+                    if (failure==='error') throw new Error('Summary unavailable');
+                    if (failure==='cancel') p.aiController.abort();
+                    return JSON.stringify({summary:failure==='too-long' ? Array(31).fill('word').join(' ') : 'A short summary.',
+                        ...(failure==='extra-field' ? {id:1} : {})});
+                }
+            }
+            return generate(connection,system,input,...rest);
+        };
+        await assert.rejects(p.writeNewsletter(),/Summary unavailable|Invalid AI response|cancelled/);
+        assert.deepEqual(seen,['used','Second selected source']);
+        assert.equal(contents.get(path),'# Existing edition');
+        assert.equal(contents.get(p.dataPath),before);
+        assert.ok(![...contents.keys()].some(path=>path.endsWith('.png')));
+    }
+});
+test('publisher titles the revised body before image generation and cannot change the article',async()=>{
+    const {p,contents}=await newsletterFixture();
+    const generate=p.generate,before=contents.get(p.dataPath),stages=[];
+    p.generate=async(connection,system,input,...rest)=>{
+        if (system.startsWith('Runtime rewriter')) {
+            stages.push('revision');
+            return rewriteResponse(input.replace('First paragraph.','Revised first paragraph.'));
+        }
+        if (input.startsWith('Runtime publisher')) {
+            stages.push('publisher');
+            assert.equal(contents.get(p.dataPath),before);
+            assert.ok(input.includes('Revised first paragraph.\n\nSecond paragraph.'));
+            assert.ok(!input.includes('Article summary.'));
+            assert.ok(!input.includes('A new newsletter'));
+            assert.deepEqual(JSON.parse(system.split('\n\n').at(-1)).jsonSchema,require('../../models/publisher.json'));
+            return JSON.stringify({title:'Title from the finished article',chapeau:'An introduction written afterwards.'});
+        }
+        return generate(connection,system,input,...rest);
+    };
+    const note=await p.writeNewsletter(),text=contents.get(note.path);
+    assert.deepEqual(stages,['revision','publisher']);
+    assert.ok(text.startsWith('# Title from the finished article'));
+    assert.ok(text.includes('*An introduction written afterwards.*'));
+    assert.ok(text.includes('Revised first paragraph.'));
+});
+test('daily draft and revision snapshots preserve both bodies and are replaced on regeneration',async()=>{
+    const {p,contents,seen}=await newsletterFixture();
+    const before=contents.get(p.dataPath),generate=p.generate,day=p.newsletter.day();
+    const draft='Data/brouillon-'+day+'.md',revision='Data/revision-'+day+'.md';
+    let replacement='Revised first paragraph.';
+    p.generate=async(connection,system,input,...rest)=>{
+        if (system.startsWith('Runtime rewriter')) {
+            assert.equal(contents.get(draft),input+'\n');
+            assert.ok(contents.get(revision).includes('not completed'));
+            assert.equal(contents.get(p.dataPath),before);
+            return rewriteResponse(input.replace('First paragraph.',replacement));
+        }
+        return generate(connection,system,input,...rest);
+    };
+    await p.writeNewsletter();
+    assert.equal(contents.get(draft),'First paragraph.\n\nSecond paragraph.\n');
+    assert.equal(contents.get(revision),'Revised first paragraph.\n\nSecond paragraph.\n');
+    assert.ok(!contents.get(draft).includes('A new newsletter'));
+    const after=contents.get(p.dataPath);
+    p.generate=async(connection,system,input,...rest)=>system.startsWith('Runtime rewriter')
+        ? rewriteResponse(input.replace('First paragraph.','Another revised first paragraph.')) : generate(connection,system,input,...rest);
+    replacement='Another revised first paragraph.';
+    await p.writeNewsletter();
+    assert.ok(contents.get(revision).startsWith(replacement));
+    assert.equal([...contents.keys()].filter(path=>/\/(?:brouillon|revision)-/.test(path)).length,2);
+    assert.equal(contents.get(p.dataPath),after);
+    assert.deepEqual(seen[1].previousNewsletters,[]);
+});
+test('a rejected revision remains available for comparison while the newsletter keeps the original text',async()=>{
+    const {p,contents}=await newsletterFixture();
+    const generate=p.generate,day=p.newsletter.day();
+    p.generate=async(connection,system,input,...rest)=>system.startsWith('Runtime rewriter')
+        ? JSON.stringify({paragraphs:['Short.','Truncated.']}) : generate(connection,system,input,...rest);
+    const note=await p.writeNewsletter();
+    assert.equal(contents.get('Data/brouillon-'+day+'.md'),'First paragraph.\n\nSecond paragraph.\n');
+    const revision=contents.get('Data/revision-'+day+'.md');
+    assert.ok(revision.includes('original article retained'));
+    assert.ok(revision.includes('```\nShort.\n\nTruncated.\n```'));
+    assert.ok(contents.get(note.path).includes('First paragraph.'));
+});
+test('snapshot write failures stop generation without replacing an existing newsletter or article usage',async()=>{
+    const {p,contents}=await newsletterFixture();
+    const before=contents.get(p.dataPath),path='Data/text-machine-'+p.newsletter.day()+'.md';
+    await p.app.vault.create(path,'# Existing newsletter');
+    const create=p.app.vault.create;
+    p.app.vault.create=async(path,text)=>{
+        if (path.includes('/brouillon-')) throw new Error('Disk full');
+        return create(path,text);
+    };
+    await assert.rejects(p.writeNewsletter(),/comparison text.*brouillon-/);
+    assert.equal(contents.get(p.dataPath),before);
+    assert.equal(contents.get(path),'# Existing newsletter');
+});
+test('publisher errors, invalid output and cancellation preserve the saved note and article usage',async()=>{
+    for (const failure of ['empty-prompt','error','invalid','extra-body','cancel']) {
+        const {p,contents}=await newsletterFixture();
+        const before=contents.get(p.dataPath),generate=p.generate,path='Data/text-machine-'+p.newsletter.day()+'.md';
+        await p.app.vault.create(path,'# Existing edition');
+        if (failure==='empty-prompt') {
+            const read=p.app.vault.adapter.read;
+            p.app.vault.adapter.read=async path=>path.endsWith('/prompts/publisher.md') ? '' : read(path);
+        }
+        p.generate=async(connection,system,input,...rest)=>{
+            if (!input.startsWith('Runtime publisher')) return generate(connection,system,input,...rest);
+            if (failure==='error') throw new Error('Publisher unavailable');
+            if (failure==='cancel') p.aiController.abort();
+            return JSON.stringify({title:'Too late',chapeau:'An intro',...(failure==='extra-body' ? {paragraphs:['Changed body']} : failure==='invalid' ? {chapeau:''} : {})});
+        };
+        await assert.rejects(p.writeNewsletter(),/publisher.md.*empty|Publisher unavailable|Invalid AI response|cancelled/);
+        assert.equal(contents.get(path),'# Existing edition');
+        assert.equal(contents.get(p.dataPath),before);
+        assert.ok(![...contents.keys()].some(path=>path.endsWith('.png')));
+    }
+});
+
+test('saved reference sources are passed to selection and writing without overriding relevance',async()=>{
+    const {p,contents}=await newsletterFixture();
+    p.settings.referenceSources='news.example.com';
+    await p.saveData(p.settings);
+    await p.onload();
+    assert.equal(p.settings.referenceSources,'news.example.com');
+    const generate=p.generate,seen=[];
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;
+        try {context=JSON.parse(input);} catch { /* Revisions receive plain prose. */ }
+        if (context?.instructions==='Runtime selection' || context?.instructions==='My runtime prompt') {
+            const ids=context.articles.map(article=>article.id).join(', ');
+            assert.ok(system.includes(p.i18n.t('referenceSourcesContract',{ids})));
+            seen.push(context.instructions);
+        }
+        return generate(connection,system,input,...rest);
+    };
+    const note=await p.writeNewsletter();
+    assert.ok(contents.get(note.path).includes('A new newsletter'));
+    assert.deepEqual(seen,['Runtime selection','My runtime prompt']);
+    assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.status),['','','']);
 });
 
 test('invalid selection and summary responses stop before writing or generating an image',async()=>{
@@ -247,7 +471,7 @@ test('invalid selection and summary responses stop before writing or generating 
         await p.app.vault.create(path,'# Existing edition');
         p.generate=async(connection,system,input,...rest)=>{
             if (JSON.parse(input).instructions===stage) return stage==='Runtime selection'
-                ? JSON.stringify({selected:[1],discard:[]}) : JSON.stringify({groups:[]});
+                ? JSON.stringify({selected:[1],discard:[]}) : JSON.stringify({summary:''});
             return generate(connection,system,input,...rest);
         };
         p.generateIllustration=async()=>{throw new Error('An invalid stage cannot generate an image');};
@@ -260,11 +484,11 @@ test('invalid selection and summary responses stop before writing or generating 
 
 test('newsletter saving applies French punctuation to the rendered note without rewriting source content',async()=>{
     for (const language of ['français','English']) {
-        const {p,contents,entries} = await newsletterFixture();
+        const {p,contents,entries,publisher} = await newsletterFixture();
+        Object.assign(publisher,{title:"L'IA: demain...",chapeau:"L'auteur s'interroge: vraiment?"});
         p.settings.newsletterLanguage = language;
-        p.generate = withStages(p, async(_connection,_system,input)=>_system.startsWith('Runtime rewriter') ? input : JSON.stringify({title:"L'IA: demain...",chapeau:"L'auteur s'interroge: vraiment?",
-            paragraphs:["«Un livre!», dit l'auteur.","Un lien [L'IA?](https://example.com/used)."]}),
-        ()=>[{title:'Livres',articles:[{id:1,title:'Un livre',summary:"L'auteur: 25 euros."}]}]);
+        p.generate = withStages(p, async(_connection,_system,input)=>_system.startsWith('Runtime rewriter') ? rewriteResponse(input) : JSON.stringify({paragraphs:["«Un livre!», dit l'auteur.","Un lien [L'IA?](https://example.com/used)."]}),
+        ()=>"L'auteur: 25 euros.");
         const note = await p.writeNewsletter();
         const markdown = contents.get(note.path);
         assert.ok(markdown.startsWith(language==='français' ? '# L’IA\u00a0: demain…' : "# L'IA: demain..."));
@@ -287,7 +511,7 @@ test('the runtime rewriter prompt runs after writing and its revision is saved b
             revisions++;
             assert.ok(system.includes('Runtime custom revision in français'));
             assert.ok(!system.includes('{{language}}'));
-            return input.replace('Une étude quasi expérimentale compare deux groupes existants.','Une étude compare deux groupes existants.');
+            return rewriteResponse(input.replace('Une étude quasi expérimentale compare deux groupes existants.','Une étude compare deux groupes existants.'));
         }
         const result = JSON.parse(await generate(connection,system,input,...rest));
         result.paragraphs[0] = 'Une étude quasi expérimentale compare deux groupes existants. '+ 'La méthode garde des limites explicites. '.repeat(10);
@@ -300,32 +524,54 @@ test('the runtime rewriter prompt runs after writing and its revision is saved b
 });
 
 test('only article paragraphs are revised; titles, chapeau, summaries and captions stay outside the request',async()=>{
-    const {p,contents}=await newsletterFixture();
+    const {p,contents,publisher}=await newsletterFixture();
     p.settings.newsletterLanguage='English';
+    Object.assign(publisher,{title:'TITLE MUST STAY',chapeau:'CHAPEAU MUST STAY'});
     const paragraphs=['The original article prose.','The second paragraph [Source](https://example.com/used).'];
     let revisions=0;
     p.generate=withStages(p, async(_connection,system,input)=>{
         if (system.startsWith('Runtime rewriter')) {
             revisions++;
             assert.equal(input,paragraphs.join('\n\n'));
+            assert.deepEqual(JSON.parse(system.split('\n\n').at(-1)).jsonSchema,require('../../models/rewriter.json'));
             for (const absent of ['TITLE MUST STAY','CHAPEAU MUST STAY','SUMMARY MUST STAY','GROUP MUST STAY','![','illustrations/']) assert.ok(!input.includes(absent));
-            return input.replace('original article prose','revised article prose');
+            return rewriteResponse(input.replace('original article prose','revised article prose'));
         }
-        return JSON.stringify({title:'TITLE MUST STAY',chapeau:'CHAPEAU MUST STAY',paragraphs});
-    },()=>[{title:'GROUP MUST STAY',articles:[{id:1,title:'Source',summary:'SUMMARY MUST STAY'}]}]);
+        return JSON.stringify({paragraphs});
+    },()=>'SUMMARY MUST STAY');
     const note=await p.writeNewsletter();
     const markdown=contents.get(note.path);
     assert.equal(revisions,1);
     assert.ok(markdown.startsWith('# TITLE MUST STAY'));
     assert.ok(markdown.includes('*CHAPEAU MUST STAY*'));
-    assert.ok(markdown.includes('### GROUP MUST STAY'));
     assert.ok(markdown.includes('SUMMARY MUST STAY'));
     assert.ok(markdown.includes('The revised article prose.'));
     assert.ok(markdown.includes('](illustrations/'));
 });
 
+test('Codex receives the revision schema with plain article paragraphs and no image input',async()=>{
+    const {p,contents}=await newsletterFixture();
+    p.settings.newsletterLanguage='English';
+    p.getAIConnection=()=>({provider:'codex',model:'fixture',apiKey:''});
+    let revisions=0;
+    p.codex={...p.codex,findCodex:async()=>'/test/codex',generate:async(_path,system,input,_model,signal,progress,schema,image)=>{
+        if (system.startsWith('Runtime rewriter')) {
+            revisions++;
+            assert.deepEqual(JSON.parse(JSON.stringify(schema)),require('../../models/rewriter.json'));
+            assert.equal(input,'First paragraph.\n\nSecond paragraph.');
+            assert.equal(image,undefined);
+            return rewriteResponse(input.replace('First paragraph.','Revised paragraph.'));
+        }
+        return p.generate({},system,input,p.requestAI,signal,progress);
+    }};
+    const note=await p.writeNewsletter();
+    assert.equal(revisions,1);
+    assert.ok(contents.get(note.path).includes('Revised paragraph.'));
+    assert.ok(contents.get(note.path).includes('](illustrations/'));
+});
+
 test('failed body revisions save the original article while cancellation still prevents saving',async()=>{
-    for (const failure of ['error','truncated','link','empty','cancel']) {
+    for (const failure of ['error','truncated','link','empty','malformed','image','cancel']) {
         const {p,contents} = await newsletterFixture();
         const before = contents.get(p.dataPath), generate = p.generate;
         p.generate = withStages(p, async(connection,system,input,...rest)=>{
@@ -337,12 +583,15 @@ test('failed body revisions save the original article while cancellation still p
             if (failure==='error') throw new Error('Rewriter unavailable');
             if (failure==='cancel') {p.aiController.abort();return input;}
             if (failure==='empty') return '';
-            return failure==='truncated' ? input.slice(0,20) : input.replace('https://example.com/used','https://other.com/used');
+            if (failure==='malformed') return '{broken';
+            if (failure==='image') return rewriteResponse(input+'\n\n![Image](https://example.com/image.jpg)');
+            return failure==='truncated' ? JSON.stringify({paragraphs:[input.slice(0,20),'Too short.']})
+                : rewriteResponse(input.replace('https://example.com/used','https://other.com/used'));
         });
         if (failure==='cancel') {
             await assert.rejects(p.writeNewsletter(),/cancelled/);
             assert.equal(contents.get(p.dataPath),before);
-            assert.equal([...contents.keys()].filter(path=>path.endsWith('.md')).length,0);
+            assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,0);
         } else {
             const progress=[];
             const note=await p.writeNewsletter((message,stream,reset)=>progress.push({message,stream,reset}));
@@ -350,7 +599,7 @@ test('failed body revisions save the original article while cancellation still p
             assert.ok(markdown.includes('First paragraph. [Source](https://example.com/used)'));
             assert.ok(!markdown.includes('https://other.com/used'));
             assert.ok(markdown.includes('](illustrations/'));
-            assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.status),['used','discard','used']);
+            assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.status),['','','']);
             assert.ok(progress.some(entry=>entry.message.includes('original article retained')));
             assert.ok(progress.some(entry=>entry.stream && entry.reset && entry.message.includes('First paragraph.')));
         }
@@ -372,6 +621,34 @@ test('omitting optional context variables avoids reading old notes and fetching 
     assert.equal(seen[0].language,'español');
     assert.ok(!Object.hasOwn(seen[0],'previousNewsletters'));
     assert.ok(!Object.hasOwn(seen[0],'recentPosts'));
+});
+test('selection receives history even when only its prompt requests it, excluding today’s edition',async()=>{
+    const {p,contents,seen}=await newsletterFixture();
+    const oldPath='Data/text-machine-2000-01-01.md';
+    await p.app.vault.create(oldPath,'# Earlier coverage of the Orélien affair');
+    const today='Data/text-machine-'+p.newsletter.day()+'.md';
+    await p.app.vault.create(today,'# Current edition must stay outside history');
+    const read=p.app.vault.adapter.read;
+    p.app.vault.adapter.read=async path=>path.endsWith('/prompts/sélection.md')
+        ? '{"instructions":"Runtime selection","previousNewsletters":{{previousNewsletters}},"articles":{{articles}}}'
+        : path.endsWith('/prompts/writer.md') ? '{"instructions":"My runtime prompt","articles":{{articles}}}' : read(path);
+    const generate=p.generate;
+    let selections=0;
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;
+        try {context=JSON.parse(input);} catch { /* Revisions contain plain prose. */ }
+        if (context?.instructions==='Runtime selection') {
+            selections++;
+            assert.deepEqual(context.previousNewsletters,[{name:'text-machine-2000-01-01.md',content:contents.get(oldPath)}]);
+            return JSON.stringify({selected:[2],discard:[1]});
+        }
+        return generate(connection,system,input,...rest);
+    };
+    assert.equal((await p.writeNewsletter()).path,today);
+    assert.equal(selections,1);
+    assert.deepEqual(seen[0].articles.map(article=>article.id),[2]);
+    assert.ok(!Object.hasOwn(seen[0],'previousNewsletters'));
+    assert.equal(contents.get(oldPath),'# Earlier coverage of the Orélien affair');
 });
 
 test('the configured Substack is fetched by the plugin and its posts are inserted in the prompt',async()=>{
@@ -502,7 +779,7 @@ test('invalid or unavailable additional feeds do not call AI or change notes and
         await assert.rejects(p.writeNewsletter(),unavailable ? /Unable to read/ : /valid HTTP or HTTPS/);
         assert.equal(requests,unavailable ? 1 : 0);
         assert.equal(contents.get(p.dataPath),before);
-        assert.equal([...contents.keys()].filter(path=>path.endsWith('.md')).length,0);
+        assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,0);
     }
 });
 
@@ -513,9 +790,9 @@ test('generation errors and note save failures leave article statuses unchanged'
         if (failure==='api') p.generate = withStages(p, async()=>{throw new Error('Provider refused');});
         if (failure==='invalid') p.generate = withStages(p, async()=>'{broken');
         if (failure==='create') failCreate();
-        await assert.rejects(p.writeNewsletter(),failure==='api' ? /Provider refused/ : failure==='create' ? /Disk full/ : /Invalid AI response/);
+        await assert.rejects(p.writeNewsletter(),failure==='api' ? /Provider refused/ : failure==='create' ? /comparison text/ : /Invalid AI response/);
         assert.equal(contents.get(p.dataPath),before);
-        assert.equal([...contents.keys()].filter(path=>path.endsWith('.md')).length,0);
+        assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,0);
     }
 });
 
@@ -524,7 +801,7 @@ test('saved newsletter survives a JSON status write failure with a precise messa
     const before = contents.get(p.dataPath);failSave();
     await assert.rejects(p.writeNewsletter(),/was saved, but updating statuses failed/);
     assert.equal(contents.get(p.dataPath),before);
-    assert.equal([...contents.keys()].filter(path=>path.endsWith('.md')).length,1);
+    assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,1);
 });
 
 test('no pending articles do not call an AI or create a note',async()=>{
@@ -544,15 +821,16 @@ test('closing the run during generation prevents a late note and status changes'
     });
     await assert.rejects(p.writeNewsletter(),/cancelled/);
     assert.equal(contents.get(p.dataPath),before);
-    assert.equal([...contents.keys()].filter(path=>path.endsWith('.md')).length,0);
+    assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,0);
 });
 
 test('irrelevant articles are discarded without creating a note',async()=>{
     const {p,contents} = await newsletterFixture();
     p.generate = async()=>JSON.stringify({selected:[],discard:[1,2]});
     assert.equal(await p.writeNewsletter(),null);
-    assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.status),['discard','discard','used']);
-    assert.equal([...contents.keys()].filter(path=>path.endsWith('.md')).length,0);
+    assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.status),['discard','discard','']);
+    assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.usedAt),['','','2000-01-01']);
+    assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,0);
 });
 
 test('crawl skips existing content even without a publication date and fetches only empty articles',async()=>{
@@ -631,7 +909,7 @@ test('failed regeneration preserves today’s saved note and its used statuses',
     const note = await p.writeNewsletter();
     const beforeNote = contents.get(note.path), beforeData = contents.get(p.dataPath);
     failCreate();
-    await assert.rejects(p.writeNewsletter(),/Disk full/);
+    await assert.rejects(p.writeNewsletter(),/comparison text/);
     assert.equal(contents.get(note.path),beforeNote);
     assert.equal(contents.get(p.dataPath),beforeData);
 });
@@ -648,7 +926,8 @@ test('an empty regeneration keeps the saved edition and used articles while disc
     assert.equal(await p.writeNewsletter(),null);
     assert.equal(contents.get(note.path),before);
     const saved = JSON.parse(contents.get(p.dataPath));
-    assert.equal(saved.articles[0].status,'used');
+    assert.equal(saved.articles[0].status,'');
+    assert.ok(!Object.hasOwn(saved.articles[0],'used'));
     assert.equal(saved.articles[0].usedAt,p.newsletter.day());
     assert.equal(saved.articles[3].status,'discard');
 });
@@ -662,7 +941,7 @@ test('AI cannot return article status changes or unknown IDs to alter the saved 
             groups:[{title:'Books',articles:[{id:1,summary:'Summary'}]}],discard:[2],...malicious}));
         await assert.rejects(p.writeNewsletter(),/Invalid AI response/);
         assert.equal(contents.get(p.dataPath),before);
-        assert.equal([...contents.keys()].filter(path=>path.endsWith('.md')).length,0);
+        assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,0);
     }
 });
 
@@ -771,7 +1050,8 @@ test('Codex receives a separate constrained schema for brief titles without call
 });
 
 test('the illustration is generated from the revised article without loading source photographs',async()=>{
-    const {p,contents}=await newsletterFixture();
+    const {p,contents,publisher}=await newsletterFixture();
+    Object.assign(publisher,{title:'A synthesis',chapeau:'Several ideas.'});
     p.settings.newsletterLanguage='English';
     const data=JSON.parse(contents.get(p.dataPath));
     data.articles[0].image='https://example.com/source.jpg';
@@ -779,8 +1059,8 @@ test('the illustration is generated from the revised article without loading sou
     contents.set(p.dataPath,JSON.stringify(data));
     p.loadPage=async()=>{throw new Error('Source photographs must not be loaded');};
     p.generate=withStages(p,async(_connection,system,input)=>system.startsWith('Runtime rewriter')
-        ? input.replace('Original first paragraph.','Revised first paragraph.')
-        : JSON.stringify({title:'A synthesis',chapeau:'Several ideas.',paragraphs:['Original first paragraph.','A second paragraph.']}));
+        ? rewriteResponse(input.replace('Original first paragraph.','Revised first paragraph.'))
+        : JSON.stringify({paragraphs:['Original first paragraph.','A second paragraph.']}));
     let images=0;
     p.generateIllustration=async(_key,prompt,_request,signal)=>{
         images++;
@@ -819,7 +1099,7 @@ test('an illustration failure prevents saving a newsletter without an image',asy
     p.createIllustration=async()=>{throw new Error('Illustration unavailable');};
     await assert.rejects(p.writeNewsletter(),/Illustration unavailable/);
     assert.equal(contents.get(p.dataPath),before);
-    assert.equal([...contents.keys()].filter(path=>path.endsWith('.md')).length,0);
+    assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,0);
 });
 
 test('the existing daily illustration is reused without image generation, decoding or an image API key',async()=>{
@@ -844,7 +1124,7 @@ test('cancelling image generation prevents any late note or status write',async(
     p.generateIllustration=async()=>{p.aiController.abort();return new ArrayBuffer(8);};
     await assert.rejects(p.writeNewsletter(),/cancelled/);
     assert.equal(contents.get(p.dataPath),before);
-    assert.equal([...contents.keys()].filter(path=>path.endsWith('.md') || path.endsWith('.png')).length,0);
+    assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path) || path.endsWith('.png')).length,0);
 });
 
 test('settings definitions are searchable without IO and redraw uses the declarative API when available',async()=>{
@@ -854,7 +1134,7 @@ test('settings definitions are searchable without IO and redraw uses the declara
     const tab=p.settingsTab;
     const definitions=tab.getSettingDefinitions();
     const rows=definitions.flatMap(item=>item.items || [item]);
-    for (const key of ['newsletterLanguage','includeFeeds','authorFeeds','aiDefaultModel','aiAnthropicKey','aiOpenaiKey']) {
+    for (const key of ['newsletterLanguage','newsletterSourcesHeading','referenceSources','includeFeeds','authorFeeds','aiDefaultModel','aiAnthropicKey','aiOpenaiKey']) {
         assert.ok(rows.some(row=>row.name===p.i18n.t(key) && row.searchable!==false),key);
     }
     let updates=0;

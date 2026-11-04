@@ -15,11 +15,12 @@ with (plugin / 'main.js').open('a') as fixture:
 (plugin / 'oauth-client.json').write_text(json.dumps({'installed': {'client_id': '123-test.apps.googleusercontent.com', 'client_secret': 'test-only'}}))
 (plugin / 'prompts').mkdir()
 (plugin / 'prompts/writer.md').write_text('{"instructions":"Runtime writer","language":"{{language}}","articles":{{articles}},"previousNewsletters":{{previousNewsletters}},"recentPosts":{{AuthorFeed}}}')
+(plugin / 'prompts/publisher.md').write_text('Runtime publisher in {{language}}.\n{{article}}')
 (plugin / 'prompts/rewriter.md').write_text('Runtime revision in {{language}}. Simplify jargon and preserve links, images and credits.')
 (plugin / 'prompts/bref.md').write_text('Runtime brief in {{language}}.')
-(plugin / 'prompts/image.md').write_text('Runtime image generation in {{language}}. Black and white BD mind map, landscape 4/3.')
+(plugin / 'prompts/image.md').write_text('Runtime image generation in {{language}}. Black and white humorous cartoon without text, landscape 4/3.')
 (plugin / 'prompts/sélection.md').write_text('{"instructions":"Runtime selection","language":"{{language}}","articles":{{articles}}}')
-(plugin / 'prompts/resume.md').write_text('{"instructions":"Runtime summaries","language":"{{language}}","articles":{{articles}}}')
+(plugin / 'prompts/resume.md').write_text('{"instructions":"Runtime summaries","language":"{{language}}","article":{{article}}}')
 (plugin / 'models').mkdir()
 (plugin / 'models/newsletter.md').write_text((root / 'models/newsletter.md').read_text().replace('## Revue de presse','## Revue de presse (modèle local)'))
 (profile / 'obsidian.json').write_text(json.dumps({'vaults': {'0123456789abcdef': {'path': str(vault), 'ts': int(time.time()*1000), 'open': True}}}))
@@ -57,6 +58,7 @@ try:
             p.loaded = true;
             p.settings.labelId = 'Label_1';
             p.settings.newsletterLanguage = 'español';
+            p.settings.referenceSources = 'news.example.com';
             p.settings.authorFeeds = 'https://tcrouzet.substack.com';
             p.client.unreadMessages = async function* () {};
             await p.ensureData('TextMachine');
@@ -91,6 +93,14 @@ try:
                 if(window.imageCalls>1)throw new Error('The illustration must be generated only once per date');
                 return {status:200,json:{data:[{b64_json:window.fixtureImage}]}};
             };
+            window.rewriteResponse=text=>JSON.stringify({paragraphs:text.trim().split(/\r?\n[ \t]*\r?\n+/)});
+            window.publication={title:'Books and AI',chapeau:'Introduction.'};
+            window.answerPublisher=input=>{
+                if(!input.startsWith('Runtime publisher'))return null;
+                if(input.includes('Selected article.') || input.includes('illustrations/') || input.includes('Previous blog idea'))throw new Error('Publisher must receive the article body only');
+                window.pipelineStages.push('publisher');
+                return JSON.stringify(window.publication);
+            };
             window.answerStages=input=>{
                 let context;try{context=JSON.parse(input);}catch{return null;}
                 if(context?.instructions==='Runtime selection'){
@@ -99,8 +109,9 @@ try:
                     return JSON.stringify({selected:context.articles.filter(article=>article.title!=='irrelevant').map(article=>article.id),discard:context.articles.filter(article=>article.title==='irrelevant').map(article=>article.id)});
                 }
                 if(context?.instructions==='Runtime summaries'){
+                    if(Object.keys(context.article).join(',')!=='title,content')throw new Error('Summary must receive only one title and text');
                     window.pipelineStages.push('resume');
-                    return JSON.stringify({groups:[{title:context.language==='français'?'Livres':'Books',articles:context.articles.map(article=>({id:article.id,title:article.title,summary:context.language==='français'?'Prix: 25 euros.':'Selected article.'}))}]});
+                    return JSON.stringify({summary:context.language==='français'?'Prix: 25 euros.':'Selected article.'});
                 }
                 return null;
             };
@@ -113,15 +124,21 @@ try:
                 return JSON.stringify({titles:[{id:4,title:system.includes('français') ? 'Nouvelle étude sur l’écriture avec l’IA' : 'Nueva investigación sobre escritura con IA'}]});
             };
             p.generate = async (_connection,system,input,_request,_signal,progress,imageUrl)=>{
+                let context;try {context=JSON.parse(input);} catch { /* Revisions receive plain prose. */ }
+                if (['Runtime selection','Runtime writer'].includes(context?.instructions)
+                    && !system.includes(p.i18n.t('referenceSourcesContract',{ids:context.articles.map(article=>article.id).join(', ')}))) throw new Error('Reference sources missing from selection or writing');
+                const publication=window.answerPublisher(input);if(publication)return publication;
                 const staged=window.answerStages(input);if(staged)return staged;
                 const brief=window.translateBrief(system,input);
                 if (brief) return brief;
                 if(imageUrl)throw new Error('Source image verification must not run');
                 if (system.startsWith('Runtime revision')) {
-                    if (input.includes('# Books and AI') || input.includes('Revue de presse') || input.includes('Selected article.') || input.includes('Photograph:')) throw new Error('Non-article content sent to revision');
-                    window.rewriterUsed=true;window.pipelineStages.push('revision');return input;
+                    if (input.includes('# Books and AI') || input.includes('Revue de presse') || input.includes('Selected article.') || input.includes('Photograph:') || input.includes('![') || input.includes('illustrations/')) throw new Error('Non-article content sent to revision');
+                    const schema=JSON.parse(system.split('\n\n').at(-1)).jsonSchema;
+                    if (Object.keys(schema.properties).join()!=='paragraphs' || schema.additionalProperties!==false) throw new Error('Missing revision schema');
+                    window.rewriterUsed=true;window.pipelineStages.push('revision');return window.rewriteResponse(input);
                 }
-                const context = JSON.parse(input);
+                context = JSON.parse(input);
                 if (context.instructions!=='Runtime writer') throw new Error('Runtime prompt not loaded');
                 if (context.language!=='español' || input.includes('{{language}}')) throw new Error('Prompt variables not expanded');
                 if (system.includes('newsletter.md') || system.includes('modèle local') || input.includes('{{#groups}}')) throw new Error('Markdown template sent to AI');
@@ -132,7 +149,7 @@ try:
                 if (context.recentPosts[0].content!=='Previous blog idea') throw new Error('Feed text not inert');
                 if (context.recentPosts[0].url!=='https://tcrouzet.substack.com/p/latest') throw new Error('Feed URL missing');
                 window.generated = true;window.pipelineStages.push('writer');
-                const result = JSON.stringify({title:'Books and AI',chapeau:'Introduction.',paragraphs:['First paragraph.','Second paragraph. [Source](https://example.com/relevant)','A new angle.']});
+                const result = JSON.stringify({paragraphs:['First paragraph.','Second paragraph. [Source](https://example.com/relevant)','A new angle.']});
                 window.fixtureProgress = progress;
                 for (let index=0;index<40;index++) progress('Étape '+index);
                 progress('<img src="https://tracker.invalid/progress">');
@@ -147,7 +164,7 @@ try:
             menu.showAtPosition({x:120,y:120});
         }""")
         page.locator('.menu-item').filter(has_text='Text Machine').click()
-        page.locator('.text-machine-live-output').filter(has_text='# Books and AI').wait_for()
+        page.locator('.text-machine-live-output').filter(has_text='First paragraph.').wait_for()
         spinner = page.locator('.text-machine-spinner')
         assert spinner.is_visible()
         assert spinner.evaluate("el => getComputedStyle(el).animationName") == 'text-machine-spin'
@@ -157,9 +174,9 @@ try:
         activity = page.get_by_role('log', name='Journal du traitement')
         assert activity.locator('img').count() == 0
         assert activity.evaluate('el => el.scrollTop > 0 && el.scrollHeight-el.scrollTop-el.clientHeight <= 1')
-        assert json.loads((vault / 'TextMachine/textmachine.json').read_text())['articles'][0]['status'] == 'used'
-        assert not json.loads((vault / 'TextMachine/textmachine.json').read_text())['articles'][0].get('usedAt')
-        assert len(list((vault / 'TextMachine').glob('*.md'))) == 2
+        assert json.loads((vault / 'TextMachine/textmachine.json').read_text())['articles'][0]['status'] == ''
+        assert json.loads((vault / 'TextMachine/textmachine.json').read_text())['articles'][0]['usedAt'] == 'unknown'
+        assert len(list((vault / 'TextMachine').glob('text-machine-*.md'))) == 2
         activity.evaluate('el => {el.scrollTop=0;}')
         page.evaluate("window.fixtureProgress('Nouvelle étape')")
         assert activity.evaluate('el => el.scrollTop') == 0
@@ -173,6 +190,11 @@ try:
         generated = first
         assert (vault / 'TextMachine/text-machine-2000-01-01.md').read_text() == '# Previous angle'
         markdown = (vault / generated).read_text()
+        draft_path = vault / 'TextMachine' / pathlib.Path(generated).name.replace('text-machine-', 'brouillon-')
+        revision_path = vault / 'TextMachine' / pathlib.Path(generated).name.replace('text-machine-', 'revision-')
+        assert draft_path.read_text().startswith('First paragraph.')
+        assert draft_path.read_text() == revision_path.read_text()
+        assert '# Books and AI' not in draft_path.read_text()
         assert markdown.startswith('# Books and AI')
         assert '## Revue de presse (modèle local)' in markdown
         assert '* [Nueva investigación sobre escritura con IA](https://example.com/blocked)' in markdown
@@ -182,7 +204,7 @@ try:
         assert 'AI and books blocked' not in markdown
         assert page.evaluate('window.imageCalls === 1 && window.unexpectedSourceLoads === 0')
         assert page.evaluate('window.rewriterUsed === true')
-        assert page.evaluate('JSON.stringify(window.pipelineStages)') == json.dumps(['selection','resume','writer','bref','revision','image'],separators=(',',':'))
+        assert page.evaluate('JSON.stringify(window.pipelineStages)') == json.dumps(['selection','resume','writer','bref','revision','publisher','image'],separators=(',',':'))
         image_path = (vault / generated).with_suffix('.png')
         image_path = image_path.parent / 'illustrations' / image_path.name
         assert image_path.exists()
@@ -193,7 +215,8 @@ try:
         assert data['annotation'] == 'Keep this'
         assert [article['id'] for article in data['articles']] == [1,2,3,4]
         assert data['nextId'] == 5
-        assert [article['status'] for article in data['articles']] == ['used','discard','used','forbidden']
+        assert [article['status'] for article in data['articles']] == ['','','','forbidden']
+        assert all('used' not in article and article['usedAt'] for article in data['articles'])
         assert data['articles'][3]['title'] == 'New AI writing study'
         assert data['articles'][0]['usedAt'] == page.evaluate("app.plugins.plugins['text-machine'].newsletter.day()")
         assert page.evaluate('app.workspace.getActiveFile().path') == generated
@@ -208,7 +231,9 @@ try:
                 if (article.url!=='https://example.com/new') throw new Error('Existing article crawled again');
                 return {...article,content:'New article about AI and books.',publish:'2026-11-03'};
             }};
+            window.publication={title:'Regenerated edition',chapeau:'Updated introduction.'};
             p.generate = async (_connection,_system,input,_request,_signal,_progress,imageUrl)=>{
+                const publication=window.answerPublisher(input);if(publication)return publication;
                 const staged=window.answerStages(input);if(staged)return staged;
                 const brief=window.translateBrief(_system,input);
                 if (brief) return brief;
@@ -219,7 +244,7 @@ try:
                 if (JSON.stringify(urls)!==JSON.stringify(['https://example.com/new','https://example.com/relevant'])) throw new Error('Today’s selection missing');
                 if (context.previousNewsletters.length!==1 || context.previousNewsletters[0].content!=='# Previous angle') throw new Error('Today was included in history');
                 window.regenerated = true;
-                return JSON.stringify({title:'Regenerated edition',chapeau:'Updated introduction.',paragraphs:['New first paragraph. [Source](https://example.com/relevant)','New second paragraph. [Source](https://example.com/new)']});
+                return JSON.stringify({paragraphs:['New first paragraph. [Source](https://example.com/relevant)','New second paragraph. [Source](https://example.com/new)']});
             };
             const menu = new window.TestMenu();
             menu.setUseNativeMenu(false);
@@ -230,30 +255,35 @@ try:
         page.get_by_role('status').filter(has_text='Newsletter enregistrée').wait_for()
         assert page.evaluate('window.regenerated && window.newMessageRead')
         assert (vault / generated).read_text().startswith('# Regenerated edition')
-        assert len(list((vault / 'TextMachine').glob('*.md'))) == 2
+        assert len(list((vault / 'TextMachine').glob('text-machine-*.md'))) == 2
         assert (vault / 'TextMachine/text-machine-2000-01-01.md').read_text() == '# Previous angle'
         saved = json.loads((vault / 'TextMachine/textmachine.json').read_text())
-        assert saved['articles'][-1]['status'] == 'used'
+        assert saved['articles'][-1]['status'] == ''
+        assert 'used' not in saved['articles'][-1]
         assert saved['articles'][-1]['usedAt'] == saved['articles'][0]['usedAt']
         print('Same-day regeneration verified through the folder command: legacy recovery, local Markdown template, new Gmail article, usedAt timestamps, one updated note and previous-day notes unchanged.', flush=True)
         page.evaluate("""async () => {
             const p = app.plugins.plugins['text-machine'];
             p.settings.newsletterLanguage = 'français';
+            window.publication={title:"L'IA: demain...",chapeau:"L'auteur s'interroge: vraiment?"};
             p.generate = async (_connection,_system,input) => {
+                const publication=window.answerPublisher(input);if(publication)return publication;
                 const staged=window.answerStages(input);if(staged)return staged;
                 const brief=window.translateBrief(_system,input);
                 if (brief) return brief;
                 if (_system.startsWith('Runtime revision')) {
                     if (!_system.includes('Runtime revision in français') || _system.includes('{{language}}')) throw new Error('Runtime rewriter prompt missing');
-                    return input.replace('Une étude quasi expérimentale compare deux groupes existants.','Une étude compare deux groupes existants. Les participants ne sont pas répartis au hasard.');
+                    return window.rewriteResponse(input.replace('Une étude quasi expérimentale compare deux groupes existants.','Une étude compare deux groupes existants. Les participants ne sont pas répartis au hasard.'));
                 }
                 const articles = JSON.parse(input).articles;
-                return JSON.stringify({title:"L'IA: demain...",chapeau:"L'auteur s'interroge: vraiment?",
-                    paragraphs:["«Un livre!», dit l'auteur. Une étude quasi expérimentale compare deux groupes existants.",'Source [article](https://example.com/relevant).']});
+                return JSON.stringify({paragraphs:["«Un livre!», dit l'auteur. Une étude quasi expérimentale compare deux groupes existants.",'Source [article](https://example.com/relevant).']});
             };
             await p.writeNewsletter();
         }""")
         french_note = (vault / generated).read_text()
+        assert 'Une étude quasi expérimentale' in draft_path.read_text()
+        assert 'Une étude compare deux groupes existants.' in revision_path.read_text()
+        assert 'Une étude quasi expérimentale' not in revision_path.read_text()
         assert french_note.startswith('# L’IA\u00a0: demain…')
         assert '*L’auteur s’interroge\u00a0: vraiment\u00a0?*' in french_note
         assert '«\u00a0Un livre\u00a0!\u00a0», dit l’auteur.' in french_note
@@ -272,7 +302,8 @@ try:
                 p.generate = async (connection,system,input,...rest) => {
                     if (!system.startsWith('Runtime revision')) return generate(connection,system,input,...rest);
                     if (failure === 'error') throw new Error('Rewriter unavailable');
-                    return failure === 'truncated' ? input.slice(0,20) : input.replace('https://example.com/relevant','https://other.com/relevant');
+                    return failure === 'truncated' ? JSON.stringify({paragraphs:[input.slice(0,20),'Too short.']})
+                        : window.rewriteResponse(input.replace('https://example.com/relevant','https://other.com/relevant'));
                 };
                 try {
                     await p.writeNewsletter((message,stream,reset) => log.push({message,stream,reset}));
@@ -311,6 +342,7 @@ try:
         assert dimensions['width'] == 1600 and dimensions['height'] == 1200
         red,green,blue,alpha=dimensions['pixel']
         assert red == green == blue and 0 < red < 255 and alpha == 255
+        print('Writer body, revision and publisher title/intro verified as separate calls with body-only streaming before the title exists.',flush=True)
         print('Daily illustration verified: final-article input, 4/3 PNG, monochrome pixels, note-based filename and reuse across regenerations without any extra image API call.',flush=True)
         print('French punctuation verified on the saved Obsidian note: title, chapeau, body, summaries and protected source links.', flush=True)
         page.evaluate("""async () => {
@@ -348,7 +380,7 @@ try:
         page.evaluate("() => { const p = app.plugins.plugins['text-machine']; p.settings.outputFolder = 'Other'; p.updateFolderIcon(); }")
         assert other_label.evaluate("el => getComputedStyle(el,'::after').maskImage.includes('data:image/svg+xml,')")
         print('Explorer folder icon verified after the folder name, in light and dark themes, and moved/removed when configuration changes.', flush=True)
-        print('Newsletter command verified: runtime prompt, eligible articles, previous notes, inert RSS context, same-day note replacement, opened note, preserved annotations and used/discard statuses.', flush=True)
+        print('Newsletter command verified: runtime prompt, eligible articles, previous notes, inert RSS context, same-day note replacement, opened note, preserved annotations, usage dates and unchanged access statuses.', flush=True)
         page.evaluate('async () => { await app.plugins.disablePlugin("text-machine"); }')
         assert other_label.evaluate("el => getComputedStyle(el,'::after').content") == 'none'
         browser.close()

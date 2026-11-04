@@ -4,28 +4,16 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "title",
-    "chapeau",
     "paragraphs"
   ],
   "properties": {
-    "title": {
-      "type": "string",
-      "description": "Titre de la newsletter, sans date ni mention de TextMachine.",
-      "minLength": 1
-    },
-    "chapeau": {
-      "type": "string",
-      "description": "Introduction de moins de 25 mots.",
-      "minLength": 1
-    },
     "paragraphs": {
       "type": "array",
       "items": {
         "type": "string",
         "minLength": 1
       },
-      "description": "Paragraphes de l’article de synthèse, avec liens et citations en Markdown. Au moins deux paragraphes si des articles sont retenus.",
+      "description": "Paragraphes du corps de l’article en Markdown, avec liens et citations, sans titre, chapeau, image ni revue de presse.",
       "minItems": 2
     }
   }

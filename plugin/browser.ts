@@ -3,6 +3,9 @@ import {isPdf} from './articles';
 import {lookup} from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { randomUUID } from 'node:crypto';
+import * as http from 'node:http';
+import * as https from 'node:https';
+import {extractPage} from './crawler';
 
 export interface Page {status: number; url: string; html: string; contentType?: string}
 export type PageLoader = (url: string, signal: AbortSignal | undefined, isBlocked: (url: string)=>boolean)=>Promise<Page>;
@@ -42,16 +45,90 @@ function publicAddress(address: string) {
     return isIP(address) === 6 && /^[23]/i.test(address) && !/^2002:|^2001:(?:0*:|db8:)/i.test(address);
 }
 
-async function publicUrl(value: string) {
+async function publicTarget(value: string) {
     let url;
-    try { url = new URL(value); } catch { return false; }
+    try { url = new URL(value); } catch { return null; }
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
-        || (url.port && !['80','443'].includes(url.port))) return false;
+        || (url.port && !['80','443'].includes(url.port))) return null;
     const host = url.hostname.replace(/^\[|\]$/g, '');
     try {
         const addresses = isIP(host) ? [{address:host}] : await lookup(host, {all:true});
-        return addresses.length > 0 && addresses.every(({address}) => publicAddress(address));
-    } catch { return false; }
+        return addresses.length && addresses.every(({address}) => publicAddress(address)) ? {url,address:addresses[0].address} : null;
+    } catch { return null; }
+}
+
+async function publicUrl(value: string) { return !!await publicTarget(value); }
+
+type Transport = (url: URL, options: https.RequestOptions, callback: (response: http.IncomingMessage)=>void)=>http.ClientRequest;
+
+async function fetchPage(url: string, signal?: AbortSignal, isBlocked: (url: string)=>boolean = ()=>false,
+    transport: Transport = (url,options,callback)=>(url.protocol==='https:' ? https : http).request(url,options,callback)): Promise<Page> {
+    const failed = (): Page=>({status:404,url,html:''});
+    const visited=new Set<string>(), deadline=Date.now()+10000;
+    let current=url;
+    try {
+        for (let redirects=0;redirects<=5;redirects++) {
+            if (signal?.aborted) throw new Error(t('pluginDisabled'));
+            if (isPdf(current)) return {status:415,url:current,html:'',contentType:'application/pdf'};
+            if (visited.has(current) || isBlocked(current) || Date.now()>=deadline) return failed();
+            visited.add(current);
+            const target=await publicTarget(current);
+            if (!target || signal?.aborted) {if (signal?.aborted) throw new Error(t('pluginDisabled'));return failed();}
+            const response=await new Promise<Page & {location?: string}>((resolve,reject)=>{
+                const request=transport(target.url,{
+                    hostname:target.address,
+                    ...(target.url.protocol==='https:' && !isIP(target.url.hostname.replace(/^\[|\]$/g,'')) ? {servername:target.url.hostname} : {}),
+                    method:'GET',signal,agent:false,
+                    headers:{Host:target.url.host,
+                        'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                        Accept:'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Accept-Language':'fr-FR,fr;q=0.9,en;q=0.8','Accept-Encoding':'identity'},
+                },response=>{
+                    const status=response.statusCode || 0;
+                    const contentType=response.headers['content-type'] || '';
+                    if (isPdf(current,contentType,response.headers['content-disposition'] || '')) {
+                        response.destroy();resolve({status:415,url:current,html:'',contentType:'application/pdf'});return;
+                    }
+                    if ([301,302,303,307,308].includes(status) && response.headers.location) {
+                        response.destroy();resolve({status,url:current,html:'',location:response.headers.location});return;
+                    }
+                    if (status<200 || status>=300 || (contentType && !/^(?:text\/html|application\/xhtml\+xml)\b/i.test(contentType))) {
+                        response.destroy();resolve({status,url:current,html:'',contentType});return;
+                    }
+                    const chunks: Buffer[]=[];
+                    let size=0;
+                    response.on('data',(chunk: Buffer)=>{
+                        size+=chunk.length;
+                        if (size>10000000) {request.destroy(new Error('Article response too large'));return;}
+                        chunks.push(chunk);
+                    });
+                    response.on('error',reject);
+                    response.on('end',()=>{
+                        try {
+                            const charset=/charset\s*=\s*["']?([^;\s"']+)/i.exec(contentType)?.[1] || 'utf-8';
+                            resolve({status,url:current,html:new TextDecoder(charset).decode(Buffer.concat(chunks)),contentType});
+                        } catch (error) {reject(error);}
+                    });
+                });
+                const timer=window.setTimeout(()=>request.destroy(new Error('Article request timed out')),Math.max(1,deadline-Date.now()));
+                request.on('error',reject);
+                request.once('close',()=>window.clearTimeout(timer));
+                request.end();
+            });
+            if (!response.location) return response;
+            current=new URL(response.location,current).href;
+        }
+    } catch {if (signal?.aborted) throw new Error(t('pluginDisabled'));}
+    return failed();
+}
+
+async function retrievePage(url: string, signal: AbortSignal | undefined, isBlocked: (url: string)=>boolean, BrowserWindow: BrowserWindowConstructor, directFetch: PageLoader=fetchPage): Promise<Page> {
+    if (signal?.aborted) throw new Error(t('pluginDisabled'));
+    if (isPdf(url)) return {status:415,url,html:'',contentType:'application/pdf'};
+    if (isBlocked(url)) return {status:404,url,html:''};
+    const direct=await directFetch(url,signal,isBlocked);
+    if (isPdf(direct.url,direct.contentType) || (direct.status>=200 && direct.status<300 && direct.html && extractPage(direct.html,direct.url).content)) return direct;
+    return loadPage(url,signal,isBlocked,BrowserWindow);
 }
 
 async function loadPage(url: string, signal: AbortSignal | undefined, isBlocked: (url: string)=>boolean, BrowserWindow: BrowserWindowConstructor): Promise<Page> {
@@ -119,4 +196,4 @@ async function loadPage(url: string, signal: AbortSignal | undefined, isBlocked:
     }
 }
 
-export {loadPage, publicAddress, publicUrl};
+export {loadPage, fetchPage, retrievePage, publicAddress, publicUrl};

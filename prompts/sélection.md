@@ -1,6 +1,8 @@
-Examine tous les articles fournis et sélectionne ceux qui ont un rapport entre la littérature, l’écriture, les romans, les métiers du livre et l’intelligence artificielle.
+Examine tous les articles fournis et sélectionne ceux qui ont un rapport entre l’intelligence artificielle ET La littérature OU l’écriture OU les romans OU les métiers du livre…
 
 Écarte les articles hors sujet. Ne conserve pas un article qui mentionne seulement l’écriture ou l’IA sans rapport avec le sujet de la newsletter.
+
+Écarte les artricles avec des sujets déjà développé dans {{previousNewsletters}} 
 
 Date et heure de rédaction : {{now}}.
 

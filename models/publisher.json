@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Titre et chapeau de l’article finalisé",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "chapeau"],
+  "properties": {
+    "title": {"type": "string", "minLength": 1, "description": "Titre simple et direct, fidèle à l’article, sans date ni mention de TextMachine."},
+    "chapeau": {"type": "string", "minLength": 1, "description": "Chapeau de moins de 25 mots, fidèle à l’article et donnant envie de le lire."}
+  }
+}

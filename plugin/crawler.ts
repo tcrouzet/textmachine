@@ -137,7 +137,7 @@ function extractPage(html: string, url: string): {blocked?: boolean; content?: s
     const doc = pageDocument(html,url);
     const meta = (name: string) => doc.querySelector(`meta[property="${name}"], meta[name="${name}"]`)?.getAttribute('content') || '';
     const title = doc.querySelector('title')?.textContent || '';
-    if (/^(?:just a moment|access denied|attention required|verify (?:you|your)|security check|checking your browser|accès refusé)/i.test(title.trim())
+    if (/^(?:just a moment|access denied|attention required|verify (?:you|your)|verifying device|security check|checking your browser|accès refusé)/i.test(title.trim())
         || doc.querySelector('#challenge-running, #challenge-form, form[action*="captcha"]')) {
         return {blocked:true};
     }
@@ -159,15 +159,27 @@ function extractPage(html: string, url: string): {blocked?: boolean; content?: s
     for (const node of doc.querySelectorAll('script[type="application/ld+json"]')) {
         try { visit(JSON.parse(node.textContent || '')); } catch { /* Ignore malformed publisher metadata. */ }
     }
-    if (structured?.isAccessibleForFree === false || structured?.isAccessibleForFree === 'False') return {blocked:true};
+    const restricted=structured?.isAccessibleForFree===false || /^false$/i.test(String(structured?.isAccessibleForFree));
     const published = dateFromDocument(doc, structured);
     let rawImage: unknown = meta('og:image') || meta('twitter:image') || structured?.image || '';
     if (Array.isArray(rawImage)) rawImage = (rawImage as unknown[])[0];
     if (rawImage && typeof rawImage === 'object') rawImage = record(rawImage).url || record(rawImage).contentUrl;
     let image=typeof rawImage==='string' ? rawImage : '';
     const article = new Readability(doc.cloneNode(true) as Document).parse();
-    if (!article || article.textContent.trim().length < 120) return {blocked:false, content:''};
+    if (!article || article.textContent.trim().length < 120) return {blocked:restricted, content:''};
     const content = parseHTML(article.content).body;
+    const prose=(content.textContent || '').replace(/\s+/g,' ');
+    const accessNotice=/you have [\d.,]+% (?:of this article )?left to read|the rest is for subscribers|(?:subscribe|sign in|log in) to (?:continue reading|read (?:the )?(?:full|rest of))|(?:article|contenu) (?:est )?réservé aux abonnés|pour (?:lire la suite|continuer (?:la lecture|à lire))[^.]{0,80}abonn/i;
+    // Metering metadata can accompany public text; short previews still remain forbidden.
+    const missingSection=restricted && [structured?.hasPart].flat().some(part=>{
+        const selector=record(part).cssSelector;
+        if (typeof selector!=='string') return false;
+        try {
+            const nodes=[...doc.querySelectorAll(selector)];
+            return nodes.length>0 && nodes.every(node=>!node.textContent?.trim());
+        } catch {return false;}
+    });
+    if (accessNotice.test(prose) || missingSection || (restricted && prose.length<1500)) return {blocked:true};
     image ||= content.querySelector('img[src]')?.getAttribute('src') || '';
     try {
         const target = new URL(image, url);

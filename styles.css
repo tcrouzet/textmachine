@@ -48,6 +48,16 @@
     max-width: 100%;
 }
 
+.text-machine-settings .setting-item:has(textarea) {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.text-machine-settings .setting-item:has(textarea) .setting-item-control,
+.text-machine-settings textarea {
+    width: 100%;
+}
+
 .text-machine-folders {
     display: flex;
     flex-direction: column;

@@ -30,7 +30,7 @@ test('stores structured articles with empty status and no Markdown escaping', ()
     assert.deepEqual(messageArticles(m), []);
     m.bodies = [{type:'text/plain', text:'https://example.com/article'}];
     const entry = messageArticles(m);
-    assert.deepEqual(entry[0], {date:'2023-11-14',title:'article',url:'https://example.com/article',source:'Utilisateur (présumé)',status:'',publish:'',content:'',image:''});
+    assert.deepEqual(entry[0], {date:'2023-11-14',title:'article',url:'https://example.com/article',source:'Utilisateur (présumé)',status:'',usedAt:'',publish:'',content:'',image:''});
     const first = mergeArticles('{"version":1,"articles":[]}', entry);
     assert.equal(first.count, 1);
     assert.equal(parseData(first.text).articles.length, 1);
@@ -117,13 +117,37 @@ test('bare domain names match extensions and YouTube short domains', () => {
     assert.equal(isExcluded({url:'https://news.publisher.fr/article',source:'User'}, 'publisher'), true);
 });
 
-test('renames legacy used and preserves its value and custom article fields', () => {
+test('migrates legacy usage strings without losing their status or custom article fields', () => {
     const legacy = {date:'', title:'Article', url:'https://example.com/article', source:'User', used:'newsletter-1', note:'Keep'};
     const saved = JSON.parse(mergeArticles(JSON.stringify({version:1, articles:[legacy]}), []).text);
     assert.equal(saved.articles[0].status, 'newsletter-1');
     assert.equal(saved.articles[0].note, 'Keep');
-    assert.equal(Object.hasOwn(saved.articles[0], 'used'), false);
+    assert.equal(saved.articles[0].usedAt, 'unknown');
+    assert.ok(!Object.hasOwn(saved.articles[0],'used'));
     for (const field of ['publish','content','image']) assert.equal(saved.articles[0][field], '');
+});
+test('usedAt alone records usage and legacy flags are removed without losing dates',()=>{
+    const article={id:1,date:'',title:'Article',url:'https://example.com/article',source:'User',status:'used',usedAt:'2026-11-03',note:'Keep'};
+    const input=JSON.stringify({version:1,nextId:2,articles:[article]});
+    const migrated=withIds(input),row=JSON.parse(migrated).articles[0];
+    assert.equal(row.status,'');assert.ok(!Object.hasOwn(row,'used'));assert.equal(row.usedAt,article.usedAt);assert.equal(row.note,'Keep');
+    assert.equal(withIds(migrated),migrated);
+    for (const used of [0,1]) {
+        const row=parseData(JSON.stringify({version:1,articles:[{...article,status:'',used}]})).articles[0];
+        assert.equal(row.usedAt,'2026-11-03');assert.ok(!Object.hasOwn(row,'used'));
+    }
+    for (const used of [2,-1,true,{}]) {
+        assert.throws(()=>parseData(JSON.stringify({version:1,articles:[{...article,status:'',used}]})),/invalide/);
+    }
+    for (const status of ['forbidden','404','discard']) {
+        const row=parseData(JSON.stringify({version:1,articles:[{...article,status:undefined,usedAt:undefined,used:status}]})).articles[0];
+        assert.equal(row.status,status);assert.equal(row.usedAt,'');assert.ok(!Object.hasOwn(row,'used'));
+    }
+});
+test('mail deduplication never resets an already used article or its edition date',()=>{
+    const article={date:'',title:'Article',url:'https://example.com/article',source:'User',status:'',used:1,usedAt:'2026-11-03'};
+    const saved=parseData(mergeArticles(JSON.stringify({version:1,articles:[article]}),[{...article,used:0,usedAt:''}]).text);
+    assert.equal(saved.articles.length,1);assert.ok(!Object.hasOwn(saved.articles[0],'used'));assert.equal(saved.articles[0].usedAt,'2026-11-03');
 });
 
 test('PDF links are retained as forbidden metadata without loading their content',()=>{

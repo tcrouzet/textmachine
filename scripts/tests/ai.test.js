@@ -49,7 +49,7 @@ async function fakeCodex(t, mode) {
             } else if (message.method === 'turn/start') {
                 if (message.params.sandboxPolicy.networkAccess !== false) process.exit(4);
                 if (mode === 'image' && !message.params.input.some(item=>item.type==='image' && item.url==='https://example.com/image.jpg')) process.exit(6);
-                if (mode === 'schema' && !message.params.outputSchema?.properties?.groups) process.exit(5);
+                if (mode === 'schema' && !message.params.outputSchema?.properties?.summary) process.exit(5);
                 const failure = message.params.outputSchema && invalidSchema(message.params.outputSchema)
                     ? {message:"Invalid schema for response_format: required is missing title",codexErrorInfo:'badRequest'}
                     : mode === 'quota' ? {message:'private-fixture-value',codexErrorInfo:'usageLimitExceeded'}
@@ -137,17 +137,19 @@ test('Codex generation can finish beyond two minutes', {timeout:5000}, async t=>
 });
 
 
-test('Codex generation receives the newsletter JSON schema as its output constraint',async t=>{
-    const schema = require('../../models/newsletter.json');
+test('Codex generation receives the summaries JSON schema as its output constraint',async t=>{
+    const schema = require('../../models/resume.json');
     assert.equal(await generate(await fakeCodex(t,'schema'),'Writer','Articles','fixture',undefined,undefined,schema),'Generated newsletter');
 });
 
 
-test('Codex accepts separate strict schemas for selection, summaries and article writing',async t=>{
+test('Codex accepts separate strict schemas for selection, summaries, article writing, revision and publication',async t=>{
     const newsletter=require('../../plugin/newsletter');
     const articles=[{id:41,title:'AI and books',url:'https://example.com/article',source:'User',publish:'',content:'An article about books and AI.'}];
-    const requests=[newsletter.selectionRequest('{{articles}}',articles,'français'),newsletter.summaryRequest('{{articles}}',articles,'français'),
-        newsletter.writerRequest('{{articles}}',articles,[],[],'français')];
+    const requests=[newsletter.selectionRequest('{{articles}}',articles,'français'),newsletter.summaryRequest('{{article}}',articles[0],'français'),
+        newsletter.writerRequest('{{articles}}',articles,[],[],'français'),
+        newsletter.publisherRequest('{{article}}',['First paragraph.','Second paragraph.'],'français'),
+        require('../../plugin/ai/rewrite').rewriteRequest('Revise the article','First paragraph.\n\nSecond paragraph.')];
     for (const request of requests) {
         assert.equal(await generate(await fakeCodex(t,'generation'),request.system,request.input,'fixture',undefined,undefined,request.schema),'Generated newsletter');
     }
@@ -169,10 +171,10 @@ test('Codex reports schema, quota and context failures without exposing raw serv
 });
 
 test('a nested optional field is rejected as a schema failure before generation',async t=>{
-    const schema = structuredClone(require('../../models/newsletter.json'));
-    const review = schema.properties.groups.items.properties.articles.items;
+    const schema = structuredClone(require('../../models/bref.json'));
+    const review = schema.properties.titles.items;
     review.required = review.required.filter(key=>key !== 'title');
-    await assert.rejects(generate(await fakeCodex(t,'schema'),'Writer','Articles','fixture',undefined,undefined,schema),/JSON schema/);
+    await assert.rejects(generate(await fakeCodex(t,'generation'),'Writer','Articles','fixture',undefined,undefined,schema),/JSON schema/);
 });
 
 test('Codex distinguishes empty and interrupted turns and waits through recoverable errors',async t=>{

@@ -16,29 +16,18 @@ Ne vous contentez pas d'un texte "acceptable". Cherchez activement:
 
 # Consignes
 Dans les citations entre guillemets ou les quotes ne corriger que l'orthographe. Ne jamais réécrire les citations ou quotes.
-Ne pas systématiquement remplacer "quand" par "lorsque".
-Ne pas remplacer les mots vulgaires ou grossiers s'ils sont justifiés dans le contexte.
-Ne pas modifier la mise en forme des dialogues (surtout quand ils sont libres sans repère typographique).
-Éviter les hiatus (par exemple "alla à" ou "marchait et").
-Les "ça" ne sont pas interdits ("cela" est souvent plus lourd).
-Ne pas ajouter de répétitions. TRÈS IMPORTANT!!!
 Ne garder que les adverbes indispensables.
 Minimiser l'usage des "peut-être", "sans doute", "encore", "comme"…
 Ne jamais ajouter (en dash) ou (em dash).
 Ne pas utiliser "il faut", "je dois", pas d'impératif.
-Ne jamais ajouter de relatives.
-Ne jamais ajouter de participes présents.
-Éviter les relatives quand pas indispensables.
-Éviter les participes présents (mais ne pas remplacer par des relatives, des "puisque"…).
-Différencier les futurs des conditionnels (j'irai ou j'irais).
 Toujours préférer les formes concises, mais pas au point de rendre illisible.
 Conserver les guillemets français quand nécessaires.
 Ne couper ni ne supprimer des parties du texte.
 Vérifier que les articles possessifs se réfèrent au bon sujet.
 Conserver la syntaxe markdown. Conserver intégralement les liens, les images, leurs légendes originales et les crédits photo. Préserver les faits, les chiffres, les attributions et les limites des études.
 Respecter la typographie propre à la langue du texte.
-Ne pas tronquer le texte, sinon recommencer (taille du texte retourné min 90% de la source)
 Ne rien retourner d'autre que le texte corrigé. Aucun message explicatif.
+Les titres des livres, journaux, films en italique.
 
 ## Examples
 
@@ -59,4 +48,4 @@ Ne rien retourner d'autre que le texte corrigé. Aucun message explicatif.
 ## Erreurs communes
 
 "étude quasi expérimentale" => reformuler en termes simples sans modifier le protocole ni la portée de l’étude.
-Titres tout en majuscule => Seul les sigles, nom propres et la première lettre en majuscule
+Titres tout en majuscule => Seul les sigles, nom propres     et la première lettre en majuscule

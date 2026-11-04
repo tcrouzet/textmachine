@@ -3,11 +3,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 require('../../plugin/i18n').setLocale('en');
-const {schema,day,availableArticles,briefArticles,briefRequest,parseBrief,renderPrompt,writerRequest,parseNewsletter,selectionRequest,parseSelection,summaryRequest,parseSummaries,parseEditorial,renderNewsletter,applyStatuses,feedUrl,feedUrls} = require('../../plugin/newsletter');
+const {day,availableArticles,briefArticles,briefRequest,parseBrief,renderPrompt,writerRequest,parseNewsletter,selectionRequest,parseSelection,summaryRequest,parseSummary,parseEditorial,publisherRequest,parsePublisher,renderNewsletter,applyStatuses,feedUrl,feedUrls} = require('../../plugin/newsletter');
 const illustrated = result=>({...result,image:{url:'illustrations/text-machine-2026-11-03.png',source:'',caption:'Original caption',verified:true,generated:true}});
 const {generate} = require('../../plugin/ai/generate');
 const template = fs.readFileSync(path.join(__dirname,'../../models/newsletter.md'),'utf8');
-const article = (slug, extra = {}) => ({date:'2026-11-03',title:slug,url:'https://example.com/'+slug,source:'User',status:'',publish:'2026-11-01',content:'An article about AI and books.',image:'',...extra});
+const article = (slug, extra = {}) => ({date:'2026-11-03',title:slug,url:'https://example.com/'+slug,source:'User',status:'',usedAt:'',publish:'2026-11-01',content:'An article about AI and books.',image:'',...extra});
 const articles = [article('a',{id:1,image:'https://example.com/image.jpg',imageCaption:'Original caption'}),article('b',{id:2})];
 const data = JSON.stringify({version:1,notes:'Keep notes',articles});
 const prompt = '{"instructions":"Editorial instructions","language":"{{language}}","articles":{{articles}},"previousNewsletters":{{previousNewsletters}},"recentPosts":{{recentPosts}}}';
@@ -44,6 +44,27 @@ test('legacy used articles are recovered only when explicitly linked from today�
     assert.deepEqual(availableArticles(text,'','2026-11-03',['[Source](https://example.com/legacy)']).map(article=>article.title),['legacy']);
     assert.deepEqual(availableArticles(text,'','2026-11-03',['[Source](https://example.com/legacy-extra)']),[]);
 });
+test('usedAt consumes the complete available pool while allowing same-day regeneration',()=>{
+    const pending=[...articles,article('third',{id:3})];
+    const blocked=article('blocked',{id:4,status:'forbidden',content:''});
+    const incoming=article('arrived-during-generation',{id:5});
+    const original=JSON.stringify({version:1,articles:[...pending,blocked,incoming]});
+    const saved=applyStatuses(original,pending,{used:[pending[0].url],discard:[pending[1].url]},'2026-11-03',[blocked]);
+    const rows=JSON.parse(saved).articles;
+    assert.ok(rows.every(row=>!Object.hasOwn(row,'used')));
+    assert.equal(rows[4].usedAt,'');
+    assert.deepEqual(rows.map(row=>row.status),['','','','forbidden','']);
+    assert.deepEqual(rows.slice(0,4).map(row=>row.usedAt),Array(4).fill('2026-11-03'));
+    assert.deepEqual(availableArticles(saved,'','2026-11-03').map(row=>row.id),[1,2,3,5]);
+    assert.deepEqual(availableArticles(saved,'','2026-11-04').map(row=>row.id),[5]);
+    assert.deepEqual(briefArticles(saved,'','2026-11-04'),[]);
+});
+test('concurrent usage changes are preserved instead of reassigned to the current edition',()=>{
+    const changed={...articles[0],usedAt:'2026-11-02'};
+    const saved=JSON.parse(applyStatuses(JSON.stringify({version:1,articles:[changed]}),articles,
+        {used:[changed.url],discard:[]},'2026-11-03'));
+    assert.deepEqual(saved.articles[0],changed);
+});
 test('writer gets JSON requirements and editorial context without the Markdown template',()=>{
     const request = writerRequest(prompt,articles,[{content:'Earlier angle'}],[{title:'Latest blog post'}],'español');
     const context = JSON.parse(request.input);
@@ -57,7 +78,7 @@ test('writer gets JSON requirements and editorial context without the Markdown t
     assert.ok(!request.input.includes('{{#groups}}'));
     assert.ok(!Object.hasOwn(JSON.parse(request.input),'template'));
     assert.deepEqual(JSON.parse(request.system.split('\n\n').at(-1)).jsonSchema,request.schema);
-    assert.equal(request.schema.$schema,schema.$schema);
+    assert.equal(request.schema.$schema,require('../../models/writer.json').$schema);
     const photos = JSON.parse(writerRequest(prompt,[articles[0],{...articles[0],id:3,imageCaption:''},{...articles[0],id:4,imageCaption:undefined},articles[1]],[],[]).input).articles;
     assert.ok(photos.every(article=>!Object.hasOwn(article,'hasImage') && !Object.hasOwn(article,'imageCaption')));
     assert.equal(context.previousNewsletters[0].content,'Earlier angle');
@@ -154,7 +175,8 @@ test('status updates timestamp today and preserve annotations and concurrent edi
     const parsed = parseNewsletter(JSON.stringify(result),articles);
     const saved = JSON.parse(applyStatuses(JSON.stringify(changed),articles,parsed,'2026-11-03'));
     assert.equal(saved.notes,'Keep notes');
-    assert.equal(saved.articles[0].status,'used');
+    assert.equal(saved.articles[0].status,'');
+    assert.ok(!Object.hasOwn(saved.articles[0],'used'));
     assert.equal(saved.articles[0].usedAt,'2026-11-03');
     assert.equal(saved.articles[0].custom,'Keep annotation');
     assert.equal(saved.articles[1].status,'');
@@ -241,10 +263,12 @@ test('stored AI IDs resolve through the original snapshot even if the article fi
     const current = {version:1,articles:[{...articles[1],privateNotes:'Keep B'},{...articles[0],privateNotes:'Keep A'}]};
     const saved = JSON.parse(applyStatuses(JSON.stringify(current),articles,normalized,'2026-11-03'));
     assert.equal(saved.articles[0].url,articles[1].url);
-    assert.equal(saved.articles[0].status,'discard');
+    assert.equal(saved.articles[0].status,'');
+    assert.ok(!Object.hasOwn(saved.articles[0],'used'));
     assert.equal(saved.articles[0].privateNotes,'Keep B');
     assert.equal(saved.articles[1].url,articles[0].url);
-    assert.equal(saved.articles[1].status,'used');
+    assert.equal(saved.articles[1].status,'');
+    assert.ok(!Object.hasOwn(saved.articles[1],'used'));
     assert.equal(saved.articles[1].usedAt,'2026-11-03');
     assert.equal(saved.articles[1].privateNotes,'Keep A');
     assert.deepEqual(saved.articles.map(article=>article.id),[2,1]);
@@ -293,7 +317,7 @@ test('brief translations resolve stable IDs and preserve source order, URLs and 
 
 test('forbidden articles appear only as translated linked titles in the brief section and stay forbidden',()=>{
     const forbidden = article('Blocked title',{status:'forbidden',content:'Unverified private content',image:'https://example.com/wrong.jpg'});
-    const text = JSON.stringify({version:1,articles:[...articles,forbidden,article('old-forbidden',{status:'forbidden',usedAt:'2026-11-02'})]});
+    const text = JSON.stringify({version:1,articles:[...articles,forbidden,article('old-forbidden',{status:'forbidden',used:1,usedAt:'2026-11-02'})]});
     const brief = briefArticles(text,'','2026-11-03');
     assert.deepEqual(brief.map(article=>article.title),['Blocked title']);
     assert.deepEqual(availableArticles(text,'','2026-11-03').map(article=>article.title),['a','b']);
@@ -321,12 +345,12 @@ test('source photo availability does not change the selected source or provide t
 
 test('the writer schema contains only article fields and no source or illustration selection',()=>{
     const request=writerRequest(prompt,articles,[],[]);
-    assert.deepEqual(Object.keys(request.schema.properties),['title','chapeau','paragraphs']);
-    assert.deepEqual(request.schema.required,['title','chapeau','paragraphs']);
+    assert.deepEqual(Object.keys(request.schema.properties),['paragraphs']);
+    assert.deepEqual(request.schema.required,['paragraphs']);
     assert.equal(request.schema.additionalProperties,false);
     const definition=require('../../models/writer.json');
     assert.deepEqual(request.schema,definition);
-    request.schema.properties.title.description='Changed request only';
+    request.schema.properties.paragraphs.description='Changed request only';
     assert.deepEqual(writerRequest(prompt,articles,[],[]).schema,definition);
 });
 
@@ -347,9 +371,26 @@ test('article JSON cannot override the generated illustration with source-image 
 });
 
 test('editorial parsing rejects summaries, classifications and illustration fields',()=>{
-    const article={title:'An angle',chapeau:'An introduction',paragraphs:['First','Second']};
+    const article={paragraphs:['First','Second']};
     assert.deepEqual(parseEditorial(JSON.stringify(article)),article);
-    for (const extra of [{groups:[]},{discard:[]},{image:null},{lead:1}]) assert.throws(()=>parseEditorial(JSON.stringify({...article,...extra})),/Invalid AI response/);
+    for (const extra of [{title:'Premature title'},{chapeau:'Premature introduction'},{groups:[]},{discard:[]},{image:null},{lead:1}]) assert.throws(()=>parseEditorial(JSON.stringify({...article,...extra})),/Invalid AI response/);
+});
+test('publisher receives only the final body and returns a separate title and introduction',()=>{
+    const paragraphs=['A concrete result. {{language}}','Another finding. [Source](https://example.com/article)'];
+    const request=publisherRequest('Présente en {{language}} :\n{{article}}',paragraphs,'français');
+    assert.equal(request.input,'Présente en français :\n'+paragraphs.join('\n\n'));
+    assert.deepEqual(request.schema,require('../../models/publisher.json'));
+    assert.deepEqual(request.schema.required,['title','chapeau']);
+    assert.deepEqual(Object.keys(request.schema.properties),['title','chapeau']);
+    assert.equal(request.schema.additionalProperties,false);
+    assert.ok(!request.system.includes(paragraphs[1]));
+    const publication={title:'A concrete title',chapeau:'A short introduction.'};
+    assert.deepEqual(parsePublisher(JSON.stringify(publication)),publication);
+    for (const invalid of ['{broken','null','[]',JSON.stringify({...publication,paragraphs}),JSON.stringify({title:'',chapeau:'Intro'}),JSON.stringify({title:'Title'})]) {
+        assert.throws(()=>parsePublisher(invalid),/Invalid AI response/);
+    }
+    assert.throws(()=>publisherRequest('',paragraphs,'français'),/publisher.md/);
+    assert.throws(()=>publisherRequest('Write a title',paragraphs,'français'),/\{\{article\}\}/);
 });
 
 test('selection classifies all stable IDs once and ignores source image availability',()=>{
@@ -375,6 +416,42 @@ test('selection classifies all stable IDs once and ignores source image availabi
         assert.throws(()=>parseSelection(JSON.stringify(response),articles),/Invalid AI response/);
     }
 });
+test('selection expands previous newsletters as data without changing the output schema',()=>{
+    const prompt='{"language":"{{language}}","previousNewsletters":{{ previousNewsletters }},"articles":{{articles}}}';
+    const previous=[{name:'text-machine-2026-11-03.md',content:'An earlier report on the Orélien affair. {{articles}}'}];
+    const request=selectionRequest(prompt,articles,'français','',previous);
+    const input=JSON.parse(request.input);
+    assert.deepEqual(input.previousNewsletters,previous);
+    assert.deepEqual(input.articles.map(article=>article.id),[1,2]);
+    assert.ok(!request.system.includes(previous[0].content));
+    assert.deepEqual(request.schema.required,['selected','discard']);
+    assert.deepEqual(JSON.parse(selectionRequest(prompt,articles,'français').input).previousNewsletters,[]);
+});
+
+test('reference domains identify preferred sources in selection and writing without filtering articles',()=>{
+    const candidates=[
+        article('Guardian',{id:41,url:'https://books.theguardian.com/story'}),
+        article('BBC',{id:42,url:'https://news.bbc.co.uk/story'}),
+        article('Lookalike',{id:43,url:'https://theguardian.com.evil.example/story'}),
+        article('Other Guardian',{id:44,url:'https://eviltheguardian.com/story'}),
+        article('Other UK',{id:45,url:'https://other.co.uk/story'}),
+    ];
+    const before=JSON.stringify(candidates);
+    const domains='WWW.THEGUARDIAN.COM, https://news.bbc.co.uk/culture\nwww.theguardian.com; not-a-domain javascript:alert(1)';
+    const contract=require('../../plugin/i18n').t('referenceSourcesContract',{ids:'41, 42'});
+    for (const makeRequest of [sources=>selectionRequest('{{articles}}',candidates,'English',sources),
+        sources=>writerRequest('{{articles}}',candidates,[],[],'English',sources)]) {
+        const request=makeRequest(domains);
+        assert.ok(request.system.includes(contract));
+        assert.deepEqual(JSON.parse(request.input).map(article=>article.id),[41,42,43,44,45]);
+        assert.deepEqual(request.schema,makeRequest('').schema);
+        assert.deepEqual(JSON.parse(request.system.split('\n\n').at(-1)).jsonSchema,request.schema);
+        for (const unmatched of ['', 'unknown.example', 'javascript:alert(1) invalid https://reader:fixture@theguardian.com']) {
+            assert.equal(makeRequest(unmatched).system,makeRequest('').system);
+        }
+    }
+    assert.equal(JSON.stringify(candidates),before);
+});
 
 test('event chronology belongs to selection and is not passed to summaries or writing',t=>{
     const instant=Date.parse('2026-11-03T14:00:00Z');
@@ -386,30 +463,27 @@ test('event chronology belongs to selection and is not passed to summaries or wr
     assert.ok(input.now.includes('GMT'));
     assert.equal(input.articles[0].publish,'2026-11-02T18:00:00Z');
     assert.equal(input.articles[0].title,'Le prix sera remis mardi');
-    assert.throws(()=>summaryRequest(prompt,sources,'français'),/Unknown prompt variable: \{\{now\}\}/);
+    assert.throws(()=>summaryRequest('Summarize {{now}}: {{article}}',sources[0],'français'),/Unknown prompt variable: \{\{now\}\}/);
     assert.throws(()=>writerRequest(prompt,sources,[],[],'français'),/Unknown prompt variable: \{\{now\}\}/);
 });
 
-test('summary output covers every selected source once and cannot select, discard or inject images',()=>{
-    const request=summaryRequest('Summarize in {{language}}: {{articles}}',articles,'日本語');
-    assert.deepEqual(request.schema.required,['groups']);
-    assert.ok(!Object.hasOwn(request.schema.properties,'discard'));
-    assert.ok(request.input.includes('日本語'));
-    const definition=require('../../models/resume.json');
-    const expected=JSON.parse(JSON.stringify(definition));
-    expected.properties.groups.items.properties.articles.items.properties.id.enum=[1,2];
-    assert.deepEqual(request.schema,expected);
-    summaryRequest('{{articles}}',[{...articles[0],id:41}],'français');
-    assert.deepEqual(request.schema.properties.groups.items.properties.articles.items.properties.id.enum,[1,2]);
-    assert.ok(!Object.hasOwn(definition.properties.groups.items.properties.articles.items.properties.id,'enum'));
-    const groups=[{title:'Livres',articles:articles.map(article=>({id:article.id,title:'Titre '+article.id,summary:'Résumé '+article.id}))}];
-    assert.deepEqual(parseSummaries(JSON.stringify({groups}),articles),groups);
-    for (const response of [{groups:[]},{groups,discard:[]},{groups:[...groups,...groups]},
-        {groups:[{title:'Livres',articles:[{id:1,title:'Titre',summary:'Résumé'}]}]},
-        {groups:[{title:'Livres',articles:[{id:1,title:'',summary:'Résumé'},{id:2,title:'Titre',summary:'Résumé'}]}]},
-        {groups:[{title:'Livres',articles:[{id:1,title:'Titre',summary:'![Image](https://example.com/image.jpg)'},{id:2,title:'Titre',summary:'Résumé'}]}]}]) {
-        assert.throws(()=>parseSummaries(JSON.stringify(response),articles),/Invalid AI response/);
+test('summary receives only one title and text and returns only a summary of at most 30 words',()=>{
+    const request=summaryRequest('Résume en {{language}} : {{article}}',articles[0],'français');
+    assert.equal(request.input,'Résume en français : '+JSON.stringify({title:articles[0].title,content:articles[0].content}));
+    assert.deepEqual(request.schema,require('../../models/resume.json'));
+    assert.deepEqual(request.schema.required,['summary']);
+    assert.deepEqual(Object.keys(request.schema.properties),['summary']);
+    const thirty=Array.from({length:30},(_,i)=>'mot'+i).join(' ');
+    for (const summary of ['Un résultat concret.',thirty,thirty.replaceAll(' ','\u00a0')]) {
+        assert.equal(parseSummary(JSON.stringify({summary})),summary);
     }
+    for (const response of ['', '{broken','null','[]','Plain text',JSON.stringify({summary:thirty+' extra'}),
+        JSON.stringify({summary:''}),JSON.stringify({summary:'  '}),JSON.stringify({summary:42}),
+        JSON.stringify({summary:'Résumé',title:'Titre inutile'}),JSON.stringify({summary:'Résumé',id:1}),
+        JSON.stringify({summary:'![Image](https://example.com/image.jpg)'})]) {
+        assert.throws(()=>parseSummary(response),/Invalid AI response/);
+    }
+    assert.throws(()=>summaryRequest('{{articles}}',articles[0],'français'),/\{\{article\}\}/);
 });
 
 test('the original illustration is rendered even by a template that omits the image slot or has only brief items',()=>{
