@@ -3,11 +3,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 require('../../plugin/i18n').setLocale('en');
-const {day,availableArticles,briefArticles,briefRequest,parseBrief,renderPrompt,writerRequest,parseNewsletter,selectionRequest,parseSelection,summaryRequest,parseSummary,parseEditorial,publisherRequest,parsePublisher,renderNewsletter,applyStatuses,feedUrl,feedUrls} = require('../../plugin/newsletter');
+const {day,availableArticles,briefArticles,briefRequest,parseBrief,renderPrompt,writerRequest,parseNewsletter,selectionRequest,parseSelection,isAuthorSource,assertNoAuthorSources,summaryRequest,parseSummary,parseEditorial,publisherRequest,parsePublisher,renderNewsletter,applyStatuses,feedUrl,feedUrls} = require('../../plugin/newsletter');
 const illustrated = result=>({...result,image:{url:'illustrations/text-machine-2026-11-03.png',source:'',caption:'Original caption',verified:true,generated:true}});
 const {generate} = require('../../plugin/ai/generate');
 const template = fs.readFileSync(path.join(__dirname,'../../models/newsletter.md'),'utf8');
-const article = (slug, extra = {}) => ({date:'2026-11-03',title:slug,url:'https://example.com/'+slug,source:'User',status:'',usedAt:'',publish:'2026-11-01',content:'An article about AI and books.',image:'',...extra});
+const article = (slug, extra = {}) => ({date:'2026-11-03',title:slug,url:'https://example.com/'+slug,source:'User',authors:[],status:'',usedAt:'',publish:'2026-11-01',content:'An article about AI and books.',image:'',...extra});
 const articles = [article('a',{id:1,image:'https://example.com/image.jpg',imageCaption:'Original caption'}),article('b',{id:2})];
 const data = JSON.stringify({version:1,notes:'Keep notes',articles});
 const prompt = '{"instructions":"Editorial instructions","language":"{{language}}","articles":{{articles}},"previousNewsletters":{{previousNewsletters}},"recentPosts":{{recentPosts}}}';
@@ -250,7 +250,7 @@ test('AI input uses stored IDs and excludes persistent state, images and private
     const original = [{...articles[0],image,status:'used',usedAt:'2026-11-03',privateNotes:'Do not send'}];
     const before = JSON.stringify(original);
     const input = JSON.parse(writerRequest(prompt,original,[],[]).input);
-    assert.deepEqual(Object.keys(input.articles[0]),['id','title','url','source','publish','content']);
+    assert.deepEqual(Object.keys(input.articles[0]),['id','title','url','source','authors','publish','content']);
     assert.equal(input.articles[0].id,1);
     assert.ok(!Object.hasOwn(input.articles[0],'hasImage'));
     assert.equal(JSON.stringify(original),before);
@@ -386,11 +386,28 @@ test('publisher receives only the final body and returns a separate title and in
     assert.ok(!request.system.includes(paragraphs[1]));
     const publication={title:'A concrete title',chapeau:'A short introduction.'};
     assert.deepEqual(parsePublisher(JSON.stringify(publication)),publication);
+    assert.equal(parsePublisher(JSON.stringify({...publication,title:'IA : Correcteurs et bulletins scolaires'})).title,'Correcteurs et bulletins scolaires');
     for (const invalid of ['{broken','null','[]',JSON.stringify({...publication,paragraphs}),JSON.stringify({title:'',chapeau:'Intro'}),JSON.stringify({title:'Title'})]) {
         assert.throws(()=>parsePublisher(invalid),/Invalid AI response/);
     }
     assert.throws(()=>publisherRequest('',paragraphs,'français'),/publisher.md/);
     assert.throws(()=>publisherRequest('Write a title',paragraphs,'français'),/\{\{article\}\}/);
+});
+test('author feeds identify their publications without excluding other publications on the same platform',()=>{
+    const feeds='https://writer.substack.com/feed https://example.com/blog/feed';
+    for (const url of ['https://writer.substack.com/p/post','https://www.writer.substack.com/p/post?utm_source=mail','https://example.com/blog/post']) {
+        assert.equal(isAuthorSource(url,feeds),true,url);
+        assert.throws(()=>assertNoAuthorSources(['A reference [Post]('+url+')'],feeds,[]),/author-feed/);
+    }
+    for (const url of ['https://another.substack.com/p/post','https://writer.substack.com.evil.example/p/post','https://example.com/other/post']) {
+        assert.equal(isAuthorSource(url,feeds),false,url);
+    }
+    const posts=[{url:'https://custom-author.example/story',title:'Existing topic',content:'Already published'}];
+    assert.equal(isAuthorSource('https://custom-author.example/story?utm_source=newsletter','https://feeds.example/author.xml',posts),true);
+    const prompt='{"articles":{{articles}},"history":{{AuthorFeed}}}';
+    const context=JSON.parse(selectionRequest(prompt,articles,'français','',[],posts).input);
+    assert.deepEqual(context.history,posts);
+    assert.deepEqual(context.articles.map(article=>article.id),[1,2]);
 });
 
 test('selection classifies all stable IDs once and ignores source image availability',()=>{

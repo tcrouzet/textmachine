@@ -10,6 +10,7 @@ export interface Settings {
     referenceSources: string;
     includeFeeds: string;
     authorFeeds: string;
+    debug: boolean;
     aiModel: string;
     codexModel: string;
     localAIServer: string;
@@ -24,7 +25,7 @@ export interface Account {
     email: string;
 }
 export interface Label {id: string; name: string}
-export type Progress = (message: string, stream?: boolean, reset?: boolean) => void;
+export type Progress = (message: string, stream?: boolean, reset?: boolean, model?: string) => void;
 export type Action = () => unknown;
 export function errorOf(value: unknown): Error & {code?: string} {
     if (value instanceof Error) return value;
@@ -55,6 +56,7 @@ export interface Article {
     title: string;
     url: string;
     source: string;
+    authors?: string[];
     status: string;
     usedAt?: string;
     publish: string;

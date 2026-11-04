@@ -1,52 +1,22 @@
-À partir des articles fournis, écris ou régénère le corps de l’article du jour, sans titre ni chapeau.
+Rédige en {{language}} une revue de presse à raconter au micro, dans l’esprit de la matinale de France Inter. Vise 1 500 signes de texte lisible, espaces compris, hors titre, chapeau et adresses des liens : c’est la longueur attendue, pas un plafond.
 
-# Angle éditorial
+Les articles fournis ont déjà été sélectionnés : fais entendre chacun par un fait saillant ou une citation. Répartis la place entre les sources ; une même expérience ne doit pas occuper l’ouverture et la conclusion pendant qu’une autre source disparaît.
 
-Écris un éditorial de 1500 signes maximum qui croise les news du jour, sans ce sentir obligé d'être exhostif, mais sans te centre seulement sur une ou deux sources, sauf si pas d'autre possibilité.
+Passe d’un journal à l’autre comme dans une revue de presse du matin. Fais entendre les auteurs, cite leurs phrases marquantes, puis rebondis vers la source suivante. Tu peux changer progressivement de sujet, sans imposer de fil rouge. Garde le rythme : pas de développement prolongé d’un seul cas, ni de commentaire qui répète ce que la citation vient de dire. L’ensemble porte sur l’IA dans la littérature, l’écriture et les métiers du livre.
 
-L’éditorial porte sur l’intelligence artificielle dans la littérature, l’écriture et les métiers du livre. Pour chaque source, utilise uniquement les faits qui éclairent cet angle. Si son lien avec l’IA n’apporte rien de nouveau, laisse cette source de côté. Une analogie générale sur la création, les préjugés ou la vérité ne constitue pas un lien suffisant.
+Attribue chaque extrait à son auteur (champ authors), sinon au média, avec un lien Markdown vers l’article. Distingue les propos du journaliste de ceux des personnes citées. Traduis fidèlement les citations ; préserve les faits, les chiffres et leur contexte, y compris le caractère fictif d’un exemple. N’invente rien.
 
-Avant de rédiger, consulte les anciennes newsletters : {{previousNewsletters}}
+Les pronoms et possessifs doivent renvoyer à un élément nommé clairement. Donne le contexte nécessaire avant une citation, sans en réécrire les mots.
 
-Éviter de reprendre exactement une idée déjà publiée.
+# Sujets déjà traités
 
-Consulte aussi les publications publiée dans ce feed {{AuthorFeed}}. Si une publication traite déjà d’un fait évoqué, intègre son URL directement dans le texte sous forme de lien Markdown : [expression descriptive](URL). Place le lien sur les mots qui désignent le sujet concerné, sans ajouter de commentaire sur cette référence.
+Écarte les sujets présents dans cet historique. Il sert uniquement à éviter les répétitions : ne le cite pas et ne reprends pas ses liens.
 
-Ne mentionne jamais le « feed », les « publications du feed » ou le contexte documentaire fourni. Utilise uniquement les URL présentes dans les données.
+Anciennes newsletters :
+{{previousNewsletters}}
 
-Ne rédige pas une simple succession de résumés.
-
-Construis un article journalistique clair, si possible autour d’une idée directrice dégagée à partir des articles sélectionné pour ton éditorial.
-
-L’article doit :
-
-* être écrit en {{language}}
-* faire environ 1 500 signes
-* proposer si possible un angle clair
-* relier les informations sans inventer de lien entre elles
-* distinguer les faits, les analyses, les déclarations et les hypothèses
-* ne pas inventer d’information absente des article.
-* traduire les citations en {{language}}
-* ne te sens pas obligé de citer tous les articles.
-
-Si plusieurs articles racontent exactement le même événement, ne le répète pas inutilement. Utilise-les comme sources complémentaires d’une même idée.
-
-# Citations et sources
-
-Trouve au moins deux citations dans les articles.
-
-Chaque citation doit :
-
-* reprendre exactement le texte disponible
-* être clairement attribuée à sa source
-* contenir un lien Markdown vers l’URL de l’article
-* être traduite en {{language}} (sans préciser que c'est une traduction)
-
-Si aucune citation fiable n’est disponible, n’en invente pas.
-
-# Sortie
-
-Retourne uniquement le JSON demandé contenant les paragraphes du corps de l’article. Le titre et le chapeau seront écrits après sa finalisation.
+Publications de l’auteur :
+{{AuthorFeed}}
 
 # Articles à utiliser
 

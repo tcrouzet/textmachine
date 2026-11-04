@@ -1,6 +1,7 @@
 import { t } from './i18n';
 import {Article, Database, FeedEntry, Message, record} from './types';
 import {parseHTML} from './html';
+import {authorNames,authorsFromText} from './authors';
 
 function header(message: Message, name: string) {
     return message.payload.headers?.find(h => h.name.toLowerCase() === name)?.value || '';
@@ -123,6 +124,7 @@ function messageArticles(message: Message): Omit<Article,'id'>[] {
         title: articleTitle(link),
         url: link.url,
         source: sourceOf(message),
+        authors: [],
         status: isPdf(link.url) ? 'forbidden' : '',
         usedAt: '',
         publish: '',
@@ -137,7 +139,7 @@ function feedArticles(entries: FeedEntry[], feed: string, date: string): Omit<Ar
         try { url = articleUrl(new URL(entry.url,feed).href,entry.title); } catch { return []; }
         if (!url || !entry.url) return [];
         return [{date:entry.publish?.slice(0,10) || date,title:articleTitle({url,title:entry.title || url}),url,
-            source:'RSS: '+new URL(feed).hostname,status:isPdf(url) ? 'forbidden' : '',usedAt:'',publish:entry.publish || '',content:'',image:''}];
+            source:'RSS: '+new URL(feed).hostname,authors:[],status:isPdf(url) ? 'forbidden' : '',usedAt:'',publish:entry.publish || '',content:'',image:''}];
     });
 }
 
@@ -199,6 +201,10 @@ function parseData(text: string): Database {
             article[key] ??= '';
             if (typeof article[key] !== 'string') throw new Error(t('invalidDataFile'));
         }
+        article.authors ??= [];
+        if (!Array.isArray(article.authors) || !article.authors.every((name: unknown)=>typeof name==='string')) throw new Error(t('invalidDataFile'));
+        const names=authorNames(article.authors);
+        article.authors=names.length ? names : authorsFromText(String(article.content));
         if (article.imageCaption !== undefined && typeof article.imageCaption !== 'string') throw new Error(t('invalidDataFile'));
         try { new URL(String(article.url)); } catch { throw new Error(t('invalidDataFile')); }
     }
@@ -210,7 +216,8 @@ function withIds(text: string) {
     const articles = before.articles as unknown[];
     return data.nextId === before.nextId && data.articles.every((article,index)=>{
         const stored=record(articles[index]);
-        return article.id===stored.id && !Object.hasOwn(stored,'used') && article.usedAt===stored.usedAt && article.status===stored.status;
+        return article.id===stored.id && !Object.hasOwn(stored,'used') && article.usedAt===stored.usedAt && article.status===stored.status
+            && JSON.stringify(article.authors)===JSON.stringify(stored.authors);
     })
         ? text : JSON.stringify(data,null,2)+'\n';
 }
@@ -238,6 +245,7 @@ function mergeArticles(text: string, incoming: Omit<Article,'id'>[]) {
                 if (!kept[key] && article[key]) kept[key] = article[key];
             }
             if (!kept.imageCaption && kept.image===article.image && article.imageCaption) kept.imageCaption = article.imageCaption;
+            if (!kept.authors?.length && article.authors?.length) kept.authors=[...article.authors];
             urls.set(urlKey, existing);
             titles.set(titleKey, existing);
             continue;

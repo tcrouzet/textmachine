@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Rédaction de l’article",
+  "title": "Revue de presse rédigée",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,7 +13,7 @@
         "type": "string",
         "minLength": 1
       },
-      "description": "Paragraphes du corps de l’article en Markdown, avec liens et citations, sans titre, chapeau, image ni revue de presse.",
+      "description": "Paragraphes d’une revue de presse qui fait entendre chaque source sélectionnée et passe de l’une à l’autre par des faits et des citations attribuées. Sans titre, chapeau, image ni liste de résumés.",
       "minItems": 2
     }
   }

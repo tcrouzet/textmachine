@@ -4,6 +4,7 @@ import {isPdf} from './articles';
 import {domainOf} from './domains';
 import {Article, record} from './types';
 import {parseHTML} from './html';
+import {authorNames} from './authors';
 import Readability from '../scripts/vendor/readability/Readability';
 import type {PageLoader} from './browser';
 
@@ -133,7 +134,7 @@ function extractImageCaption(html: string, url: string, image: string) {
     return captionFromDocument(doc,image,url,{image:images});
 }
 
-function extractPage(html: string, url: string): {blocked?: boolean; content?: string; publish?: string; image?: string; imageCaption?: string} {
+function extractPage(html: string, url: string): {blocked?: boolean; content?: string; publish?: string; authors?: string[]; image?: string; imageCaption?: string} {
     const doc = pageDocument(html,url);
     const meta = (name: string) => doc.querySelector(`meta[property="${name}"], meta[name="${name}"]`)?.getAttribute('content') || '';
     const title = doc.querySelector('title')?.textContent || '';
@@ -142,10 +143,12 @@ function extractPage(html: string, url: string): {blocked?: boolean; content?: s
         return {blocked:true};
     }
     let structured: Record<string,unknown> | undefined;
+    const references=new Map<string,Record<string,unknown>>();
     const visit = (input: unknown): void => {
         if (Array.isArray(input)) {input.forEach(visit);return;}
         const value=record(input);
         if (!value || typeof value !== 'object') return;
+        if (typeof value['@id']==='string') references.set(value['@id'],value);
         if ([value['@type']].flat().some(type => typeof type === 'string' && /(?:^|[/#])(?:\w*Article|BlogPosting|Report)$/.test(type))) {
             structured ||= value;
             if (!structured.datePublished && value.datePublished) structured = {...structured, datePublished:value.datePublished};
@@ -180,6 +183,26 @@ function extractPage(html: string, url: string): {blocked?: boolean; content?: s
         } catch {return false;}
     });
     if (accessNotice.test(prose) || missingSection || (restricted && prose.length<1500)) return {blocked:true};
+    const authors=authorNames([structured?.author].flat().map(value=>{
+        if (typeof value==='string' && references.has(value)) return references.get(value);
+        const data=record(value);
+        return !data.name && typeof data['@id']==='string' ? references.get(data['@id']) : value;
+    }));
+    if (!authors.length) {
+        for (const node of doc.querySelectorAll('meta')) {
+            const name=(node.getAttribute('name') || node.getAttribute('property') || '').toLowerCase();
+            if (['author','article:author','citation_author','dc.creator','dcterms.creator','parsely-author','sailthru.author','byl'].includes(name)) {
+                authors.push(...authorNames(node.getAttribute('content')));
+            }
+        }
+    }
+    if (!authors.length) {
+        for (const node of doc.querySelectorAll('[rel="author"], [itemprop="author"], .author-name, .byline__name, .byline-name')) {
+            if (node.closest('footer, nav, aside, blockquote, [class*="comment"]')) continue;
+            authors.push(...authorNames(node.querySelector('[itemprop="name"]')?.textContent || node.textContent));
+        }
+    }
+    if (!authors.length) authors.push(...authorNames(article.byline));
     image ||= content.querySelector('img[src]')?.getAttribute('src') || '';
     try {
         const target = new URL(image, url);
@@ -189,6 +212,7 @@ function extractPage(html: string, url: string): {blocked?: boolean; content?: s
     return {
         content:(content.textContent || '').replace(/[ \t]+/g, ' ').replace(/\n\s*\n(?:\s*\n)+/g, '\n\n').trim(),
         publish:published || publicationDate(article.publishedTime),
+        authors:authorNames(authors),
         image,
         imageCaption:captionFromDocument(doc,image,url,structured),
     };

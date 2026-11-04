@@ -1,5 +1,5 @@
 import {t} from './i18n';
-import {parseData, isExcluded, isPdf} from './articles';
+import {parseData, isExcluded, isPdf, articleUrl} from './articles';
 import selectionSchema from '../models/selection.json';
 import writerSchema from '../models/writer.json';
 import publisherSchema from '../models/publisher.json';
@@ -83,11 +83,32 @@ function renderPrompt(prompt: string, values: Record<string,string>) {
     });
 }
 
-function selectionRequest(prompt: string, articles: Article[], language: string, referenceSources = '', previous: {name: string; content: string}[] = []) {
+function selectionRequest(prompt: string, articles: Article[], language: string, referenceSources = '', previous: {name: string; content: string}[] = [], feed: FeedEntry[] = []) {
     const schema = structuredClone(selectionSchema);
     const ids = articles.map(article=>article.id);
     for (const key of ['selected','discard'] as const) Object.assign(schema.properties[key].items,{enum:ids});
-    return {input:articleInput(prompt,articles,language,{now:new Date().toString(),previousNewsletters:JSON.stringify(previous)}),system:t('selectionContract')+referenceInstructions(articles,referenceSources)+'\n\n'+JSON.stringify({jsonSchema:schema}),schema};
+    return {input:articleInput(prompt,articles,language,{now:new Date().toString(),previousNewsletters:JSON.stringify(previous),AuthorFeed:JSON.stringify(feed),recentPosts:JSON.stringify(feed)}),system:t('selectionContract')+referenceInstructions(articles,referenceSources)+'\n\n'+JSON.stringify({jsonSchema:schema}),schema};
+}
+
+function isAuthorSource(value: string, feeds: string, posts: FeedEntry[] = []) {
+    const canonical=(value: string)=>{
+        const url=new URL(articleUrl(value) || value);
+        url.hostname=url.hostname.replace(/^www\./,'');url.hash='';url.searchParams.sort();
+        return url.href.replace(/\/$/,'');
+    };
+    let target: URL;
+    try {target=new URL(canonical(value));} catch {return false;}
+    if (posts.some(post=>{try {return !!post.url && canonical(post.url)===canonical(value);} catch {return false;}})) return true;
+    return feedUrls(feeds).some(value=>{
+        const feed=new URL(canonical(value));
+        const prefix=feed.pathname.replace(/\/(?:feed|rss|atom)(?:\.(?:xml|rss))?\/?$/i,'').replace(/\/$/,'');
+        return target.hostname===feed.hostname && (!prefix || target.pathname===prefix || target.pathname.startsWith(prefix+'/'));
+    });
+}
+
+function assertNoAuthorSources(paragraphs: string[], feeds: string, posts: FeedEntry[]) {
+    const urls=paragraphs.join('\n').match(/https?:\/\/[^\s<>"\])]+/g) || [];
+    if (urls.some(url=>isAuthorSource(url.replace(/[.,;:!?]+$/,''),feeds,posts))) throw new Error(t('newsletterAuthorSource'));
 }
 
 function parseSelection(text: string, articles: Article[]) {
@@ -139,14 +160,16 @@ function parsePublisher(text: string): Pick<Editorial,'title' | 'chapeau'> {
     try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {throw new Error(t('newsletterInvalid'));}
     if (Object.keys(result).length!==2 || typeof result.title!=='string' || !result.title.trim()
         || typeof result.chapeau!=='string' || !result.chapeau.trim()) throw new Error(t('newsletterInvalid'));
-    return {title:result.title,chapeau:result.chapeau};
+    const title=result.title.trim().replace(/^(?:IA|AI|intelligence artificielle)\s*[:：]\s*/i,'');
+    if (!title.trim()) throw new Error(t('newsletterInvalid'));
+    return {title,chapeau:result.chapeau};
 }
 
 function articleInput(prompt: string, articles: Article[], language: string, values: Record<string,string> = {}) {
     if (!/\{\{\s*articles\s*\}\}/.test(prompt)) throw new Error(t('writerArticlesMissing',{variable:'{{articles}}'}));
     return renderPrompt(prompt,{...values,
         language:language.trim() || 'français',
-        articles:JSON.stringify(articles.map(article=>({id:article.id,title:article.title,url:article.url,source:article.source,
+        articles:JSON.stringify(articles.map(article=>({id:article.id,title:article.title,url:article.url,source:article.source,authors:article.authors || [],
             publish:article.publish,content:article.content}))),
     });
 }
@@ -317,4 +340,4 @@ function readFeed(xml: string, limit = 5, base = ''): FeedEntry[] {
     });
 }
 
-export {day, availableArticles, briefArticles, briefRequest, parseBrief, selectionRequest, parseSelection, summaryRequest, parseSummary, parseEditorial, publisherRequest, parsePublisher, renderPrompt, writerRequest, parseNewsletter, renderNewsletter, applyStatuses, feedUrl, feedUrls, readFeed, preview};
+export {day, availableArticles, briefArticles, briefRequest, parseBrief, selectionRequest, parseSelection, isAuthorSource, assertNoAuthorSources, summaryRequest, parseSummary, parseEditorial, publisherRequest, parsePublisher, renderPrompt, writerRequest, parseNewsletter, renderNewsletter, applyStatuses, feedUrl, feedUrls, readFeed, preview};

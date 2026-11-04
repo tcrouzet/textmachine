@@ -49,7 +49,7 @@ test('plugin loading persists missing article IDs without Gmail or an AI run',as
     assert.equal(data.articles[0].id,1);
     assert.equal(data.nextId,2);
     assert.equal(data.notes,'Keep notes');
-    assert.deepEqual(data.articles[0],{...article,status:'',publish:'',image:'',id:1});
+    assert.deepEqual(data.articles[0],{...article,status:'',publish:'',image:'',id:1,authors:[]});
     const migrated = saved;
     await layoutReady();
     assert.equal(saved,migrated);
@@ -126,7 +126,7 @@ test('native secret references reuse existing keys and never copy values into se
 
 async function newsletterFixture() {
     const {p,obsidian} = await fixture();
-    const article = (name,extra={}) => ({date:'2026-11-03',title:name,url:'https://example.com/'+name,source:'User',status:'',usedAt:'',publish:'2026-11-01',content:'Article about AI and books.',image:'',...extra});
+    const article = (name,extra={}) => ({date:'2026-11-03',title:name,url:'https://example.com/'+name,source:'User',authors:[],status:'',usedAt:'',publish:'2026-11-01',content:'Article about AI and books.',image:'',...extra});
     const entries = [article('used',{id:1}),article('discard',{id:2}),article('old',{id:3,usedAt:'2000-01-01'})];
     const contents = new Map([['Data/textmachine.json',JSON.stringify({version:1,nextId:4,notes:'Keep notes',articles:entries})]]);
     const files = new Map();
@@ -365,8 +365,34 @@ test('publisher titles the revised body before image generation and cannot chang
     assert.ok(text.includes('*An introduction written afterwards.*'));
     assert.ok(text.includes('Revised first paragraph.'));
 });
+test('debug off still revises the newsletter without creating or overwriting comparison files',async()=>{
+    const {p,contents}=await newsletterFixture();
+    assert.equal(p.settings.debug,false);
+    const generate=p.generate,day=p.newsletter.day();
+    let revisions=0;
+    p.generate=async(connection,system,input,...rest)=>{
+        if (system.startsWith('Runtime rewriter')) {
+            revisions++;
+            return rewriteResponse(input.replace('First paragraph.','Revised first paragraph.'));
+        }
+        return generate(connection,system,input,...rest);
+    };
+    const note=await p.writeNewsletter();
+    assert.equal(revisions,1);
+    assert.ok(contents.get(note.path).includes('Revised first paragraph.'));
+    const draft='Data/brouillon-'+day+'.md',revision='Data/revision-'+day+'.md';
+    assert.equal(contents.has(draft),false);
+    assert.equal(contents.has(revision),false);
+    await p.app.vault.create(draft,'Previous draft');
+    await p.app.vault.create(revision,'Previous revision');
+    await p.writeNewsletter();
+    assert.equal(revisions,2);
+    assert.equal(contents.get(draft),'Previous draft');
+    assert.equal(contents.get(revision),'Previous revision');
+});
 test('daily draft and revision snapshots preserve both bodies and are replaced on regeneration',async()=>{
     const {p,contents,seen}=await newsletterFixture();
+    p.settings.debug=true;
     const before=contents.get(p.dataPath),generate=p.generate,day=p.newsletter.day();
     const draft='Data/brouillon-'+day+'.md',revision='Data/revision-'+day+'.md';
     let replacement='Revised first paragraph.';
@@ -395,6 +421,7 @@ test('daily draft and revision snapshots preserve both bodies and are replaced o
 });
 test('a rejected revision remains available for comparison while the newsletter keeps the original text',async()=>{
     const {p,contents}=await newsletterFixture();
+    p.settings.debug=true;
     const generate=p.generate,day=p.newsletter.day();
     p.generate=async(connection,system,input,...rest)=>system.startsWith('Runtime rewriter')
         ? JSON.stringify({paragraphs:['Short.','Truncated.']}) : generate(connection,system,input,...rest);
@@ -407,6 +434,7 @@ test('a rejected revision remains available for comparison while the newsletter 
 });
 test('snapshot write failures stop generation without replacing an existing newsletter or article usage',async()=>{
     const {p,contents}=await newsletterFixture();
+    p.settings.debug=true;
     const before=contents.get(p.dataPath),path='Data/text-machine-'+p.newsletter.day()+'.md';
     await p.app.vault.create(path,'# Existing newsletter');
     const create=p.app.vault.create;
@@ -606,8 +634,9 @@ test('failed body revisions save the original article while cancellation still p
     }
 });
 
-test('omitting optional context variables avoids reading old notes and fetching the blog feed',async()=>{
+test('without author feeds or optional history variables no context is fetched',async()=>{
     const {p,contents,seen} = await newsletterFixture();
+    p.settings.authorFeeds='';
     const old = await p.app.vault.create('Data/text-machine-2000-01-01.md','# Old newsletter');
     const read = p.app.vault.read;
     p.app.vault.read = async file=>{assert.notEqual(file,old);return read(file);};
@@ -659,6 +688,78 @@ test('the configured Substack is fetched by the plugin and its posts are inserte
     assert.deepEqual(urls,['https://example.substack.com/feed']);
     assert.equal(seen[0].recentPosts[0].title,'Recent blog post');
     assert.equal(seen[0].recentPosts[0].content,'Recent idea');
+});
+test('author publications are excluded before selection and supplied only as topic history',async()=>{
+    const {p,contents,entries,seen}=await newsletterFixture();
+    const own={...entries[0],id:4,title:'My post',url:'https://example.substack.com/p/my-post'};
+    const ownBrief={...own,id:5,title:'My inaccessible post',url:'https://example.substack.com/p/unreadable',status:'forbidden'};
+    const data=JSON.parse(contents.get(p.dataPath));data.nextId=6;data.articles.push(own,ownBrief);
+    contents.set(p.dataPath,JSON.stringify(data));
+    const posts=[{title:own.title,url:own.url,publish:'2026-11-03',content:'A topic already covered by the author.'}];
+    p.newsletter.readFeed=()=>posts;
+    const read=p.app.vault.adapter.read,generate=p.generate;
+    p.app.vault.adapter.read=async path=>path.endsWith('/prompts/sélection.md')
+        ? '{"instructions":"Runtime selection","articles":{{articles}},"history":{{AuthorFeed}}}'
+        : path.endsWith('/prompts/writer.md') ? '{"instructions":"My runtime prompt","articles":{{articles}}}' : read(path);
+    let selections=0;
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;try {context=JSON.parse(input);} catch { /* Prose in later stages. */ }
+        if (context?.instructions==='Runtime selection') {
+            selections++;
+            assert.deepEqual(context.articles.map(article=>article.id),[1,2]);
+            assert.deepEqual(context.history,posts);
+        }
+        assert.ok(!system.startsWith('Runtime brief'));
+        return generate(connection,system,input,...rest);
+    };
+    const note=await p.writeNewsletter();
+    assert.equal(selections,1);
+    assert.ok(!contents.get(note.path).includes(own.url));
+    assert.deepEqual(seen[0].articles.map(article=>article.id),[1]);
+    assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.slice(-2),[own,ownBrief]);
+});
+test('a writer or publisher reusing an author-feed link cannot replace the saved newsletter',async()=>{
+    for (const stage of ['writer','publisher']) {
+        const {p,contents}=await newsletterFixture();
+        const before=contents.get(p.dataPath),generate=p.generate,path='Data/text-machine-'+p.newsletter.day()+'.md';
+        await p.app.vault.create(path,'# Existing edition');
+        const own='https://example.substack.com/p/own-post';
+        p.generate=async(connection,system,input,...rest)=>{
+            if (stage==='publisher' && input.startsWith('Runtime publisher')) return JSON.stringify({title:'My post',chapeau:'See '+own});
+            let context;try {context=JSON.parse(input);} catch { /* Prose in later stages. */ }
+            if (stage==='writer' && context?.instructions==='My runtime prompt') return JSON.stringify({paragraphs:['A reference [My post]('+own+').','Second paragraph.']});
+            return generate(connection,system,input,...rest);
+        };
+        await assert.rejects(p.writeNewsletter(),/author-feed link/);
+        assert.equal(contents.get(path),'# Existing edition');
+        assert.equal(contents.get(p.dataPath),before);
+    }
+});
+test('a revision adding a plain author URL is retained only for comparison and the original article is published',async()=>{
+    const {p,contents}=await newsletterFixture();
+    p.settings.debug=true;
+    const generate=p.generate;
+    p.generate=async(connection,system,input,...rest)=>system.startsWith('Runtime rewriter')
+        ? rewriteResponse(input+'\n\nhttps://example.substack.com/p/own-post') : generate(connection,system,input,...rest);
+    const note=await p.writeNewsletter();
+    assert.ok(!contents.get(note.path).includes('example.substack.com/p/own-post'));
+    const revision=contents.get('Data/revision-'+p.newsletter.day()+'.md');
+    assert.ok(revision.includes('original article retained'));
+    assert.ok(revision.includes('example.substack.com/p/own-post'));
+});
+test('an author feed cannot also be imported as a source feed',async()=>{
+    const {p}=await newsletterFixture();
+    p.settings.includeFeeds=p.settings.authorFeeds;
+    p.request=async()=>{throw new Error('Author feeds must not be collected');};
+    assert.equal(await p.importFeeds(),0);
+});
+test('only author publications produce no edition and do not consume the saved articles',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    const before=JSON.stringify({version:1,nextId:2,articles:[{...entries[0],url:'https://example.substack.com/p/my-post'}]});
+    contents.set(p.dataPath,before);
+    p.generate=async()=>{throw new Error('Author publications must never reach generation');};
+    assert.equal(await p.writeNewsletter(),null);
+    assert.equal(contents.get(p.dataPath),before);
 });
 
 test('author feeds combine recent posts without duplicates and never add collected articles',async()=>{
@@ -786,6 +887,7 @@ test('invalid or unavailable additional feeds do not call AI or change notes and
 test('generation errors and note save failures leave article statuses unchanged',async()=>{
     for (const failure of ['api','create','invalid']) {
         const {p,contents,failCreate} = await newsletterFixture();
+        p.settings.debug=true;
         const before = contents.get(p.dataPath);
         if (failure==='api') p.generate = withStages(p, async()=>{throw new Error('Provider refused');});
         if (failure==='invalid') p.generate = withStages(p, async()=>'{broken');
@@ -849,6 +951,22 @@ test('crawl skips existing content even without a publication date and fetches o
     assert.deepEqual(saved.slice(0,3),existing);
     assert.equal(saved[3].content,'Newly fetched article');
 });
+test('crawled authors are saved and passed to the writer for source attribution',async()=>{
+    const {p,contents,entries,seen}=await newsletterFixture();
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:2,articles:[{...entries[0],content:''}]}));
+    p.crawler={...p.crawler,crawl:async article=>({...article,content:'A complete source article.',authors:['Jane Doe','Jean Dupont']})};
+    await p.crawlArticles();
+    assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles[0].authors,['Jane Doe','Jean Dupont']);
+    await p.writeNewsletter();
+    assert.deepEqual(seen[0].articles[0].authors,['Jane Doe','Jean Dupont']);
+});
+test('an explicit signature in cached content reaches the writer without crawling the source again',async()=>{
+    const {p,contents,entries,seen}=await newsletterFixture();
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:2,articles:[{...entries[0],content:'By Emmanuel Bernet\n\nA complete source article.'}]}));
+    p.loadPage=async()=>{throw new Error('Cached articles must not be fetched again');};
+    await p.writeNewsletter();
+    assert.deepEqual(seen[0].articles[0].authors,['Emmanuel Bernet']);
+});
 
 test('crawl retains blocked and inaccessible articles as forbidden without retrying them',async()=>{
     const {p,contents,entries} = await newsletterFixture();
@@ -906,6 +1024,7 @@ test('legacy links recover used articles from today’s note while older notes s
 
 test('failed regeneration preserves today’s saved note and its used statuses',async()=>{
     const {p,contents,failCreate} = await newsletterFixture();
+    p.settings.debug=true;
     const note = await p.writeNewsletter();
     const beforeNote = contents.get(note.path), beforeData = contents.get(p.dataPath);
     failCreate();
@@ -948,6 +1067,7 @@ test('AI cannot return article status changes or unknown IDs to alter the saved 
 
 test('a brief-only edition translates titles without reading forbidden content and persists the briefing date',async()=>{
     const {p,contents,entries} = await newsletterFixture();
+    p.settings.authorFeeds='';
     p.settings.newsletterLanguage='français';
     const original={...entries[0],title:'How AI changes writing',status:'forbidden',content:'Unverified content must never be sent to AI'};
     contents.set(p.dataPath,JSON.stringify({version:1,articles:[original]}));
@@ -1125,6 +1245,25 @@ test('cancelling image generation prevents any late note or status write',async(
     await assert.rejects(p.writeNewsletter(),/cancelled/);
     assert.equal(contents.get(p.dataPath),before);
     assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path) || path.endsWith('.png')).length,0);
+});
+
+test('the footer debug toggle defaults to off and persists both boolean values across reloads',async()=>{
+    const {p}=await fixture();
+    const row=p.settingsTab.getSettingDefinitions().at(-1);
+    assert.equal(row.name,'Debug');
+    let initialValue,change;
+    const toggle={setValue(value){initialValue=value;return this;},onChange(handler){change=handler;return this;}};
+    row.render({addToggle:render=>render(toggle)});
+    assert.equal(initialValue,false);
+    for (const value of [true,false]) {
+        await change(value);
+        assert.equal(p.savedSettings.debug,value);
+        await p.onload();
+        assert.equal(p.settings.debug,value);
+    }
+    p.savedSettings.debug='true';
+    await p.onload();
+    assert.equal(p.settings.debug,false);
 });
 
 test('settings definitions are searchable without IO and redraw uses the declarative API when available',async()=>{

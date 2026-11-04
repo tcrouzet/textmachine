@@ -70,6 +70,13 @@ try:
 
         icon.locator('..').screenshot(path=str(temporary / 'settings-icon.png'))
         page.locator('.setting-item-heading .setting-item-name').filter(has_text='Intelligence artificielle').wait_for()
+        debug = page.locator('.setting-item').filter(has=page.get_by_text('Debug', exact=True)).locator('.checkbox-container')
+        assert not page.evaluate("app.plugins.plugins['text-machine'].settings.debug")
+        assert page.evaluate("app.setting.pluginTabs.find(tab => tab.id === 'text-machine').getSettingDefinitions().at(-1).name") == 'Debug'
+        debug.click()
+        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).debug === true")
+        debug.click()
+        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).debug === false")
         assert page.evaluate("() => app.setting.pluginTabs.find(tab => tab.id === 'text-machine').getSettingDefinitions().flatMap(item => item.items || [item]).some(row => row.name === 'Langue de la newsletter')")
         language = page.get_by_role('textbox', name='Langue de la newsletter', exact=True)
         assert language.input_value() == 'français'
@@ -121,18 +128,43 @@ try:
         assert page.evaluate("app.plugins.plugins['text-machine'].getAIConnection().baseUrl") == 'http://localhost:11434/v1'
         page.evaluate("""() => {
             const p = app.plugins.plugins['text-machine'];
-            p.codex = {...p.codex, findCodex:async () => '/fixture/codex', listModels:async () => [{value:'codex-fixture',label:'Codex fixture'}]};
+            p.settings.codexModel = 'codex-fixture';
+            p.codex = {...p.codex, findCodex:async () => '/fixture/codex', listModels:() => new Promise(resolve=>{window.resolveModels=resolve;})};
             const tab = app.setting.pluginTabs.find(tab => tab.id === 'text-machine');
             tab.aiDiscoveryStarted = false;
             tab.display();
         }""")
         page.get_by_role('combobox', name='Codex : modèle', exact=True).wait_for()
+        codex_model = page.get_by_role('combobox', name='Codex : modèle', exact=True)
+        expect(codex_model).to_have_value('codex-fixture')
+        expect(codex_model.locator('option:checked')).to_have_text('codex-fixture')
+        expect(codex_model).to_be_disabled()
+        page.evaluate("window.resolveModels([{value:'codex-fixture',label:'Codex fixture'}])")
+        expect(codex_model).to_be_enabled()
         page.get_by_role('combobox', name='Codex : modèle', exact=True).select_option('codex-fixture')
         page.get_by_role('combobox', name='Modèle par défaut', exact=True).select_option('__codex__')
         assert page.evaluate("app.plugins.plugins['text-machine'].getAIConnection().provider") == 'codex'
         assert page.evaluate("app.plugins.plugins['text-machine'].getAIConnection().model") == 'codex-fixture'
+        page.evaluate("() => {app.plugins.plugins['text-machine'].codex.listModels=async()=>[{value:'codex-fixture',label:'Codex fixture'}];}")
         page.get_by_role('button', name='Recharger', exact=True).click()
         page.wait_for_function("app.plugins.plugins['text-machine'].aiController === null")
+        page.evaluate("() => {app.setting.close();app.setting.open();app.setting.openTabById('text-machine');}")
+        expect(codex_model).to_have_value('codex-fixture')
+        expect(codex_model.locator('option:checked')).to_have_text('Codex fixture')
+        page.evaluate("() => {app.plugins.plugins['text-machine'].codex.listModels=async()=>{throw new Error('Fixture catalog unavailable');};}")
+        page.get_by_role('button', name='Recharger', exact=True).click()
+        page.get_by_role('alert').filter(has_text='Fixture catalog unavailable').wait_for()
+        page.evaluate("() => {app.setting.close();app.setting.open();app.setting.openTabById('text-machine');}")
+        expect(codex_model).to_have_value('codex-fixture')
+        expect(codex_model.locator('option:checked')).to_have_text('Codex fixture')
+        expect(codex_model).to_be_enabled()
+        assert page.evaluate("app.plugins.plugins['text-machine'].getAIConnection().model") == 'codex-fixture'
+        page.evaluate("() => {app.plugins.plugins['text-machine'].codex.listModels=async()=>[];}")
+        page.get_by_role('button', name='Recharger', exact=True).click()
+        expect(codex_model.locator('option:checked')).to_have_text('codex-fixture (absent de la liste)')
+        assert not codex_model.locator('option:checked').evaluate('el => el.disabled')
+        assert page.evaluate("app.plugins.plugins['text-machine'].getAIConnection().model") == 'codex-fixture'
+        print('Codex choice verified while loading, after reopening, after catalog failure and when omitted by the catalog.', flush=True)
 
         assert page.get_by_role('button', name='Importer le JSON', exact=True).count() == 0
         assert page.get_by_text('Première connexion : configurer Google', exact=True).count() == 0
@@ -284,7 +316,7 @@ try:
         assert saved['version'] == 1
         assert len(saved['articles']) == 1
         assert saved['nextId'] == 2
-        assert saved['articles'][0] == {'id':1,'date':'2023-11-14','title':'Article & science','url':'https://example.com/article','source':'Google Alerts','status':'','publish':'2023-11-13','content':'Fixture article content','image':'https://example.com/cover.jpg'}
+        assert saved['articles'][0] == {'id':1,'date':'2023-11-14','title':'Article & science','url':'https://example.com/article','source':'Google Alerts','authors':[],'status':'','usedAt':'','publish':'2023-11-13','content':'Fixture article content','image':'https://example.com/cover.jpg'}
         assert 'My existing notes' in log
         assert 'unsubscribe' not in log and 'tracker.invalid' not in log and 'footer-special' not in log and '/related' not in log
         assert not page.evaluate('!!window.mailScriptRan')

@@ -17,8 +17,8 @@ function renderAI(plugin: TextMachine, tab: GmailSettings): SettingsGroup {
         tab.aiError = '';
         redraw();
         const controller = plugin.aiController = new AbortController();
-        try { tab.codexModels = await plugin.codex.listModels(tab.codexPath, controller.signal); }
-        catch (error) { tab.codexModels = []; tab.aiError = errorOf(error).message; }
+        try { tab.codexModels = await plugin.codex.listModels(tab.codexPath, controller.signal); tab.aiModelsLoaded = true; }
+        catch (error) { tab.aiError = errorOf(error).message; }
         finally { tab.aiLoading = false; if (plugin.aiController === controller) plugin.aiController = null; redraw(); }
     };
     const discover = () => {
@@ -27,8 +27,9 @@ function renderAI(plugin: TextMachine, tab: GmailSettings): SettingsGroup {
         void plugin.codex.findCodex().then(executable => {
             if (plugin.disposed) return;
             tab.codexPath = executable;
+            tab.aiDiscoveryComplete = true;
             if (executable) void loadModels(); else redraw();
-        }).catch(() => { tab.codexPath = null; redraw(); });
+        }).catch(() => { tab.codexPath = null; tab.aiDiscoveryComplete = true; redraw(); });
     };
     const items: SettingRow[] = [];
     for (const [provider,label,url] of [
@@ -62,9 +63,7 @@ function renderAI(plugin: TextMachine, tab: GmailSettings): SettingsGroup {
             for (const model of tab.codexModels) dropdown.addOption(model.value,model.label);
             const selected = plugin.settings.codexModel;
             if (selected && !tab.codexModels.some(model => model.value === selected)) {
-                dropdown.addOption(selected,selected + ' (' + t('aiUnavailable') + ')');
-                const option=dropdown.selectEl.lastElementChild;
-                if (option instanceof HTMLOptionElement) option.disabled = true;
+                dropdown.addOption(selected,selected + (tab.aiModelsLoaded && !tab.aiLoading && !tab.aiError ? ' (' + t('aiModelNotListed') + ')' : ''));
             }
             dropdown.setValue(selected).setDisabled(tab.aiLoading || plugin.busy).onChange(value => save(async () => {
                 plugin.settings.codexModel = value;
@@ -73,7 +72,7 @@ function renderAI(plugin: TextMachine, tab: GmailSettings): SettingsGroup {
         }).addButton(button => button.setButtonText(t('aiReload')).setDisabled(tab.aiLoading || plugin.busy).onClick(loadModels));
     }});
     const choices = [...models];
-    if (tab.codexPath || plugin.settings.aiModel === CODEX_MODEL) choices.push({value:CODEX_MODEL,label:tab.codexPath ? 'Codex' : 'Codex (' + t('aiUnavailable') + ')'});
+    if (tab.codexPath || plugin.settings.aiModel === CODEX_MODEL) choices.push({value:CODEX_MODEL,label:tab.codexPath || !tab.aiDiscoveryComplete ? 'Codex' : 'Codex (' + t('aiUnavailable') + ')'});
     const custom = tab.aiCustom || !choices.some(model => model.value === plugin.settings.aiModel);
     items.push({name:t('aiDefaultModel'),desc:t('aiPriorityDescription'),render:setting=>{
         setting.addDropdown(dropdown => {
@@ -81,7 +80,7 @@ function renderAI(plugin: TextMachine, tab: GmailSettings): SettingsGroup {
             for (const model of choices) {
                 dropdown.addOption(model.value, model.label);
                 const option=dropdown.selectEl.lastElementChild;
-                if (model.value === CODEX_MODEL && !tab.codexPath && option instanceof HTMLOptionElement) option.disabled = true;
+                if (model.value === CODEX_MODEL && tab.aiDiscoveryComplete && !tab.codexPath && option instanceof HTMLOptionElement) option.disabled = true;
             }
             dropdown.addOption('__custom__',t('aiCustomModel'));
             dropdown.setValue(custom ? '__custom__' : plugin.settings.aiModel).onChange(async value => {

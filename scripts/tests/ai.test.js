@@ -45,7 +45,7 @@ async function fakeCodex(t, mode) {
             else if (message.method === 'config/read') result = {config:{mcp_servers:{fixture:{enabled:true}}}};
             else if (message.method === 'thread/start') {
                 if (message.params.sandbox !== 'read-only' || message.params.config.mcp_servers.fixture.enabled !== false) process.exit(3);
-                result = {thread:{id:'thread-1',ephemeral:true},sandbox:{type:mode === 'unsafe' ? 'workspaceWrite' : 'readOnly'},approvalPolicy:'never'};
+                result = {model:message.params.model || 'resolved-default',thread:{id:'thread-1',ephemeral:true},sandbox:{type:mode === 'unsafe' ? 'workspaceWrite' : 'readOnly'},approvalPolicy:'never'};
             } else if (message.method === 'turn/start') {
                 if (message.params.sandboxPolicy.networkAccess !== false) process.exit(4);
                 if (mode === 'image' && !message.params.input.some(item=>item.type==='image' && item.url==='https://example.com/image.jpg')) process.exit(6);
@@ -119,10 +119,18 @@ test('Codex model discovery can be cancelled', async t => {
 
 test('Codex generation uses an ephemeral read-only thread without file or network tools',async t=>{
     const feedback = [];
-    assert.equal(await generate(await fakeCodex(t,'generation'),'Writer prompt','Collected articles','fixture-model',undefined,(text,partial)=>feedback.push({text,partial})), 'Generated newsletter');
-    assert.deepEqual(feedback,[{text:'The AI is preparing its response…',partial:undefined},{text:'Preparing newsletter',partial:undefined},{text:'Generated newsletter',partial:true}]);
+    assert.equal(await generate(await fakeCodex(t,'generation'),'Writer prompt','Collected articles','fixture-model',undefined,(text,partial,_reset,model)=>feedback.push(model ? {model} : {text,partial})), 'Generated newsletter');
+    assert.deepEqual(feedback,[{model:'Codex · fixture-model'},{text:'The AI is preparing its response…',partial:undefined},{text:'Preparing newsletter',partial:undefined},{text:'Generated newsletter',partial:true}]);
     await assert.rejects(generate(await fakeCodex(t,'tools'),'Writer','Articles','fixture-model'),/without tools/);
     await assert.rejects(generate(await fakeCodex(t,'unsafe'),'Writer','Articles','fixture-model'),/without tools/);
+});
+
+test('Codex reports the selected model and resolves the configured default model',async t=>{
+    for (const selected of ['fixture-model','']) {
+        const reported=[];
+        await generate(await fakeCodex(t,'generation'),'Writer','Articles',selected,undefined,(_message,_stream,_reset,model)=>{if(model)reported.push(model);});
+        assert.deepEqual(reported,['Codex · '+(selected || 'resolved-default')]);
+    }
 });
 
 

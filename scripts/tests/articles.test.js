@@ -30,7 +30,7 @@ test('stores structured articles with empty status and no Markdown escaping', ()
     assert.deepEqual(messageArticles(m), []);
     m.bodies = [{type:'text/plain', text:'https://example.com/article'}];
     const entry = messageArticles(m);
-    assert.deepEqual(entry[0], {date:'2023-11-14',title:'article',url:'https://example.com/article',source:'Utilisateur (présumé)',status:'',usedAt:'',publish:'',content:'',image:''});
+    assert.deepEqual(entry[0], {date:'2023-11-14',title:'article',url:'https://example.com/article',source:'Utilisateur (présumé)',authors:[],status:'',usedAt:'',publish:'',content:'',image:''});
     const first = mergeArticles('{"version":1,"articles":[]}', entry);
     assert.equal(first.count, 1);
     assert.equal(parseData(first.text).articles.length, 1);

@@ -37,6 +37,29 @@ test('punctuation preserves Markdown links, images, code, metadata and addresses
     for (const part of protectedParts) assert.ok(output.includes(part),part);
 });
 
+test('French heading and brief link titles receive nonbreaking colon spacing without changing their targets',()=>{
+    const target='https://example.com/report:2026?q=10:30&title=Writing:practice';
+    const input='# Écrire: apprendre\n\n#### [Écriture : pratiques](<'+target+'> "Source: titre")\n\n* [Atelier à 10:30: écrire](https://example.com/a_(b):c)';
+    const expected='# Écrire\u00a0: apprendre\n\n#### [Écriture\u00a0: pratiques](<'+target+'> "Source: titre")\n\n* [Atelier à 10:30\u00a0: écrire](https://example.com/a_(b):c)';
+    assert.equal(correct(input,'français'),expected);
+    assert.equal(correct(expected,'français'),expected);
+    assert.equal(correct(input,'English'),input);
+});
+
+test('colon correction in link labels preserves code, frontmatter, images and wiki targets',()=>{
+    const parts=[
+        '---\ntitle: "[Titre: lien](https://example.com)"\n---',
+        '`[Titre: code](https://example.com)`',
+        '```md\n[Titre: bloc](https://example.com)\n```',
+        '![Photo: légende](https://example.com/photo.jpg)',
+        '[![Photo: légende](https://example.com/photo.jpg)](https://example.com/article)',
+        '[[Note: cible]]',
+        '[Titre: référence][ref]\n\n[ref]: https://example.com',
+    ];
+    const input=parts.join('\n\n');
+    assert.equal(correct(input,'français'),input);
+});
+
 test('Finition paragraph spacing keeps lists compact and code blank lines intact',()=>{
     const input = '- Un\n\n- Deux\n\n\nFin.\n\n```\nUn\n\n\nDeux\n```';
     assert.equal(correct(input,'français'),'- Un\n- Deux\n\nFin.\n\n```\nUn\n\n\nDeux\n```');

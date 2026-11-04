@@ -1,13 +1,7 @@
-À partir de l’article finalisé ci-dessous, écris son titre et son chapeau en {{language}}.
+Écris en {{language}} un titre court et un chapeau de moins de 25 mots pour cette revue de presse. Présente le parcours entre les différentes sources, sans réduire l’édition à son exemple d’ouverture. Le chapeau doit se comprendre seul : des faits concrets, des acteurs nommés, aucun pronom au référent incertain.
 
-Le titre est simple et direct. Il doit donner envie de lire, refléter l’idée qui se dégage du texte et ne comporter ni date ni référence à TextMachine. Évite les structures alambiquées et la simple reprise du titre d’une source.
+Appuie-toi uniquement sur le texte, sans lui imposer une idée commune ni ajouter de faits. Évite les étiquettes abstraites et l’énumération des thèmes. Le titre ne répète ni « IA », ni « AI », ni « intelligence artificielle » ; il ne comporte ni date ni référence à TextMachine.
 
-Le chapeau fait moins de 25 mots et donne envie de lire l’article, sans répéter le titre.
-
-Appuie-toi uniquement sur le texte fourni. N’ajoute aucun fait, aucune citation ni aucun rapprochement absent de l’article. Ne réécris pas son corps.
-
-Retourne uniquement le JSON demandé avec le titre et le chapeau.
-
-# Article finalisé
+# Texte finalisé
 
 {{article}}

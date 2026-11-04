@@ -78,12 +78,13 @@ export default class TextMachine extends Plugin {
         this.renderAI = renderAI;
         const {newsletterFeed:legacyFeed,...storedSettings} = record(await this.loadData());
         const defaults: Settings = {...this.ai.defaults, secretKey:'',labelId:'',outputFolder:'',excludedSources:'',newsletterLanguage:'français',referenceSources:'',includeFeeds:'',
-            authorFeeds:typeof legacyFeed==='string' ? legacyFeed : '',anthropicSecretId:undefined,openaiSecretId:undefined};
+            authorFeeds:typeof legacyFeed==='string' ? legacyFeed : '',debug:false,anthropicSecretId:undefined,openaiSecretId:undefined};
         this.settings = {...storedSettings,...defaults};
         for (const key of Object.keys(defaults) as (keyof Settings)[]) {
             const value=storedSettings[key];
-            if (typeof value==='string') this.settings[key]=value;
+            if (key!=='debug' && typeof value==='string') this.settings[key]=value;
         }
+        this.settings.debug=storedSettings.debug===true;
         if (legacyFeed!==undefined) await this.saveData(this.settings);
         this.labels = [];
         this.busy = false;
@@ -350,6 +351,7 @@ export default class TextMachine extends Plugin {
                     const saved = current.articles.find((item: {url:string}) => item.url === article.url);
                     if (saved) {
                         for (const key of ['publish', 'content', 'image'] as const) saved[key] ||= result[key];
+                        if (!saved.authors?.length && result.authors?.length) saved.authors=[...result.authors];
                         if (saved.image===result.image && !saved.imageCaption) saved.imageCaption = result.imageCaption;
                         if (result.status === 'forbidden') saved.status = 'forbidden';
                         else if (saved.status === '404') saved.status = '';
@@ -361,7 +363,7 @@ export default class TextMachine extends Plugin {
     }
 
     async importFeeds(progress?: Progress) {
-        const feeds = this.newsletter.feedUrls(this.settings.includeFeeds);
+        const feeds = this.newsletter.feedUrls(this.settings.includeFeeds).filter(url=>!this.newsletter.isAuthorSource(url,this.settings.authorFeeds));
         if (!feeds.length) return 0;
         if (!this.dataReady) throw new Error(t('createFolderFirst'));
         const log = this.dataFile;
@@ -376,7 +378,7 @@ export default class TextMachine extends Plugin {
                 if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));
                 if (response.status!==200) throw new Error(t('newsletterFeedFailed'));
                 const entries = this.articles.feedArticles(this.newsletter.readFeed(response.text,Infinity,url),url,this.newsletter.day())
-                    .filter((article: Omit<Article,'id'>)=>!this.articles.isExcluded(article,this.settings.excludedSources))
+                    .filter((article: Omit<Article,'id'>)=>!this.articles.isExcluded(article,this.settings.excludedSources) && !this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds))
                     .map((article: Omit<Article,'id'>)=>this.crawler.isBlocked(article.url,blocked) ? {...article,status:'forbidden'} : article);
                 let result!: ReturnType<typeof articles.mergeArticles>;
                 await this.app.vault.process(log,text=>{
@@ -405,7 +407,7 @@ export default class TextMachine extends Plugin {
                 const message = await this.client.message(id);
                 if (!message.labelIds.includes('UNREAD') || !message.labelIds.includes(labelId)) continue;
                 const entry = this.articles.messageArticles(message)
-                    .filter(article => !this.articles.isExcluded(article, this.settings.excludedSources))
+                    .filter(article => !this.articles.isExcluded(article, this.settings.excludedSources) && !this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds))
                     .map(article=>this.crawler.isBlocked(article.url,blocked) ? {...article,status:'forbidden'} : article);
                 if (this.disposed) throw new Error(t('pluginDisabled'));
                 let result!: ReturnType<typeof articles.mergeArticles>;
@@ -455,17 +457,19 @@ export default class TextMachine extends Plugin {
         const todayNotes = await Promise.all(notes.filter(file=>file.name.startsWith('text-machine-'+day)).map(file=>vault.read(file)));
         await vault.process(log,text=>this.articles.withIds(text));
         const data = await vault.read(log);
-        const pending: Article[] = this.newsletter.availableArticles(data,this.settings.excludedSources,day,todayNotes);
-        const brief: Article[] = this.newsletter.briefArticles(data,this.settings.excludedSources,day);
+        let pending: Article[] = this.newsletter.availableArticles(data,this.settings.excludedSources,day,todayNotes);
+        let brief: Article[] = this.newsletter.briefArticles(data,this.settings.excludedSources,day);
         if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
         let template = newsletterTemplate;
         const templatePath = this.manifest.dir + '/models/newsletter.md';
         if (await vault.adapter.exists(templatePath)) template = await vault.adapter.read(templatePath);
         if (!template.trim()) throw new Error(t('newsletterTemplateInvalid'));
         const controller = this.aiController = new AbortController();
+        const debug = this.settings.debug;
         const check = () => {if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));};
         const saveSnapshot = async (name: string, text: string) => {
             check();
+            if (!debug) return;
             const path=this.settings.outputFolder+'/'+name+'-'+day+'.md';
             const file=vault.getAbstractFileByPath(path);
             try {
@@ -482,10 +486,18 @@ export default class TextMachine extends Plugin {
             return prompt;
         };
         const respond = async (request: {system: string; input: string; schema?: object}, feedback?: Progress) => {
-            connection ||= this.getAIConnection();
+            if (!connection) {
+                connection = this.getAIConnection();
+                const provider = connection.provider==='codex' ? 'Codex' : connection.provider==='anthropic' ? 'Anthropic' : connection.baseUrl ? t('aiLocalServer') : 'OpenAI';
+                progress?.('',false,false,provider+' · '+(connection.model || t('aiDefaultCodexModel')));
+            }
+            const report: Progress = (message,stream,reset,model) => {
+                if (model) progress?.(message,stream,reset,model);
+                else feedback?.(message,stream,reset);
+            };
             const response=connection.provider==='codex'
-                ? await this.codex.generate(await this.codex.findCodex(),request.system,request.input,connection.model,controller.signal,feedback,request.schema)
-                : await this.generate(connection,request.system,request.input,this.requestAI,controller.signal,feedback);
+                ? await this.codex.generate(await this.codex.findCodex(),request.system,request.input,connection.model,controller.signal,report,request.schema)
+                : await this.generate(connection,request.system,request.input,this.requestAI,controller.signal,report);
             check();
             return response;
         };
@@ -493,7 +505,10 @@ export default class TextMachine extends Plugin {
             let result: ReturnType<typeof newsletter.parseNewsletter> = {title:'',chapeau:'',paragraphs:[],lead:null,image:null,groups:[],used:[],discard:[]};
             let draft: {lead: number; groups: newsletter.SourceGroup[]; discard: number[]} | null = null;
             let generated: Awaited<ReturnType<typeof createIllustration>> | null = null;
-            let authorPosts: ReturnType<typeof newsletter.readFeed> | undefined;
+            const authorPosts=await this.readAuthorFeeds(controller.signal);
+            pending=pending.filter(article=>!this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds,authorPosts));
+            brief=brief.filter(article=>!this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds,authorPosts));
+            if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
             if (pending.length) {
                 const prompt=await readPrompt('writer.md',writerPrompt);
                 const selectionTemplate=await readPrompt('sélection.md',selectionPrompt);
@@ -502,10 +517,9 @@ export default class TextMachine extends Plugin {
                 const previous=[prompt,selectionTemplate].some(text=>/\{\{\s*previousNewsletters\s*\}\}/.test(text))
                     ? await Promise.all(oldNotes.map(async file=>({name:file.name,content:await vault.read(file)}))) : [];
                 progress?.(t('newsletterReadingContext'));
-                if (/\{\{\s*(?:recentPosts|AuthorFeed)\s*\}\}/.test(prompt)) authorPosts=await this.readAuthorFeeds(controller.signal);
                 check();
                 progress?.(t('newsletterSelecting'));
-                const selectionRequest=this.newsletter.selectionRequest(selectionTemplate,pending,language,this.settings.referenceSources,previous);
+                const selectionRequest=this.newsletter.selectionRequest(selectionTemplate,pending,language,this.settings.referenceSources,previous,authorPosts);
                 const selection=this.newsletter.parseSelection(await respond(selectionRequest),pending);
                 result.discard=selection.discard.map((id: number)=>pending.find(article=>article.id===id)!.url);
                 if (selection.selected.length) {
@@ -526,6 +540,7 @@ export default class TextMachine extends Plugin {
                     draft={lead:selection.selected[0].id,groups,discard:selection.discard};
                     await saveSnapshot('brouillon',result.paragraphs.join('\n\n'));
                     await saveSnapshot('revision','> '+t('newsletterRevisionPending'));
+                    this.newsletter.assertNoAuthorSources(result.paragraphs,this.settings.authorFeeds,authorPosts);
                 }
                 if (!result.used.length && (!brief.length || pending.some(article=>!!article.usedAt))) {
                     await vault.process(log,current=>this.newsletter.applyStatuses(current,pending.filter(article=>!article.usedAt),result,day));
@@ -535,16 +550,12 @@ export default class TextMachine extends Plugin {
             }
             let translatedBrief = brief;
             if (brief.length) {
-                connection ||= this.getAIConnection();
                 progress?.(t('newsletterTranslatingBrief'));
                 let prompt = brefPrompt;
                 const path = this.manifest.dir + '/prompts/bref.md';
                 if (await vault.adapter.exists(path)) prompt = await vault.adapter.read(path);
                 const request = this.newsletter.briefRequest(prompt,brief,language);
-                const response = connection.provider==='codex'
-                    ? await this.codex.generate(await this.codex.findCodex(),request.system,request.input,connection.model,controller.signal,undefined,request.schema)
-                    : await this.generate(connection,request.system,request.input,this.requestAI,controller.signal);
-                check();
+                const response = await respond(request);
                 translatedBrief = this.newsletter.parseBrief(response,brief);
             }
             if (result.used.length && connection) {
@@ -555,7 +566,6 @@ export default class TextMachine extends Plugin {
                     const path = this.manifest.dir + '/prompts/rewriter.md';
                     if (await vault.adapter.exists(path)) prompt = await vault.adapter.read(path);
                     if (!prompt.trim()) throw new Error(t('newsletterRewriterEmpty'));
-                    if (/\{\{\s*(?:recentPosts|AuthorFeed)\s*\}\}/.test(prompt) && authorPosts===undefined) authorPosts = await this.readAuthorFeeds(controller.signal);
                     const serializedPosts = JSON.stringify(authorPosts || []);
                     const system = this.newsletter.renderPrompt(prompt,{language,AuthorFeed:serializedPosts,recentPosts:serializedPosts});
                     progress?.(t('newsletterRewriting'));
@@ -565,7 +575,9 @@ export default class TextMachine extends Plugin {
                         const paragraphs=record(JSON.parse(response.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''))).paragraphs;
                         if (Array.isArray(paragraphs) && paragraphs.every((item: unknown)=>typeof item==='string')) revisedText=paragraphs.join('\n\n');
                     } catch { /* Preserve malformed responses for comparison. */ }
-                    result.paragraphs = parseRewrite(original,response);
+                    const revised=parseRewrite(original,response);
+                    this.newsletter.assertNoAuthorSources(revised,this.settings.authorFeeds,authorPosts);
+                    result.paragraphs = revised;
                 } catch (caught) {
                     check();
                     revisionError=t('newsletterRewriteFallback',{reason:errorOf(caught).message});
@@ -579,6 +591,7 @@ export default class TextMachine extends Plugin {
                 progress?.(t('newsletterPublishing'));
                 const request=this.newsletter.publisherRequest(await readPrompt('publisher.md',publisherPrompt),result.paragraphs,language);
                 const publication=this.newsletter.parsePublisher(await respond(request,progress));
+                this.newsletter.assertNoAuthorSources([publication.title,publication.chapeau],this.settings.authorFeeds,authorPosts);
                 result=this.newsletter.parseNewsletter(JSON.stringify({...draft,...publication,paragraphs:result.paragraphs,image:null}),pending);
             }
             const illustrationName='text-machine-'+day+'.png';
@@ -643,6 +656,8 @@ class TextMachineRun extends Modal {
     statusEl?: HTMLElement;
     logEl?: HTMLElement;
     outputEl?: HTMLElement;
+    modelEl?: HTMLElement;
+    modelText = '';
     aiText = '';
     notePath = '';
 
@@ -666,6 +681,7 @@ class TextMachineRun extends Modal {
         p.busy = true;
         this.working = true;
         this.aiText = '';
+        this.modelText = '';
         this.outputEl = undefined;
         this.error = '';
         this.render();
@@ -695,7 +711,7 @@ class TextMachineRun extends Modal {
             return;
         }
         await this.perform(async () => {
-            const progress: Progress = (message,stream,reset) => this.showProgress(message,stream,reset);
+            const progress: Progress = (message,stream,reset,model) => this.showProgress(message,stream,reset,model);
             const collected = await p.importUnread(progress);
             if (this.closed || p.disposed) return;
             const note = await p.writeNewsletter(progress);
@@ -704,8 +720,13 @@ class TextMachineRun extends Modal {
         }, false);
     }
 
-    showProgress(message: string, stream = false, reset = false) {
+    showProgress(message: string, stream = false, reset = false, model?: string) {
         if (this.closed || !this.logEl) return;
+        if (model) {
+            this.modelText = t('aiTextModel',{model});
+            if (this.modelEl) {this.modelEl.setText(this.modelText);this.modelEl.hidden=false;}
+            return;
+        }
         const follow = this.logEl.scrollHeight-this.logEl.scrollTop-this.logEl.clientHeight <= 1;
         if (stream) {
             if (reset) this.aiText='';
@@ -726,6 +747,8 @@ class TextMachineRun extends Modal {
     render() {
         const p = this.plugin, el = this.contentEl;
         el.empty();
+        this.modelEl = el.createEl('p',{cls:'text-machine-run-model',text:this.modelText});
+        this.modelEl.hidden = !this.modelText;
         if (this.error) el.createEl('p', {text:this.error, attr:{role:'alert'}});
         if (this.working) {
             const activity = el.createDiv('text-machine-activity');
@@ -882,7 +905,9 @@ export class GmailSettings extends PluginSettingTab {
     progress = '';
     aiError = '';
     aiLoading = false;
+    aiModelsLoaded = false;
     aiDiscoveryStarted = false;
+    aiDiscoveryComplete = false;
     codexPath: string | null = null;
     codexModels: Model[] = [];
     aiCustom = false;
@@ -1139,6 +1164,12 @@ export class GmailSettings extends PluginSettingTab {
         }});
         newsletterSettings.items.push({name:t('newsletterSourcesHeading'),render:setting=>{setting.setHeading();}},...newsletterSources);
         items.push(p.renderAI(p,this));
+        items.push({name:t('debug'),desc:t('debugDescription'),render:setting=>{
+            setting.addToggle(toggle=>toggle.setValue(p.settings.debug).onChange(value=>{
+                p.settings.debug=value;
+                void p.saveData(p.settings).catch(()=>{this.error=t('aiSaveFailed');this.redraw();});
+            }));
+        }});
         return items;
     }
 }

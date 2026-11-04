@@ -181,6 +181,18 @@ try:
         assert not page.evaluate('!!window.articleScriptRan')
         assert not inert_requests, inert_requests
         for metadata, expected in [
+            ('<script type="application/ld+json">{"@type":"NewsArticle","author":[{"@type":"Person","name":"Jane Doe"},{"@type":"Person","name":"Jean Dupont"}]}</script>', ['Jane Doe','Jean Dupont']),
+            ('<script type="application/ld+json">{"@graph":[{"@type":"NewsArticle","author":{"@id":"#writer"}},{"@type":"Person","@id":"#writer","name":"Jane Doe"}]}</script>', ['Jane Doe']),
+            ('<meta name="author" content="Jane Doe"><meta name="citation_author" content="Jean Dupont"><meta name="author" content="Jane Doe"><meta property="article:author" content="https://example.com/authors/jane">', ['Jane Doe','Jean Dupont']),
+            ('<a rel="author">Par Jane Doe</a><blockquote><span class="author-name">Interview subject</span></blockquote><footer><span class="author-name">Footer editor</span></footer>', ['Jane Doe']),
+            ('<span itemprop="author"><span itemprop="name">Jane Doe</span></span>', ['Jane Doe']),
+            ('<meta property="article:author" content="https://example.com/profile">', []),
+        ]:
+            authored = page.evaluate("""metadata => app.plugins.plugins['text-machine'].crawler.extractPage(metadata
+                + '<article><p>' + 'A meaningful article about publishing books and reading. '.repeat(30) + '</p></article>', 'https://example.com/authored')""", metadata)
+            assert authored['authors'] == expected, (metadata, authored)
+        print('Article authors verified: JSON-LD people and references, multiple metadata names, visible signatures, no profile URLs or quoted speakers.', flush=True)
+        for metadata, expected in [
             ('<time datetime="2026-10-12T12:00:00Z"></time>', '2026-10-12T12:00:00Z'),
             ('<meta name="parsely-pub-date" content="2026-09-04">', '2026-09-04'),
             ('<article><span class="published-date">Publié le 3 novembre 2026</span></article>', '2026-11-03'),

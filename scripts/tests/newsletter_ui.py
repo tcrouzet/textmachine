@@ -19,7 +19,7 @@ with (plugin / 'main.js').open('a') as fixture:
 (plugin / 'prompts/rewriter.md').write_text('Runtime revision in {{language}}. Simplify jargon and preserve links, images and credits.')
 (plugin / 'prompts/bref.md').write_text('Runtime brief in {{language}}.')
 (plugin / 'prompts/image.md').write_text('Runtime image generation in {{language}}. Black and white humorous cartoon without text, landscape 4/3.')
-(plugin / 'prompts/sélection.md').write_text('{"instructions":"Runtime selection","language":"{{language}}","articles":{{articles}}}')
+(plugin / 'prompts/sélection.md').write_text('{"instructions":"Runtime selection","language":"{{language}}","articles":{{articles}},"previousPosts":{{AuthorFeed}}}')
 (plugin / 'prompts/resume.md').write_text('{"instructions":"Runtime summaries","language":"{{language}}","article":{{article}}}')
 (plugin / 'models').mkdir()
 (plugin / 'models/newsletter.md').write_text((root / 'models/newsletter.md').read_text().replace('## Revue de presse','## Revue de presse (modèle local)'))
@@ -58,6 +58,7 @@ try:
             p.loaded = true;
             p.settings.labelId = 'Label_1';
             p.settings.newsletterLanguage = 'español';
+            p.settings.debug = true;
             p.settings.referenceSources = 'news.example.com';
             p.settings.authorFeeds = 'https://tcrouzet.substack.com';
             p.client.unreadMessages = async function* () {};
@@ -104,6 +105,7 @@ try:
             window.answerStages=input=>{
                 let context;try{context=JSON.parse(input);}catch{return null;}
                 if(context?.instructions==='Runtime selection'){
+                    if(context.previousPosts[0]?.url!=='https://tcrouzet.substack.com/p/latest')throw new Error('Author history missing from selection');
                     window.pipelineStages.push('selection');
                     if(context.articles.some(article=>['status','image','hasImage','imageCaption'].some(key=>Object.hasOwn(article,key))))throw new Error('Selection must not depend on photo metadata');
                     return JSON.stringify({selected:context.articles.filter(article=>article.title!=='irrelevant').map(article=>article.id),discard:context.articles.filter(article=>article.title==='irrelevant').map(article=>article.id)});
@@ -166,6 +168,9 @@ try:
         page.locator('.menu-item').filter(has_text='Text Machine').click()
         page.locator('.text-machine-live-output').filter(has_text='First paragraph.').wait_for()
         spinner = page.locator('.text-machine-spinner')
+        model = page.locator('.text-machine-run-model')
+        assert model.inner_text() == 'Modèle du texte : OpenAI · fixture'
+        assert model.is_visible()
         assert spinner.is_visible()
         assert spinner.evaluate("el => getComputedStyle(el).animationName") == 'text-machine-spin'
         page.emulate_media(reduced_motion='reduce')
@@ -184,6 +189,8 @@ try:
         page.evaluate('window.finishGeneration()')
         page.get_by_role('status').filter(has_text='Newsletter enregistrée').wait_for()
         assert spinner.count() == 0
+        assert model.inner_text() == 'Modèle du texte : OpenAI · fixture'
+        assert model.is_visible()
         print('Live progress verified before completion: animated spinner, reduced motion, streamed text, inert logs, automatic scrolling, manual scroll preserved and no premature writes.', flush=True)
         assert page.evaluate('window.generated === true && !window.feedExecuted')
         first = page.evaluate('window.firstNote')
@@ -345,6 +352,22 @@ try:
         print('Writer body, revision and publisher title/intro verified as separate calls with body-only streaming before the title exists.',flush=True)
         print('Daily illustration verified: final-article input, 4/3 PNG, monochrome pixels, note-based filename and reuse across regenerations without any extra image API call.',flush=True)
         print('French punctuation verified on the saved Obsidian note: title, chapeau, body, summaries and protected source links.', flush=True)
+        author_guard = page.evaluate("""async () => {
+            const p=app.plugins.plugins['text-machine'];
+            const file=app.vault.getAbstractFileByPath(p.dataPath),note=app.vault.getAbstractFileByPath(window.firstNote);
+            const beforeData=await app.vault.read(file),beforeNote=await app.vault.read(note),generate=p.generate;
+            p.generate=async(connection,system,input,...rest)=>{
+                let context;try{context=JSON.parse(input);}catch{}
+                if(context?.instructions==='Runtime writer')return JSON.stringify({paragraphs:['Un billet [de l’auteur](https://tcrouzet.substack.com/p/latest).','Une autre phrase.']});
+                return generate(connection,system,input,...rest);
+            };
+            let failure='';
+            try{await p.writeNewsletter();}catch(error){failure=error.message;}finally{p.generate=generate;}
+            return {failure,unchangedData:beforeData===await app.vault.read(file),unchangedNote:beforeNote===await app.vault.read(note)};
+        }""")
+        assert 'flux d’auteur' in author_guard['failure'], author_guard
+        assert author_guard['unchangedData'] and author_guard['unchangedNote'], author_guard
+        print('Author-feed history reached selection; an attempted author-post reference was blocked without changing the published note or article usage.', flush=True)
         page.evaluate("""async () => {
             const leaf = app.workspace.getLeavesOfType('file-explorer')[0] || app.workspace.getLeftLeaf(false);
             await leaf.setViewState({type:'file-explorer',active:true});

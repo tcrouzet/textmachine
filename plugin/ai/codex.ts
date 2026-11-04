@@ -128,6 +128,7 @@ async function run(executable: string | null, signal?: AbortSignal, generation?:
             if (typeof details.id !== 'string' || !details.id || record(thread.sandbox).type !== 'readOnly'
                 || thread.approvalPolicy !== 'never' || details.ephemeral !== true) throw new Error(t('aiCodexToolsDenied'));
             threadId = details.id;
+            if (typeof thread.model === 'string' && thread.model.trim() && thread.model.length <= 200) generation.progress?.('',false,false,'Codex · '+thread.model);
             await request('turn/start',{threadId,input:[{type:'text',text:generation.input,text_elements:[]},...(generation.imageUrl ? [{type:'image',url:generation.imageUrl}] : [])],sandboxPolicy:{type:'readOnly',networkAccess:false},...(generation.schema ? {outputSchema:generation.schema} : {})});
             return await completed;
         }

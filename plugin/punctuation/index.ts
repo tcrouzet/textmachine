@@ -1,5 +1,5 @@
 // Repris des corrections de ponctuation de Finition, avec leurs protections Markdown.
-import { linkRanges, mergeRanges } from "./markdown-links";
+import { linkRanges, markdownLinks, mergeRanges } from "./markdown-links";
 import { markdownExclusionRanges } from "./markdown-tags";
 import { preserveNonbreakingSpaces } from "./diff";
 import units from "./units.json";
@@ -192,5 +192,15 @@ export function fixBlankLinesProtected(text: string): string {
 
 export function correctNewsletterPunctuation(markdown: string, language: string): string {
 	if (!/^(?:fr(?:[-_][a-z]{2})?|fran[cç]ais|french)$/i.test(language.trim())) return markdown;
+	const excluded = [...markdownExclusionRanges(markdown), ...[...markdown.matchAll(PROTECT_RE)].map(match => [match.index, match.index + match[0].length] as const)];
+	for (const { from, label } of markdownLinks(markdown).reverse()) {
+		if (!label || markdown[from] !== "[" || markdown[label[1] + 1] !== "("
+			|| excluded.some(([start, end]) => from >= start && from < end)) continue;
+		const visible = markdown.slice(label[0], label[1]);
+		if (visible.includes("![")) continue;
+		const protectedLabel = protectSpans(visible);
+		const corrected = preserveNonbreakingSpaces(visible, protectedLabel.restore(protectedLabel.text.replace(/[\u00A0\u202F \t]*:/g, "\u00A0:")));
+		markdown = markdown.slice(0, label[0]) + corrected + markdown.slice(label[1]);
+	}
 	return fixBlankLinesProtected(fixPunctuationSpacing(markdown));
 }
