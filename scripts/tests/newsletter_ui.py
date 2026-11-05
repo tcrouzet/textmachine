@@ -20,9 +20,8 @@ with (plugin / 'main.js').open('a') as fixture:
 (plugin / 'prompts/bref.md').write_text('Runtime brief in {{language}}.')
 (plugin / 'prompts/image.md').write_text('Runtime image generation in {{language}}. Black and white humorous cartoon without text, landscape 4/3.')
 (plugin / 'prompts/sélection.md').write_text('{"instructions":"Runtime selection","language":"{{language}}","articles":{{articles}},"previousPosts":{{AuthorFeed}}}')
-(plugin / 'prompts/resume.md').write_text('{"instructions":"Runtime summaries","language":"{{language}}","article":{{article}}}')
 (plugin / 'models').mkdir()
-(plugin / 'models/newsletter.md').write_text((root / 'models/newsletter.md').read_text().replace('## Revue de presse','## Revue de presse (modèle local)'))
+(plugin / 'models/newsletter.md').write_text((root / 'models/newsletter.md').read_text()+'\nmodèle local\n')
 (profile / 'obsidian.json').write_text(json.dumps({'vaults': {'0123456789abcdef': {'path': str(vault), 'ts': int(time.time()*1000), 'open': True}}}))
 (vault / '.obsidian/community-plugins.json').write_text('["text-machine"]')
 (vault / '.obsidian/core-plugins.json').write_text('["file-explorer"]')
@@ -68,9 +67,14 @@ try:
             const article = (slug,extra={})=>({date:'2026-11-03',title:slug,url:'https://example.com/'+slug,source:'User',status:'',publish:'2026-11-01',content:'AI and books '+slug,image:'',...extra});
             const entries = [article('relevant',{status:'used',image:'https://example.com/cover.jpg'}),article('irrelevant'),article('old',{status:'used'}),article('blocked',{title:'New AI writing study',status:'404',content:'Unverified content must never be sent'})];
             const file = app.vault.getAbstractFileByPath(p.dataPath);
-            await app.vault.modify(file,JSON.stringify({version:1,annotation:'Keep this',articles:entries}));
             const now = new Date();
             const day = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+            const yesterday=new Date(now.getFullYear(),now.getMonth(),now.getDate()-1);
+            window.previousDay=p.newsletter.day(yesterday);
+            entries[1].usedAt=window.previousDay;
+            await app.vault.modify(file,JSON.stringify({version:1,annotation:'Keep this',articles:entries}));
+            window.previousNote='TextMachine/text-machine-'+window.previousDay+'.md';
+            await app.vault.create(window.previousNote,'# Yesterday');
             window.firstNote = 'TextMachine/text-machine-'+day+'.md';
             await app.vault.create(window.firstNote,'# Earlier edition\n\n[Source](https://example.com/relevant)');
             await app.vault.create('TextMachine/text-machine-2000-01-01.md','# Previous angle');
@@ -98,7 +102,7 @@ try:
             window.publication={title:'Books and AI',chapeau:'Introduction.'};
             window.answerPublisher=input=>{
                 if(!input.startsWith('Runtime publisher'))return null;
-                if(input.includes('Selected article.') || input.includes('illustrations/') || input.includes('Previous blog idea'))throw new Error('Publisher must receive the article body only');
+                if(input.includes('illustrations/') || input.includes('Previous blog idea'))throw new Error('Publisher must receive the article body only');
                 window.pipelineStages.push('publisher');
                 return JSON.stringify(window.publication);
             };
@@ -109,11 +113,6 @@ try:
                     window.pipelineStages.push('selection');
                     if(context.articles.some(article=>['status','image','hasImage','imageCaption'].some(key=>Object.hasOwn(article,key))))throw new Error('Selection must not depend on photo metadata');
                     return JSON.stringify({selected:context.articles.filter(article=>article.title!=='irrelevant').map(article=>article.id),discard:context.articles.filter(article=>article.title==='irrelevant').map(article=>article.id)});
-                }
-                if(context?.instructions==='Runtime summaries'){
-                    if(Object.keys(context.article).join(',')!=='title,content')throw new Error('Summary must receive only one title and text');
-                    window.pipelineStages.push('resume');
-                    return JSON.stringify({summary:context.language==='français'?'Prix: 25 euros.':'Selected article.'});
                 }
                 return null;
             };
@@ -135,7 +134,7 @@ try:
                 if (brief) return brief;
                 if(imageUrl)throw new Error('Source image verification must not run');
                 if (system.startsWith('Runtime revision')) {
-                    if (input.includes('# Books and AI') || input.includes('Revue de presse') || input.includes('Selected article.') || input.includes('Photograph:') || input.includes('![') || input.includes('illustrations/')) throw new Error('Non-article content sent to revision');
+                    if (input.includes('# Books and AI') || input.includes('Revue de presse') || input.includes('Photograph:') || input.includes('![') || input.includes('illustrations/')) throw new Error('Non-article content sent to revision');
                     const schema=JSON.parse(system.split('\n\n').at(-1)).jsonSchema;
                     if (Object.keys(schema.properties).join()!=='paragraphs' || schema.additionalProperties!==false) throw new Error('Missing revision schema');
                     window.rewriterUsed=true;window.pipelineStages.push('revision');return window.rewriteResponse(input);
@@ -145,7 +144,7 @@ try:
                 if (context.language!=='español' || input.includes('{{language}}')) throw new Error('Prompt variables not expanded');
                 if (system.includes('newsletter.md') || system.includes('modèle local') || input.includes('{{#groups}}')) throw new Error('Markdown template sent to AI');
                 if (context.articles.length!==1) throw new Error('Writer must receive only the selected source');
-                if(Object.hasOwn(context,'summaries') || input.includes('Selected article.'))throw new Error('Press review must be assembled by the plugin, not sent to the writer');
+                if(Object.hasOwn(context,'summaries'))throw new Error('Removed summaries must not be sent to the writer');
                 if (context.articles[0].id!==1 || Object.hasOwn(context.articles[0],'hasImage') || Object.hasOwn(context.articles[0],'status') || Object.hasOwn(context.articles[0],'image')) throw new Error('AI input not optimized');
                 if (context.previousNewsletters[0].content!=='# Previous angle') throw new Error('History missing');
                 if (context.recentPosts[0].content!=='Previous blog idea') throw new Error('Feed text not inert');
@@ -166,6 +165,21 @@ try:
             menu.showAtPosition({x:120,y:120});
         }""")
         page.locator('.menu-item').filter(has_text='Text Machine').click()
+        page.get_by_role('alert').filter(has_text='1 articles lisibles disponibles ; 10 minimum requis').wait_for()
+        assert page.evaluate('window.pipelineStages.length === 0 && window.imageCalls === 0')
+        page.evaluate('async () => { await app.vault.delete(app.vault.getAbstractFileByPath(window.previousNote)); }')
+        page.get_by_role('button', name='Réessayer', exact=True).click()
+        page.get_by_role('alert').filter(has_text='2 articles lisibles disponibles ; 10 minimum requis').wait_for()
+        assert page.evaluate('window.pipelineStages.length === 0 && window.imageCalls === 0')
+        assert len(list((vault / 'TextMachine').glob('text-machine-*.md'))) == 2
+        assert (vault / page.evaluate('window.firstNote')).read_text().startswith('# Earlier edition')
+        data = json.loads((vault / 'TextMachine/textmachine.json').read_text())
+        assert data['articles'][0]['usedAt'] == 'unknown'
+        assert data['articles'][1]['usedAt'] == page.evaluate('window.previousDay')
+        assert not list((vault / 'TextMachine').glob('brouillon-*.md'))
+        assert not list((vault / 'TextMachine').glob('revision-*.md'))
+        page.evaluate("app.plugins.plugins['text-machine'].settings.minimumSources = 1")
+        page.get_by_role('button', name='Réessayer', exact=True).click()
         page.locator('.text-machine-live-output').filter(has_text='First paragraph.').wait_for()
         spinner = page.locator('.text-machine-spinner')
         model = page.locator('.text-machine-run-model')
@@ -203,7 +217,8 @@ try:
         assert draft_path.read_text() == revision_path.read_text()
         assert '# Books and AI' not in draft_path.read_text()
         assert markdown.startswith('# Books and AI')
-        assert '## Revue de presse (modèle local)' in markdown
+        assert 'modèle local' in markdown
+        assert '## Revue de presse' not in markdown
         assert '* [Nueva investigación sobre escritura con IA](https://example.com/blocked)' in markdown
         assert page.evaluate('window.briefTranslationUsed === true')
         assert 'New AI writing study' not in markdown
@@ -211,7 +226,7 @@ try:
         assert 'AI and books blocked' not in markdown
         assert page.evaluate('window.imageCalls === 1 && window.unexpectedSourceLoads === 0')
         assert page.evaluate('window.rewriterUsed === true')
-        assert page.evaluate('JSON.stringify(window.pipelineStages)') == json.dumps(['selection','resume','writer','bref','revision','publisher','image'],separators=(',',':'))
+        assert page.evaluate('JSON.stringify(window.pipelineStages)') == json.dumps(['selection','writer','bref','revision','publisher','image'],separators=(',',':'))
         image_path = (vault / generated).with_suffix('.png')
         image_path = image_path.parent / 'illustrations' / image_path.name
         assert image_path.exists()
@@ -283,7 +298,7 @@ try:
                     return window.rewriteResponse(input.replace('Une étude quasi expérimentale compare deux groupes existants.','Une étude compare deux groupes existants. Les participants ne sont pas répartis au hasard.'));
                 }
                 const articles = JSON.parse(input).articles;
-                return JSON.stringify({paragraphs:["«Un livre!», dit l'auteur. Une étude quasi expérimentale compare deux groupes existants.",'Source [article](https://example.com/relevant).']});
+                return JSON.stringify({paragraphs:["«Un livre!», dit l'auteur. Une étude quasi expérimentale compare deux groupes existants.",'Prix: 25 euros. Source [article](https://example.com/relevant).']});
             };
             await p.writeNewsletter();
         }""")
@@ -325,7 +340,7 @@ try:
             assert 'Prix\u00a0: 25\u00a0euros.' in fallback
             assert any('article initial conservé' in entry['message'] and reason in entry['message'] for entry in reported)
             assert any(entry.get('reset') and 'étude quasi expérimentale' in entry['message'] for entry in reported)
-        print('Body-only revision and fallback verified in Obsidian for truncated text, changed links and provider errors; original prose saved with titles and summaries preserved.', flush=True)
+        print('Body-only revision and fallback verified in Obsidian for truncated text, changed links and provider errors; original prose saved with titles preserved.', flush=True)
         page.evaluate("""async () => {
             const p=app.plugins.plugins['text-machine'];
             p.getAIKey=()=>{throw new Error('Cached images must not read an image API key');};
@@ -351,7 +366,7 @@ try:
         assert red == green == blue and 0 < red < 255 and alpha == 255
         print('Writer body, revision and publisher title/intro verified as separate calls with body-only streaming before the title exists.',flush=True)
         print('Daily illustration verified: final-article input, 4/3 PNG, monochrome pixels, note-based filename and reuse across regenerations without any extra image API call.',flush=True)
-        print('French punctuation verified on the saved Obsidian note: title, chapeau, body, summaries and protected source links.', flush=True)
+        print('French punctuation verified on the saved Obsidian note: title, chapeau, body and protected source links.', flush=True)
         author_guard = page.evaluate("""async () => {
             const p=app.plugins.plugins['text-machine'];
             const file=app.vault.getAbstractFileByPath(p.dataPath),note=app.vault.getAbstractFileByPath(window.firstNote);

@@ -11,7 +11,7 @@ export async function packageResources(output: string) {
     const destination = resolve(output);
     await mkdir(destination, {recursive:true});
     const prompts = (await readdir(resolve(root,'prompts'))).filter(name=>name.endsWith('.md')).sort().map(name=>'prompts/'+name);
-    const models = ['selection','writer','publisher','resume','bref','rewriter'].map(name=>'models/'+name+'.json');
+    const models = ['selection','writer','publisher','bref','rewriter'].map(name=>'models/'+name+'.json');
     const sources = [...prompts,'models/newsletter.md',...models,'scripts/vendor/public_suffix_list.dat','scripts/vendor/MPL-2.0.txt','scripts/vendor/readability/LICENSE.md','scripts/vendor/readability/LICENSE-2.0.txt'];
     const files = [];
     for (const path of sources) {

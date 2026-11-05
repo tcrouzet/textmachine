@@ -24,7 +24,6 @@ import imagePrompt from '../prompts/image.md';
 import rewriterPrompt from '../prompts/rewriter.md';
 import brefPrompt from '../prompts/bref.md';
 import selectionPrompt from '../prompts/sélection.md';
-import summaryPrompt from '../prompts/resume.md';
 import textMachineIcon from '../icon.svg';
 const {t} = i18n;
 
@@ -78,13 +77,16 @@ export default class TextMachine extends Plugin {
         this.renderAI = renderAI;
         const {newsletterFeed:legacyFeed,...storedSettings} = record(await this.loadData());
         const defaults: Settings = {...this.ai.defaults, secretKey:'',labelId:'',outputFolder:'',excludedSources:'',newsletterLanguage:'français',referenceSources:'',includeFeeds:'',
-            authorFeeds:typeof legacyFeed==='string' ? legacyFeed : '',debug:false,anthropicSecretId:undefined,openaiSecretId:undefined};
+            authorFeeds:typeof legacyFeed==='string' ? legacyFeed : '',minimumSources:10,debug:false,anthropicSecretId:undefined,openaiSecretId:undefined};
         this.settings = {...storedSettings,...defaults};
         for (const key of Object.keys(defaults) as (keyof Settings)[]) {
             const value=storedSettings[key];
-            if (key!=='debug' && typeof value==='string') this.settings[key]=value;
+            if (key!=='debug' && key!=='minimumSources' && typeof value==='string') this.settings[key]=value;
         }
+        if (typeof storedSettings.minimumSources==='number' && Number.isSafeInteger(storedSettings.minimumSources) && storedSettings.minimumSources>0)
+            this.settings.minimumSources=storedSettings.minimumSources;
         this.settings.debug=storedSettings.debug===true;
+        this.settings.codexEffort=/^[a-z][a-z0-9_-]{0,31}$/.test(this.settings.codexEffort.trim()) ? this.settings.codexEffort.trim() : this.ai.defaults.codexEffort;
         if (legacyFeed!==undefined) await this.saveData(this.settings);
         this.labels = [];
         this.busy = false;
@@ -454,11 +456,12 @@ export default class TextMachine extends Plugin {
         const folder = vault.getAbstractFileByPath(this.settings.outputFolder);
         if (!(folder instanceof TFolder)) throw new Error(t('createFolderFirst'));
         const notes = folder.children.filter((file): file is TFile => file instanceof TFile && /^text-machine-\d{4}-\d{2}-\d{2}(?:-\d+)?\.md$/.test(file.name));
+        const lastEdition=notes.map(file=>file.name.slice('text-machine-'.length,'text-machine-'.length+10)).filter(date=>date<day).sort().pop() || '';
         const todayNotes = await Promise.all(notes.filter(file=>file.name.startsWith('text-machine-'+day)).map(file=>vault.read(file)));
         await vault.process(log,text=>this.articles.withIds(text));
         const data = await vault.read(log);
-        let pending: Article[] = this.newsletter.availableArticles(data,this.settings.excludedSources,day,todayNotes);
-        let brief: Article[] = this.newsletter.briefArticles(data,this.settings.excludedSources,day);
+        let pending: Article[] = this.newsletter.availableArticles(data,this.settings.excludedSources,day,todayNotes,lastEdition);
+        let brief: Article[] = this.newsletter.briefArticles(data,this.settings.excludedSources,day,lastEdition);
         if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
         let template = newsletterTemplate;
         const templatePath = this.manifest.dir + '/models/newsletter.md';
@@ -496,19 +499,20 @@ export default class TextMachine extends Plugin {
                 else feedback?.(message,stream,reset);
             };
             const response=connection.provider==='codex'
-                ? await this.codex.generate(await this.codex.findCodex(),request.system,request.input,connection.model,controller.signal,report,request.schema)
+                ? await this.codex.generate(await this.codex.findCodex(),request.system,request.input,connection.model,controller.signal,report,request.schema,undefined,connection.effort)
                 : await this.generate(connection,request.system,request.input,this.requestAI,controller.signal,report);
             check();
             return response;
         };
         try {
-            let result: ReturnType<typeof newsletter.parseNewsletter> = {title:'',chapeau:'',paragraphs:[],lead:null,image:null,groups:[],used:[],discard:[]};
-            let draft: {lead: number; groups: newsletter.SourceGroup[]; discard: number[]} | null = null;
+            const result: newsletter.Newsletter = {title:'',chapeau:'',paragraphs:[],image:null,used:[],discard:[]};
             let generated: Awaited<ReturnType<typeof createIllustration>> | null = null;
             const authorPosts=await this.readAuthorFeeds(controller.signal);
             pending=pending.filter(article=>!this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds,authorPosts));
             brief=brief.filter(article=>!this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds,authorPosts));
             if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
+            if (pending.length<this.settings.minimumSources)
+                throw new Error(t('newsletterNotEnoughSources',{count:pending.length,minimum:this.settings.minimumSources}));
             if (pending.length) {
                 const prompt=await readPrompt('writer.md',writerPrompt);
                 const selectionTemplate=await readPrompt('sélection.md',selectionPrompt);
@@ -523,21 +527,11 @@ export default class TextMachine extends Plugin {
                 const selection=this.newsletter.parseSelection(await respond(selectionRequest),pending);
                 result.discard=selection.discard.map((id: number)=>pending.find(article=>article.id===id)!.url);
                 if (selection.selected.length) {
-                    const summaryTemplate=await readPrompt('resume.md',summaryPrompt);
-                    const groups: newsletter.SourceGroup[] = [{title:'',articles:[]}];
-                    for (const [index,article] of selection.selected.entries()) {
-                        check();
-                        progress?.(t('newsletterSummarizing',{current:index+1,total:selection.selected.length,title:article.title}));
-                        const request=this.newsletter.summaryRequest(summaryTemplate,article,language);
-                        const summary=this.newsletter.parseSummary(await respond(request));
-                        groups[0].articles.push({id:article.id,summary});
-                    }
                     progress?.(t('newsletterWriting'));
                     const request=this.newsletter.writerRequest(prompt,selection.selected,previous,authorPosts || [],language,this.settings.referenceSources);
                     const editorial=this.newsletter.parseEditorial(await respond(request,progress));
                     result.paragraphs=editorial.paragraphs;
                     result.used=selection.selected.map(article=>article.url);
-                    draft={lead:selection.selected[0].id,groups,discard:selection.discard};
                     await saveSnapshot('brouillon',result.paragraphs.join('\n\n'));
                     await saveSnapshot('revision','> '+t('newsletterRevisionPending'));
                     this.newsletter.assertNoAuthorSources(result.paragraphs,this.settings.authorFeeds,authorPosts);
@@ -587,12 +581,12 @@ export default class TextMachine extends Plugin {
                 const fence='`'.repeat((revisedText.match(/`+/g) || []).reduce((length,run)=>Math.max(length,run.length+1),3));
                 await saveSnapshot('revision',revisionError ? '> '+revisionError+'\n\n'+fence+'\n'+revisedText+'\n'+fence : revisedText);
             }
-            if (draft) {
+            if (result.used.length) {
                 progress?.(t('newsletterPublishing'));
                 const request=this.newsletter.publisherRequest(await readPrompt('publisher.md',publisherPrompt),result.paragraphs,language);
                 const publication=this.newsletter.parsePublisher(await respond(request,progress));
                 this.newsletter.assertNoAuthorSources([publication.title,publication.chapeau],this.settings.authorFeeds,authorPosts);
-                result=this.newsletter.parseNewsletter(JSON.stringify({...draft,...publication,paragraphs:result.paragraphs,image:null}),pending);
+                Object.assign(result,publication);
             }
             const illustrationName='text-machine-'+day+'.png';
             const imagePath=this.settings.outputFolder+'/illustrations/'+illustrationName;
@@ -611,7 +605,7 @@ export default class TextMachine extends Plugin {
                 check();
             }
             result.image={url:'illustrations/'+illustrationName,source:'',caption:result.title || t('newsletterBriefTitle'),verified:true,generated:true};
-            const markdown = correctNewsletterPunctuation(this.newsletter.renderNewsletter(template,result,pending,translatedBrief),language);
+            const markdown = correctNewsletterPunctuation(this.newsletter.renderNewsletter(template,result,translatedBrief),language);
             const path = this.settings.outputFolder + '/text-machine-' + day + '.md';
             const existing = vault.getAbstractFileByPath(path);
             check();
@@ -1146,6 +1140,26 @@ export class GmailSettings extends PluginSettingTab {
                 text.setValue(p.settings.newsletterLanguage).setPlaceholder('français').onChange(value=>{
                     p.settings.newsletterLanguage=value.trim();
                     void p.saveData(p.settings).catch(()=>{this.error=t('aiSaveFailed');this.redraw();});
+                });
+            });
+        }});
+        newsletterSettings.items.push({name:t('minimumSources'),desc:t('minimumSourcesDescription'),render:setting=>{
+            setting.addText(text=>{
+                text.inputEl.type='number';
+                text.inputEl.min='1';
+                text.inputEl.step='1';
+                text.inputEl.setAttribute('aria-label',t('minimumSources'));
+                text.setValue(String(p.settings.minimumSources)).onChange(()=>{
+                    const value=text.inputEl.valueAsNumber;
+                    const valid=Number.isSafeInteger(value) && value>0;
+                    text.inputEl.setAttribute('aria-invalid',String(!valid));
+                    if (!valid) return;
+                    p.settings.minimumSources=value;
+                    void p.saveData(p.settings).catch(()=>{this.error=t('aiSaveFailed');this.redraw();});
+                });
+                text.inputEl.addEventListener('blur',()=>{
+                    text.setValue(String(p.settings.minimumSources));
+                    text.inputEl.removeAttribute('aria-invalid');
                 });
             });
         }});

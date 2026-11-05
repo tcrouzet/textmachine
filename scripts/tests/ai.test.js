@@ -13,9 +13,18 @@ test('same model catalog and provider priorities as Finition', () => {
     const key = provider => provider + '-fixture';
     assert.equal(getConnection(settings({aiModel:'claude-example'}),key).provider,'anthropic');
     for (const model of ['gpt-example','o3-example','GPT-CUSTOM']) assert.equal(getConnection(settings({aiModel:model}),key).apiKey,'openai-fixture');
-    assert.deepEqual(getConnection(settings({aiModel:CODEX_MODEL,codexModel:'chosen',localAIServer:'bad'}),()=>{throw new Error('No API key needed');}),{provider:'codex',model:'chosen',apiKey:''});
+    assert.deepEqual(getConnection(settings({aiModel:CODEX_MODEL,codexModel:'chosen',localAIServer:'bad'}),()=>{throw new Error('No API key needed');}),{provider:'codex',model:'chosen',apiKey:'',effort:'low'});
     assert.deepEqual(getConnection(settings({localAIServer:'http://localhost:11434',localAIModel:'local'}),()=>{throw new Error('No API key needed');}),{provider:'openai',model:'local',apiKey:'',baseUrl:'http://localhost:11434/v1'});
     assert.equal(getConnection(settings({localAIServer:'https://example.test/api/v1/',localAIModel:'local'}),key).baseUrl,'https://example.test/api/v1');
+});
+
+test('Codex keeps the chosen effort and rejects invalid values without reading API keys',()=>{
+    const secret=()=>assert.fail('Codex must not read API keys');
+    assert.equal(defaults.codexEffort,'low');
+    assert.equal(getConnection(settings({aiModel:CODEX_MODEL,codexEffort:' high '}),secret).effort,'high');
+    for (const effort of ['', 'high effort', 'HIGH', 'x'.repeat(33)])
+        assert.throws(()=>getConnection(settings({aiModel:CODEX_MODEL,codexEffort:effort}),secret),/reasoning effort/);
+    assert.equal(getConnection(settings({aiModel:'gpt-example',codexEffort:'high'}),()=> 'fixture').effort,undefined);
 });
 
 test('invalid local configuration fails without cloud fallback, and missing cloud keys fail', () => {
@@ -44,12 +53,14 @@ async function fakeCodex(t, mode) {
             else if (message.method === 'account/read') result = {requiresOpenaiAuth:true,account:mode === 'login' ? null : {type:'chatgpt'}};
             else if (message.method === 'config/read') result = {config:{mcp_servers:{fixture:{enabled:true}}}};
             else if (message.method === 'thread/start') {
+                if (mode === 'effort' && message.params.config.model_reasoning_effort !== 'high') process.exit(8);
                 if (message.params.sandbox !== 'read-only' || message.params.config.mcp_servers.fixture.enabled !== false) process.exit(3);
                 result = {model:message.params.model || 'resolved-default',thread:{id:'thread-1',ephemeral:true},sandbox:{type:mode === 'unsafe' ? 'workspaceWrite' : 'readOnly'},approvalPolicy:'never'};
             } else if (message.method === 'turn/start') {
+                if (mode === 'effort' && message.params.effort !== 'high') process.exit(9);
                 if (message.params.sandboxPolicy.networkAccess !== false) process.exit(4);
                 if (mode === 'image' && !message.params.input.some(item=>item.type==='image' && item.url==='https://example.com/image.jpg')) process.exit(6);
-                if (mode === 'schema' && !message.params.outputSchema?.properties?.summary) process.exit(5);
+                if (mode === 'schema' && !message.params.outputSchema?.properties?.paragraphs) process.exit(5);
                 const failure = message.params.outputSchema && invalidSchema(message.params.outputSchema)
                     ? {message:"Invalid schema for response_format: required is missing title",codexErrorInfo:'badRequest'}
                     : mode === 'quota' ? {message:'private-fixture-value',codexErrorInfo:'usageLimitExceeded'}
@@ -90,7 +101,10 @@ async function fakeCodex(t, mode) {
                 result = {};
             } else if (message.method === 'model/list') {
                 if (mode === 'cancel') return;
-                result = message.params.cursor ? {data:[{model:'second',displayName:'Second'}],nextCursor:mode === 'cycle' ? 'next' : null}
+                result = mode.startsWith('efforts') ? {data:[{model:'first',displayName:'First',supportedReasoningEfforts:
+                    mode==='efforts-invalid' ? [{reasoningEffort:'invalid effort'}] : mode==='efforts-malformed' ? 'high'
+                        : [{reasoningEffort:'low'},{reasoningEffort:'high'},{reasoningEffort:'low'},{reasoningEffort:'ultra'}]}],nextCursor:null}
+                    : message.params.cursor ? {data:[{model:'second',displayName:'Second'}],nextCursor:mode === 'cycle' ? 'next' : null}
                     : {data:[{model:'first',displayName:'First'},{hidden:true}],nextCursor:'next'};
             } else {process.exit(2);}
             const reply = JSON.stringify({id:message.id,result}) + '\\n';
@@ -102,6 +116,15 @@ async function fakeCodex(t, mode) {
 test('Codex discovers all model pages using the existing account without starting a turn', async t => {
     const executable = await fakeCodex(t,'models');
     assert.deepEqual(await listModels(executable),[{value:'first',label:'First'},{value:'second',label:'Second'}]);
+});
+
+test('Codex discovers supported efforts and validates the returned catalog',async t=>{
+    assert.deepEqual(await listModels(await fakeCodex(t,'efforts')),[{value:'first',label:'First',efforts:['low','high','ultra']}]);
+    for (const mode of ['efforts-invalid','efforts-malformed']) await assert.rejects(listModels(await fakeCodex(t,mode)),/Invalid Codex/);
+});
+
+test('Codex sends the chosen effort to both the thread and its turn',async t=>{
+    assert.equal(await generate(await fakeCodex(t,'effort'),'Writer','Articles','fixture',undefined,undefined,undefined,undefined,'high'),'Generated newsletter');
 });
 
 test('Codex detects a disconnected account and invalid model pagination', async t => {
@@ -145,16 +168,16 @@ test('Codex generation can finish beyond two minutes', {timeout:5000}, async t=>
 });
 
 
-test('Codex generation receives the summaries JSON schema as its output constraint',async t=>{
-    const schema = require('../../models/resume.json');
+test('Codex generation receives the writer JSON schema as its output constraint',async t=>{
+    const schema = require('../../models/writer.json');
     assert.equal(await generate(await fakeCodex(t,'schema'),'Writer','Articles','fixture',undefined,undefined,schema),'Generated newsletter');
 });
 
 
-test('Codex accepts separate strict schemas for selection, summaries, article writing, revision and publication',async t=>{
+test('Codex accepts separate strict schemas for selection, article writing, revision and publication',async t=>{
     const newsletter=require('../../plugin/newsletter');
     const articles=[{id:41,title:'AI and books',url:'https://example.com/article',source:'User',publish:'',content:'An article about books and AI.'}];
-    const requests=[newsletter.selectionRequest('{{articles}}',articles,'français'),newsletter.summaryRequest('{{article}}',articles[0],'français'),
+    const requests=[newsletter.selectionRequest('{{articles}}',articles,'français'),
         newsletter.writerRequest('{{articles}}',articles,[],[],'français'),
         newsletter.publisherRequest('{{article}}',['First paragraph.','Second paragraph.'],'français'),
         require('../../plugin/ai/rewrite').rewriteRequest('Revise the article','First paragraph.\n\nSecond paragraph.')];

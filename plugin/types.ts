@@ -7,12 +7,14 @@ export interface Settings {
     outputFolder: string;
     excludedSources: string;
     newsletterLanguage: string;
+    minimumSources: number;
     referenceSources: string;
     includeFeeds: string;
     authorFeeds: string;
     debug: boolean;
     aiModel: string;
     codexModel: string;
+    codexEffort: string;
     localAIServer: string;
     localAIModel: string;
     anthropicSecretId?: string;
@@ -44,8 +46,8 @@ export interface HttpOptions {url: string; method?: string; contentType?: string
 export interface HttpResponse {status: number; text?: string; json?: unknown}
 export type HttpRequest = (options: HttpOptions) => Promise<HttpResponse>;
 export type StreamRequest = (options: HttpOptions, onChunk?: (chunk: string) => void, signal?: AbortSignal, maxResponseBytes?: number) => Promise<HttpResponse>;
-export interface Connection {provider: 'openai' | 'anthropic' | 'codex'; apiKey: string; model: string; baseUrl?: string}
-export interface Model {value: string; label: string}
+export interface Connection {provider: 'openai' | 'anthropic' | 'codex'; apiKey: string; model: string; baseUrl?: string; effort?: string}
+export interface Model {value: string; label: string; efforts?: string[]}
 export interface FeedEntry {title: string; url: string; publish: string; content: string}
 export interface Message {payload: {headers?: {name: string; value: string}[]}; bodies: {type: string; text: string}[]; internalDate?: string; labelIds: string[]}
 export interface Database {version: number; nextId?: number; articles: Article[]; [key: string]: unknown}

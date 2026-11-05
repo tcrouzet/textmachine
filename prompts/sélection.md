@@ -4,6 +4,8 @@ Appuie-toi sur le contenu réel : écarte les pages de menus, connexion ou erreu
 
 Date de rédaction : {{now}}. Écarte les annonces d’événements déjà passés, ainsi que celles d’aujourd’hui si rien ne confirme que l’événement reste à venir. Les comptes rendus, études et analyses restent admissibles, même anciens.
 
+Pour une revue de presse de 1 500 signes, retiens quelques articles complémentaires : chacun doit apporter un fait précis, une scène, une citation éclairante ou un point de vue qui renouvelle la lecture. Écarte les textes vagues dont on ne peut tirer qu’une généralité. N’impose pas un sujet commun à des articles sans rapport.
+
 Si plusieurs articles racontent le même fait, privilégie la source la plus fiable et précise. Conserve les points de vue complémentaires.
 
 # Sujets déjà traités

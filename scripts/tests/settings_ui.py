@@ -83,6 +83,16 @@ try:
         assert '{{language}}' in page.locator('.setting-item').filter(has_text='Langue de la newsletter').inner_text()
         language.fill('español')
         page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).newsletterLanguage === 'español'")
+        minimum = page.get_by_role('spinbutton', name='Minimum d’articles avec texte', exact=True)
+        assert minimum.input_value() == '10'
+        minimum.fill('12')
+        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).minimumSources === 12")
+        for invalid in ('0', '-1', '2.5', ''):
+            minimum.fill(invalid)
+            expect(minimum).to_have_attribute('aria-invalid', 'true')
+            assert page.evaluate("app.plugins.plugins['text-machine'].settings.minimumSources") == 12
+            minimum.press('Tab')
+            expect(minimum).to_have_value('12')
         references = page.get_by_role('textbox', name='Sources de référence', exact=True)
         assert_full_width(references)
         assert references.input_value() == ''
@@ -114,6 +124,19 @@ try:
             picker = page.locator('.modal-container').last
             picker.get_by_text(secret_id, exact=True).click()
             picker.get_by_role('button', name='Sauvegarder', exact=True).click()
+            reference = row.get_by_text(secret_id, exact=True)
+            expect(reference).to_be_visible()
+            reference.click()
+            assert 'fixture-anthropic-only' not in row.inner_text()
+            assert 'fixture-openai-only' not in row.inner_text()
+            assert row.locator('.setting-password').count() == 0
+            row.locator('.setting-hotkey-icon').click()
+            expect(reference).to_have_count(0)
+            row.get_by_role('button', name='Lier...', exact=True).click()
+            picker = page.locator('.modal-container').last
+            picker.get_by_text(secret_id, exact=True).click()
+            picker.get_by_role('button', name='Sauvegarder', exact=True).click()
+            expect(reference).to_be_visible()
         page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).openaiSecretId === 'fixture-openai'")
         assert page.evaluate("app.plugins.plugins['text-machine'].getAIConnection().apiKey === 'fixture-anthropic-only'")
         assert 'fixture-anthropic-only' not in (plugin / 'data.json').read_text()
@@ -139,9 +162,21 @@ try:
         expect(codex_model).to_have_value('codex-fixture')
         expect(codex_model.locator('option:checked')).to_have_text('codex-fixture')
         expect(codex_model).to_be_disabled()
-        page.evaluate("window.resolveModels([{value:'codex-fixture',label:'Codex fixture'}])")
+        effort = page.get_by_role('combobox', name='Codex : effort de raisonnement', exact=True)
+        expect(effort).to_be_disabled()
+        expect(effort).to_have_value('low')
+        page.evaluate("window.resolveModels([{value:'codex-fixture',label:'Codex fixture',efforts:['low','high','ultra']},{value:'restricted-fixture',label:'Restricted fixture',efforts:['medium']}])")
         expect(codex_model).to_be_enabled()
+        expect(effort).to_be_enabled()
+        assert effort.locator('option').evaluate_all('options => options.map(option=>option.value)') == ['low','high','ultra']
+        effort.select_option('high')
+        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).codexEffort === 'high'")
+        codex_model.select_option('restricted-fixture')
+        expect(effort).to_have_value('medium')
+        assert effort.locator('option').evaluate_all('options => options.map(option=>option.value)') == ['medium']
         page.get_by_role('combobox', name='Codex : modèle', exact=True).select_option('codex-fixture')
+        expect(effort).to_have_value('low')
+        effort.select_option('high')
         page.get_by_role('combobox', name='Modèle par défaut', exact=True).select_option('__codex__')
         assert page.evaluate("app.plugins.plugins['text-machine'].getAIConnection().provider") == 'codex'
         assert page.evaluate("app.plugins.plugins['text-machine'].getAIConnection().model") == 'codex-fixture'
@@ -151,6 +186,11 @@ try:
         page.evaluate("() => {app.setting.close();app.setting.open();app.setting.openTabById('text-machine');}")
         expect(codex_model).to_have_value('codex-fixture')
         expect(codex_model.locator('option:checked')).to_have_text('Codex fixture')
+        expect(effort).to_have_value('high')
+        assert page.evaluate("app.plugins.plugins['text-machine'].getAIConnection().effort") == 'high'
+        for secret_id in ('fixture-anthropic','fixture-openai'):
+            expect(page.locator('.setting-item-control').get_by_text(secret_id, exact=True)).to_be_visible()
+        assert page.locator('.setting-password').count() == 0
         page.evaluate("() => {app.plugins.plugins['text-machine'].codex.listModels=async()=>{throw new Error('Fixture catalog unavailable');};}")
         page.get_by_role('button', name='Recharger', exact=True).click()
         page.get_by_role('alert').filter(has_text='Fixture catalog unavailable').wait_for()
@@ -509,8 +549,8 @@ try:
         }""")
         assert page.evaluate("""() => {
             const p = app.plugins.plugins['text-machine'];
-            return p.settings.newsletterLanguage === 'español' && p.settings.referenceSources === ['theguardian.com','bbc.co.uk'].join(String.fromCharCode(10))
-                && p.settings.aiModel === '__codex__' && p.settings.codexModel === 'codex-fixture'
+            return p.settings.minimumSources === 12 && p.settings.newsletterLanguage === 'español' && p.settings.referenceSources === ['theguardian.com','bbc.co.uk'].join(String.fromCharCode(10))
+                && p.settings.aiModel === '__codex__' && p.settings.codexModel === 'codex-fixture' && p.settings.codexEffort === 'high'
                 && p.settings.authorFeeds === ['https://example.substack.com','https://other.example/feed'].join(String.fromCharCode(10))
                 && p.settings.includeFeeds === ''
                 && p.settings.localAIServer === 'http://localhost:11434' && p.settings.localAIModel === 'local-fixture'

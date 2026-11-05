@@ -3,20 +3,14 @@ import {parseData, isExcluded, isPdf, articleUrl} from './articles';
 import selectionSchema from '../models/selection.json';
 import writerSchema from '../models/writer.json';
 import publisherSchema from '../models/publisher.json';
-import summarySchema from '../models/resume.json';
 import briefSchema from '../models/bref.json';
 import {Article, FeedEntry, record, array} from './types';
 import {parseHTML} from './html';
 import {domainOf} from './domains';
 
-interface SourceSummary {id: number; title?: string; summary: string}
-export interface SourceGroup {title: string; articles: SourceSummary[]}
 interface Editorial {title: string; chapeau: string; paragraphs: string[]}
-interface RawNewsletter extends Editorial {lead: number | null; image: null; groups: SourceGroup[]; discard: number[]}
-interface Newsletter extends Editorial {
-    lead: string | null;
+export interface Newsletter extends Editorial {
     image: {url: string; source: string; caption: string; verified: boolean; generated?: boolean} | null;
-    groups: {title: string; articles: {url: string; title?: string; summary: string}[]}[];
     used: string[];
     discard: string[];
 }
@@ -38,14 +32,19 @@ function day(date = new Date()) {
     return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
 
-function availableArticles(text: string, exclusions = '', date = day(), todayNotes: string[] = []) {
+function availableForEdition(article: Article, date: string, lastEdition: string) {
+    return !article.usedAt || article.usedAt===date || (/^\d{4}-\d{2}-\d{2}$/.test(article.usedAt)
+        && article.usedAt>lastEdition && article.usedAt<date);
+}
+
+function availableArticles(text: string, exclusions = '', date = day(), todayNotes: string[] = [], lastEdition = date) {
     return parseData(text).articles.filter(article => article.content.trim() && !isPdf(article.url) && !isExcluded(article,exclusions)
-        && article.status === '' && (!article.usedAt || article.usedAt === date
+        && article.status === '' && (availableForEdition(article,date,lastEdition)
             || (article.usedAt==='unknown' && todayNotes.some(note=>note.includes(']('+article.url+')') || note.includes(']('+article.url+' ')))));
 }
 
-function briefArticles(text: string, exclusions = '', date = day()) {
-    return parseData(text).articles.filter(article=>article.status === 'forbidden' && (!article.usedAt || article.usedAt === date)
+function briefArticles(text: string, exclusions = '', date = day(), lastEdition = date) {
+    return parseData(text).articles.filter(article=>article.status === 'forbidden' && availableForEdition(article,date,lastEdition)
         && !isExcluded(article,exclusions));
 }
 
@@ -124,21 +123,6 @@ function parseSelection(text: string, articles: Article[]) {
     return {selected:articles.filter(article=>selected.includes(article.id)),discard:result.discard as number[]};
 }
 
-function summaryRequest(prompt: string, article: Pick<Article,'title' | 'content'>, language: string) {
-    if (!/\{\{\s*article\s*\}\}/.test(prompt)) throw new Error(t('writerArticlesMissing',{variable:'{{article}}'}));
-    const schema = structuredClone(summarySchema);
-    return {input:renderPrompt(prompt,{language:language.trim() || 'français',article:JSON.stringify({title:article.title,content:article.content})}),
-        system:t('summaryContract')+'\n\n'+JSON.stringify({jsonSchema:schema}),schema};
-}
-
-function parseSummary(text: string): string {
-    let result: Record<string,unknown>;
-    try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {throw new Error(t('newsletterSummariesInvalid'));}
-    if (Object.keys(result).length!==1 || typeof result.summary!=='string' || !result.summary.trim()
-        || result.summary.trim().split(/\s+/u).length>30 || /!\[|<img\b/i.test(result.summary)) throw new Error(t('newsletterSummariesInvalid'));
-    return result.summary.trim();
-}
-
 function parseEditorial(text: string): Pick<Editorial,'paragraphs'> {
     let result: Record<string,unknown>;
     try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {throw new Error(t('newsletterInvalid'));}
@@ -188,53 +172,10 @@ function writerRequest(prompt: string, articles: Article[], previous: {name: str
     };
 }
 
-function parseNewsletter(text: string, articles: Article[]): Newsletter {
-    let value: unknown;
-    try { value = JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')); }
-    catch { throw new Error(t('newsletterInvalid')); }
-    const raw=record(value);
-    const invalid = () => {throw new Error(t('newsletterInvalid'));};
-    const string = (value: unknown): value is string => typeof value === 'string';
-    const nonempty = (value: unknown) => string(value) && value.trim();
-    const shape = (value: unknown,fields: string[]) => value && typeof value === 'object' && !Array.isArray(value)
-        && Object.keys(value).length === fields.length && fields.every(field=>Object.hasOwn(value,field));
-    const references = new Map(articles.map(article=>[article.id,article]));
-    const known = (id: unknown) => typeof id==='number' && Number.isSafeInteger(id) && references.has(id);
-    if (!shape(value,['title','chapeau','paragraphs','lead','image','groups','discard']) || !string(raw.title) || !string(raw.chapeau)
-        || !strings(raw.paragraphs) || raw.paragraphs.some(paragraph=>!nonempty(paragraph))
-        || !Array.isArray(raw.groups) || !Array.isArray(raw.discard)) invalid();
-    for (const value of array(raw.groups)) {
-        const group=record(value);
-        if (!shape(group,['title','articles']) || !string(group.title) || !Array.isArray(group.articles) || !group.articles.length
-            || group.articles.some((value: unknown)=>{const article=record(value);return (!shape(value,['id','summary']) && !shape(value,['id','title','summary']))
-                || !known(article.id) || !nonempty(article.summary) || (Object.hasOwn(article,'title') && !nonempty(article.title));})) invalid();
-    }
-    const result = raw as unknown as RawNewsletter;
-    const usedIds = result.groups.flatMap(group=>group.articles.map(article=>article.id));
-    const classified = [...usedIds,...result.discard];
-    if (new Set(articles.map(article=>article.url)).size !== articles.length || classified.length !== articles.length
-        || new Set(classified).size !== classified.length || classified.some(id=>!known(id))) invalid();
-    if (usedIds.length ? !nonempty(result.title) || !nonempty(result.chapeau) || result.paragraphs.length < 2
-        : result.title || result.chapeau || result.paragraphs.length || result.image !== null) invalid();
-    if (usedIds.length ? result.lead===null || !usedIds.includes(result.lead) : result.lead !== null) invalid();
-    if (result.image !== null) invalid();
-    if ([...result.paragraphs,...result.groups.flatMap(group=>group.articles.map(article=>article.summary))]
-        .some(text=>/!\[|<img\b/i.test(text))) invalid();
-    return {...result,
-        groups:result.groups.map(group=>({...group,articles:group.articles.map(article=>({url:references.get(article.id)!.url,summary:article.summary,
-            ...(article.title ? {title:article.title} : {})}))})),
-        lead:result.lead === null ? null : references.get(result.lead)!.url,
-        image:null,
-        used:usedIds.map(id=>references.get(id)!.url),discard:result.discard.map(id=>references.get(id)!.url),
-    };
-}
-
-function renderNewsletter(template: string, result: Newsletter, articles: Article[], brief: Pick<Article,'title' | 'url'>[] = []) {
+function renderNewsletter(template: string, result: Newsletter, brief: Pick<Article,'title' | 'url'>[] = []) {
     if (!template.trim()) throw new Error(t('newsletterTemplateInvalid'));
     const escape = (value: string) => value.replace(/[\r\n]+/g,' ').replace(/[\\`*_[\]<>]/g,'\\$&');
     const link = (url: string) => new URL(url).href.replace(/[()]/g,char=>char === '(' ? '%28' : '%29');
-    const domain = (url: string) => new URL(url).hostname.replace(/^www\./,'');
-    const source = new Map(articles.map(article=>[article.url,article]));
     const image = result.image?.verified === true && result.image.caption.trim() ? result.image : null;
     interface Context {[key: string]: string | Context[]}
     const values: Context = {
@@ -242,9 +183,6 @@ function renderNewsletter(template: string, result: Newsletter, articles: Articl
         paragraphs_before_image:result.paragraphs.slice(0,2).join('\n\n'),
         image:image ? (image.generated ? `![${escape(image.caption)}](${image.url})` : `[![${escape(image.caption)}](${link(image.url)})](${link(image.source)})`) : '',
         paragraphs_after_image:result.paragraphs.slice(2).join('\n\n'),
-        groups:result.groups.map(group=>({title:escape(group.title),heading:group.title.trim() ? [{title:escape(group.title)}] : [],articles:group.articles.map(article=>({
-            title:escape(article.title || source.get(article.url)!.title),summary:article.summary,domain:domain(article.url),url:link(article.url),
-        }))})),
     };
     const briefRows = brief.map(article=>({title:escape(article.title),url:link(article.url)}));
     values.articles = briefRows;
@@ -340,4 +278,4 @@ function readFeed(xml: string, limit = 5, base = ''): FeedEntry[] {
     });
 }
 
-export {day, availableArticles, briefArticles, briefRequest, parseBrief, selectionRequest, parseSelection, isAuthorSource, assertNoAuthorSources, summaryRequest, parseSummary, parseEditorial, publisherRequest, parsePublisher, renderPrompt, writerRequest, parseNewsletter, renderNewsletter, applyStatuses, feedUrl, feedUrls, readFeed, preview};
+export {day, availableArticles, briefArticles, briefRequest, parseBrief, selectionRequest, parseSelection, isAuthorSource, assertNoAuthorSources, parseEditorial, publisherRequest, parsePublisher, renderPrompt, writerRequest, renderNewsletter, applyStatuses, feedUrl, feedUrls, readFeed, preview};

@@ -1,124 +1,127 @@
-# TextMachine pour Obsidian
+# TextMachine
 
-Dans **Réglages → TextMachine**, saisissez votre adresse Gmail et cliquez sur **Connecter**. Google ouvre la connexion dans votre navigateur et vous demande d’autoriser la lecture et la modification des messages. De retour dans Obsidian, choisissez le **Libellé source**. **Vérifier l’accès** confirme son existence et affiche le nombre de messages.
+**De vos lectures à une newsletter illustrée, sans quitter Obsidian.**
 
-Les réglages affichent **Connecter** ou **Déconnecter**, selon la session. Sans connexion, les autres contrôles sont désactivés. L’extraction se lance depuis le menu contextuel du dossier : **Text Machine** propose la reconnexion si nécessaire. Sans dossier de données configuré, cette commande est disponible sur les dossiers du coffre et propose d’en créer un avant de poursuivre.
+Google Alerts, Google Scholar, services de veille, liens envoyés par vous ou vos lecteurs, flux RSS… TextMachine rassemble ces sources, récupère les articles et prépare une revue de presse avec citations et liens. Une illustration originale accompagne le texte ; les sources dont le contenu reste inaccessible apparaissent en fin de note, dans **En bref**.
 
-Votre mot de passe est saisi uniquement chez Google. Le plugin conserve l’adresse du compte et le jeton de renouvellement dans le coffre de secrets local d’Obsidian. Le jeton d’accès reste en mémoire. `data.json` contient uniquement le nom du secret et l’identifiant du libellé et le dossier des données. **Déconnecter** révoque l’autorisation Google et retire la session locale.
+Vous choisissez les sources, les consignes et le modèle d’IA. La newsletter reste une note Markdown dans votre coffre, à relire et à modifier avant publication. Les prompts fournis portent sur l’intelligence artificielle, l’écriture et les métiers du livre ; vous pouvez les adapter à votre sujet.
 
-Google autorise la lecture et la modification des messages du compte entier ; le libellé sélectionné définit la source de TextMachine. Dans **Choisir le dossier où enregistrer les données**, **Créer le dossier** est obligatoire avant l’extraction. Créez un dossier (`TextMachine` par défaut) ou sélectionnez un dossier existant vide. `textmachine.json` est créé avec une liste d’articles vide, puis un clic droit sur ce dossier → **Text Machine** traite les messages non lus du libellé sélectionné. Chaque message traité est marqué comme lu après une écriture réussie du JSON, même si ses liens sont exclus ou déjà présents. Une erreur d’extraction ou d’écriture laisse le message non lu. Si le marquage Gmail échoue, les articles restent enregistrés et une relance reprend sans doublon. Les identifiants des messages sont collectés avant tout marquage pour éviter de sauter des pages. Aucune donnée n’est reprise des anciens fichiers `log.md`, qui ne sont ni lus ni modifiés.
+[Télécharger TextMachine](https://github.com/tcrouzet/textmachine/releases/latest) · [Signaler un problème](https://github.com/tcrouzet/textmachine/issues)
 
-Le fichier contient un objet `{ "version": 1, "articles": [] }`. Chaque article possède un `id` entier stable et les champs `date`, `title`, `url`, `source`, `status`, `publish`, `content` et `image`. `status` est une chaîne vide après une extraction réussie. Les articles bloqués, non vérifiables et les PDF restent enregistrés avec `status: "forbidden"`. Les anciennes entrées `"404"` sont converties en `forbidden` au prochain traitement. Ces entrées ne sont plus chargées ; leur éventuel contenu conservé n’est pas transmis à l’IA. Les anciennes valeurs de `used` sont conservées dans `status` lors de la prochaine écriture. `publish` contient la date de publication fournie par le site, `content` le texte de l’article et `image` l’URL de son image principale. La date est recherchée dans les métadonnées, les données structurées et les balises de date visibles en français ou anglais. La date du mail et la date de modification ne servent pas de remplacement. Dès que `content` est renseigné, l’article n’est plus interrogé, même si sa date ou son image manque. Une date absente reste vide. Les champs supplémentaires ajoutés à la racine ou aux articles sont conservés lors des extractions. Une nouvelle extraction enrichit le fichier sans écraser les statuts ou annotations existants. Les doublons sont éliminés par URL ou titre ; la comparaison des titres ignore la casse, les accents et la ponctuation. Un JSON invalide ou d’une version inconnue bloque l’extraction sans être remplacé.
+## De la collecte à la newsletter
 
-Google Alerts et Google Scholar sont reconnus par leur adresse d’expédition ; les catégories utilisateur et autre service sont présumées à partir des en-têtes. Les liens de gestion Google (y compris `google.fr`), de navigation, de désabonnement, de réseaux sociaux, de vidéo et d’applications sont exclus. Les redirections Google sont décodées. Les liens PDF sont conservés comme métadonnées `forbidden`, sans lecture du document. Lorsqu’un PDF n’est pas identifiable dans l’URL, son chargement est arrêté d’après le type MIME ou le nom de fichier HTTP, y compris après redirection. Un PDF n’entraîne pas le blocage du domaine qui l’héberge. Si le message contient des liens HTML, la version texte n’est pas retraitée. Après l’enregistrement des liens et leur marquage Gmail comme lus, les pages cibles sont chargées dans une fenêtre Chromium isolée et invisible, fournie par Obsidian. JavaScript peut rendre la page ; la fenêtre se ferme ensuite automatiquement. Les pages n’ont accès ni à Node.js, ni au coffre, ni aux sessions du navigateur habituel. Les adresses locales sont refusées. Les captchas et les accès abonnés ne sont pas contournés. Aucun contenu HTML du message n’est exécuté.
+[![Organigramme vertical : alertes Google, autres services et mails personnels rejoignent un libellé Gmail ; les flux RSS complètent la collecte. Les liens sont filtrés et les articles lus, puis les prompts sélectionnent les sources, rédigent et révisent le texte, créent le titre, le chapeau et l’illustration. Les sources inaccessibles passent par une branche En bref. Les anciennes publications servent à éviter les répétitions. Le plugin assemble et enregistre la note finale.](doc/processus.svg)](doc/processus.svg)
 
-**Sources exclues** accepte un domaine, un mot de domaine ou un nom de source comme `Google Alerts`, par ligne. `youtube` exclut `youtube.com`, `youtube.be`, `youtu.be` et leurs sous-domaines ; un domaine complet comme `example.com` reste limité à ce domaine et ses sous-domaines. Les exclusions s’enregistrent automatiquement et filtrent les prochaines extractions sans retirer les articles déjà présents. **Réinitialiser le JSON** demande confirmation, puis remet le fichier à `{ "version": 1, "articles": [] }`. Les articles, statuts et champs supplémentaires du fichier sont supprimés ; les réglages Gmail et exclusions restent en place.
+## Installer TextMachine
 
-Les anciennes connexions en lecture seule doivent être renouvelées avec **Connecter** pour autoriser le marquage comme lu. Réinitialiser le JSON ne remet pas les messages Gmail à l’état non lu.
+Obsidian **1.11.4 ou ultérieur**, sur ordinateur, est requis. Le plugin est gratuit, sous [licence MIT](LICENSE). Les appels aux services d’IA dépendent de votre abonnement ou de votre facturation API.
 
-Les refus d’accès des sites sont enregistrés dans `blocked.json`, dans le dossier des données. Seuls les domaines sont stockés dans une liste, par exemple `["thetimes.com"]` ; les sous-domaines sont regroupés et ne sont plus interrogés non plus. La [Public Suffix List](https://publicsuffix.org/list/) embarquée (`scripts/vendor/public_suffix_list.dat`, licence MPL 2.0 incluse) distingue notamment les domaines comme `bbc.co.uk`. Les anciennes entrées détaillées sont simplifiées lors du prochain traitement. Les liens des domaines mémorisés restent enregistrés dans `textmachine.json` avec `status: "forbidden"`, sans nouvelle requête vers ces domaines, y compris après réinitialisation du JSON. **Voir blocked.json** permet de les consulter dans les réglages. Un fichier de blocage invalide arrête le traitement au lieu d’ignorer ses exclusions.
+1. Télécharger `main.js`, `manifest.json` et `styles.css` depuis la [dernière release](https://github.com/tcrouzet/textmachine/releases/latest).
+2. Placer ces fichiers dans `.obsidian/plugins/text-machine/`, à l’intérieur du coffre.
+3. Recharger Obsidian, puis activer **TextMachine** dans **Réglages → Plugins communautaires**.
 
-## Intelligence artificielle
+**Connexion Gmail :** cette version exige un client OAuth Google pour ordinateur, avec l’API Gmail activée. Son fichier de configuration, au format Google `installed`, doit être placé dans `oauth-client.json` à la racine du dossier du plugin. Ce fichier n’est pas distribué avec les releases. Sans cette configuration, le bouton de connexion reste indisponible.
 
-Les réglages reprennent les choix de Finition : clés Anthropic et OpenAI, serveur et modèle locaux, Codex et modèle par défaut ou personnalisé. Le catalogue initial des modèles est repris de `plugin/ai/models.json` (copié de Finition). Codex choisi explicitement est prioritaire ; sinon un serveur local renseigné est prioritaire sur les API cloud. Un serveur local mal configuré produit une erreur sans repli automatique vers le cloud. Les clés se choisissent ou se créent avec le sélecteur natif des secrets d’Obsidian ; elles peuvent être partagées avec d’autres plugins. Text Machine conserve uniquement les identifiants sélectionnés (`anthropicSecretId` et `openaiSecretId`) dans `data.json`. Les clés précédemment saisies dans Text Machine restent disponibles et leur référence est reprise automatiquement.
+## Préparer sa veille
 
-Codex est détecté aux mêmes emplacements que dans Finition. La liste de ses modèles est lue avec `app-server` (`account/read` puis `model/list`) ; aucune génération n’est lancée et sa configuration n’est pas modifiée. L’arrêt du plugin annule une lecture en cours. La connexion au compte se fait avec Codex CLI. Les réglages IA restent disponibles sans connexion Gmail.
+Dans **Réglages → TextMachine** :
 
-La commande **Text Machine** enchaîne collecte, lecture des articles et fabrication de la newsletter. Chaque étape possède son propre prompt, relu à chaque lancement ; la version embarquée sert de remplacement si le fichier manque.
+1. Saisir son adresse Gmail, cliquer sur **Connecter** et autoriser l’accès dans la fenêtre Google.
+2. Choisir le **Libellé source**. Lui affecter les alertes, les messages de veille et les mails contenant des liens à lire. Un lien envoyé à votre propre adresse peut ainsi rejoindre la collecte.
+3. Créer le dossier des données, nommé `TextMachine` par défaut, ou choisir un dossier existant vide.
+4. Configurer l’IA pour le texte et une clé OpenAI pour l’illustration.
+5. Choisir la **Langue de la newsletter** et le **Minimum d’articles avec texte** : **10 par défaut**, avant la sélection éditoriale. Les titres seuls, les PDF et les articles inaccessibles ne comptent pas dans ce minimum.
 
-1. `prompts/sélection.md` choisit les sources pertinentes et écarte les doublons éditoriaux, sans tenir compte des photographies disponibles.
-2. `prompts/resume.md` produit la revue de presse : thèmes, titres traduits et résumés des seules sources retenues.
-3. `prompts/writer.md` rédige uniquement le titre, le chapeau et les paragraphes de l’article, à partir des sources retenues. Le code assemble ensuite cet article avec la revue de presse préparée séparément.
-4. `prompts/bref.md` traduit séparément les titres de la rubrique En bref.
-5. `prompts/rewriter.md` révise uniquement les paragraphes de l’article ; un échec conserve leur version initiale.
-6. `prompts/image.md` guide la création de l’illustration à partir de l’article final. Cette étape est sautée si l’image du jour existe déjà.
+La section **Newsletter → Sources** permet d’affiner la collecte :
 
-Les articles avec un statut vide et ceux marqués `used` avec `usedAt` à la date du jour sont examinés, s’ils ont du contenu et une source autorisée. Le contexte éditorial contient les cinq dernières notes `text-machine-*.md` des autres jours et les cinq dernières publications de chaque flux **Author feed** configuré. Lorsque le prompt utilise `{{AuthorFeed}}` ou `{{recentPosts}}`, une erreur de lecture du flux arrête la génération.
+- **Include feeds** ajoute des flux RSS ou Atom aux articles reçus par mail. Plusieurs adresses peuvent être séparées par des espaces ou des retours à la ligne. Une adresse Substack est convertie en adresse de flux.
+- **Author feeds** fournit vos publications récentes comme historique des sujets déjà traités. Ces publications sont exclues des sources de la newsletter. Le plugin lit les flux et transmet leur contenu à l’IA.
+- **Sources de référence** indique les domaines à privilégier parmi les sources disponibles, par exemple `theguardian.com`.
+- **Sources exclues** écarte un domaine ou une catégorie de source. `youtube` filtre notamment `youtube.com` et `youtu.be` ; `Google Alerts` filtre cette source de collecte.
+- **Sites bloqués** affiche les domaines que le plugin ne peut pas lire : connexion nécessaire, abonnement, filtrage… Ils sont mémorisés pour éviter de les interroger à nouveau.
 
-Pendant le traitement, une roue animée et un journal défilant montrent les étapes et le texte reçu progressivement de l’IA. Le journal conserve sa position quand vous remontez pour le consulter. Les API OpenAI, Anthropic et les serveurs locaux compatibles utilisent le streaming ; Codex transmet ses événements d’avancement. Le contenu partiel est un aperçu : la note et les statuts ne sont enregistrés qu’après validation de la réponse complète.
+## Lancer une édition
 
-La newsletter est enregistrée puis ouverte dans `text-machine-AAAA-MM-JJ.md`, dans le dossier des données. Chaque relance régénère cette même note du jour avec les articles déjà utilisés aujourd’hui et les nouveaux articles disponibles. Les notes des autres jours restent intactes. Après sauvegarde, les articles retenus passent à `used` avec `usedAt` au format `AAAA-MM-JJ` ; les autres passent à `discard`. Pour les anciennes entrées `used` sans date, les liens des notes du jour permettent de reconnaître les articles à reprendre et leur date est enregistrée après la première régénération réussie. Sans article pertinent, aucune note n’est créée ; une édition déjà enregistrée reste intacte, de même que ses articles utilisés aujourd’hui, et seuls les nouveaux articles écartés passent à `discard`. Une erreur de génération ou de sauvegarde de la note conserve les statuts. Si la note est enregistrée mais que la mise à jour du JSON échoue, elle reste disponible et son chemin est signalé. Les annotations supplémentaires sont conservées.
+Dans l’explorateur, faire un **clic droit sur le dossier TextMachine → Text Machine**. Une icône de machine à écrire repère ce dossier. La commande propose de se reconnecter ou de créer le dossier si nécessaire.
 
-Les réponses IA sont séparées et validées avant assemblage : sélection (`selected`, `discard`), revue de presse (`groups`), puis article (`title`, `chapeau`, `paragraphs`). Chaque source est identifiée par son `id` stable ; les références inconnues, répétées ou manquantes sont refusées. Le plugin assemble ces réponses selon la structure de `models/newsletter.json`, associe lui-même les URLs et ajoute ensuite l’illustration. Les statuts et annotations privées ne sont pas transmis à l’IA ; seul le plugin met à jour les statuts après la sauvegarde de la note. Les IDs sont persistés une seule fois et le compteur `nextId` empêche leur réutilisation. Les titres originaux du JSON ne sont pas remplacés par les titres traduits de la revue de presse.
+TextMachine traite les messages **non lus** du libellé choisi et les flux complémentaires. Il extrait les liens vers les articles, élimine les doublons par URL ou titre et conserve leur origine. Les messages sont marqués comme lus après l’enregistrement des liens. Les pages sont ensuite chargées pour extraire leur texte, leurs auteurs et leur date de publication. Un article dont le texte est déjà enregistré n’est pas relu.
 
-Le plugin remplit localement `models/newsletter.md`, sans transmettre ce modèle Markdown à l’IA. Le fichier est relu à chaque lancement, avec remplacement par la version embarquée s’il manque. Les variables `{{title}}`, `{{chapeau}}`, `{{paragraphs_before_image}}`, `{{image}}` et `{{paragraphs_after_image}}` composent l’article ; les blocs `{{#groups}}` et `{{#articles}}` répètent les thèmes et les sources. L’image est insérée après le deuxième paragraphe. Son texte alternatif reste dans la syntaxe Markdown de l’image, sans paragraphe de légende supplémentaire.
+Une fois le minimum d’articles lisibles atteint, les étapes IA démarrent. La fenêtre de traitement affiche le fournisseur, le modèle, l’avancement et le texte reçu progressivement. Fermer cette fenêtre annule le traitement.
 
-L’illustration est toujours originale : `prompts/image.md` demande une bande dessinée / carte mentale en noir et blanc, au format horizontal 4/3, avec les libellés dans la langue de la newsletter. La génération utilise `gpt-image-2.5-flare` via l’API Images d’OpenAI et la clé OpenAI choisie dans les secrets d’Obsidian, même lorsque les étapes textuelles utilisent Codex, Anthropic ou un serveur local. La réponse PNG est validée puis normalisée en monochrome à 1600 × 1200 pixels. Le fichier porte le même nom que la note : `illustrations/text-machine-AAAA-MM-JJ.png`. S’il existe déjà pour cette date, il est réutilisé sans lecture de la clé image ni nouvel appel de génération, même si le texte ou le prompt a changé. Les photographies des sources ne sont pas utilisées et aucun dessin générique de remplacement n’est créé. Un échec de génération de l’image empêche la sauvegarde de la nouvelle édition et conserve les statuts. Le modèle Markdown ne peut pas supprimer l’illustration par simple omission de sa variable.
+Le résultat s’ouvre dans **`text-machine-AAAA-MM-JJ.md`** : titre, chapeau, article avec liens vers les sources, illustration après le deuxième paragraphe, puis **En bref**. Cette dernière rubrique contient uniquement les titres traduits et les liens des articles inaccessibles ou non vérifiables, y compris les PDF. Leur contenu n’est pas envoyé à l’IA.
 
-Les entrées `forbidden` sont ajoutées par le plugin à la section **En Bref**, avec uniquement leur titre traduit et leur lien, sans résumé ni contenu non vérifié. `prompts/bref.md` est relu à chaque lancement pour un appel IA distinct de la rédaction et de la révision ; sa version embarquée sert de remplacement s’il manque. `{{language}}` prend la langue de newsletter configurée. Seuls les IDs et les titres originaux sont transmis pour cette traduction, jamais le contenu non vérifié, et les sources ne sont pas relues. Chaque titre traduit est validé puis associé à son URL par son ID ; les titres originaux du JSON sont conservés. Une traduction vide, incomplète ou invalide arrête la génération sans modifier la note ni ses statuts. Leur statut reste `forbidden` et `usedAt` mémorise le jour où elles ont été affichées : elles sont reprises lors des régénérations du même jour, puis ne sont plus répétées les jours suivants. Une édition contenant seulement ces titres utilise aussi ce passage de traduction, sans appel au writer ni au rewriter. Le modèle utilise les blocs conditionnels `{{#editorial}}` et `{{#brief}}` pour masquer les sections absentes.
+Pour une newsletter en français, les corrections typographiques de Finition sont appliquées localement : apostrophes, guillemets, espaces insécables, notamment avant les deux-points, et ponctuation. Finition n’a pas besoin d’être installé.
 
-La réponse est validée avant écriture : chaque source doit être classée une seule fois et chaque source retenue doit avoir un titre et un résumé. Le prompt éditorial reste modifiable ; ses anciennes instructions de création d’issue GitHub sont remplacées par ce parcours local. Aucune publication GitHub ou Substack n’est déclenchée. Les articles et le contexte sont envoyés au fournisseur IA choisi. Aucune durée maximale n’est imposée à la réponse de l’IA ; fermer la fenêtre de traitement ou désactiver le plugin annule l’attente. Codex utilise une session éphémère en lecture seule, sans outils de fichiers ou de réseau.
+## Des prompts pour chaque étape
 
-## Langue
+Les fichiers du dossier [`prompts/`](prompts/) définissent la ligne éditoriale. Ils sont relus à chaque lancement ; si un fichier local manque, le plugin utilise sa version embarquée.
 
-Après la rédaction, `prompts/rewriter.md` est relu et exécuté uniquement sur les paragraphes de l’article. Le titre, le chapeau, les titres et résumés de la revue de presse, l’image et sa légende restent en dehors de cette révision. `{{language}}` y est remplacé par la langue configurée. La révision doit conserver les liens et au moins 90 % de la longueur du texte initial. En cas d’erreur ou de réponse refusée, le motif est affiché et la newsletter est enregistrée avec les paragraphes non révisés. Une annulation interrompt toujours la génération sans enregistrer la note ni ses statuts. La ponctuation est appliquée après cette étape.
+| Prompt | Ce qu’il reçoit et produit |
+| --- | --- |
+| [`sélection.md`](prompts/sélection.md) | Examine les articles complets et l’historique. Choisit les sources complémentaires et écarte les sujets déjà traités, les textes sans apport et les annonces d’événements passés. |
+| [`writer.md`](prompts/writer.md) | Reçoit les articles retenus et rédige les paragraphes. Les consignes fournies visent une revue de presse orale de 1 500 signes, qui passe d’une source à l’autre par des faits et des citations attribuées. |
+| [`bref.md`](prompts/bref.md) | Reçoit seulement les titres des sources inaccessibles et les traduit pour **En bref**. |
+| [`rewriter.md`](prompts/rewriter.md) | Révise uniquement le corps de l’article, sans image, titre ni chapeau. Si la révision échoue ou altère les liens, le texte initial est conservé. |
+| [`publisher.md`](prompts/publisher.md) | Reçoit le texte finalisé et propose son titre et son chapeau. |
+| [`image.md`](prompts/image.md) | Guide la création d’un dessin à partir du titre, du chapeau et du texte final. Les consignes fournies demandent une scène humoristique en noir et blanc, sans texte. |
 
-Avant l’enregistrement d’une newsletter en français (`français`, `francais`, `French`, `fr`, `fr-FR`, `fr-CA`…), TextMachine applique les corrections de ponctuation de Finition : apostrophes et guillemets typographiques, espaces insécables, tirets, points de suspension, espacement des unités et des paragraphes. Les liens, images, URLs, métadonnées et blocs de code sont protégés. Ce traitement est local et embarqué dans TextMachine ; Finition n’a pas besoin d’être installé. Les newsletters rédigées dans une autre langue conservent leur ponctuation.
+Les étapes textuelles renvoient du JSON, validé avec les schémas de [`models/`](models/). Le plugin assemble leurs résultats dans [`models/newsletter.md`](models/newsletter.md) et met lui-même à jour le suivi des articles. Le modèle Markdown ne fait pas partie des consignes envoyées à l’IA.
 
-Dans **Réglages → TextMachine → Newsletter**, **Langue de la newsletter** définit la langue de rédaction, des citations, des titres traduits et des libellés de l’illustration. La valeur initiale est `français` ; saisissez par exemple `English` ou `español`. **Include feeds** et **Author feed** sont deux champs texte distincts. Saisissez les adresses séparées par des espaces. Les adresses Substack (`https://exemple.substack.com`) sont converties automatiquement en `/feed` ; les URL RSS ou Atom explicites sont aussi acceptées. Les adresses répétées sont ignorées.
+Pour personnaliser les prompts d’une installation, copier les fichiers souhaités depuis ce dépôt dans les dossiers `prompts/` et `models/` du plugin. Leur nom doit rester identique. Le thème, la longueur, le ton et le style du dessin se règlent dans ces fichiers.
 
-**Include feeds** collecte toutes les entrées présentes dans les flux à chaque commande **Text Machine**, avec les mails. Leurs liens deviennent des articles dans `textmachine.json`, qualifiés par leur source RSS, puis suivent les mêmes exclusions, dédoublonnage par URL ou titre, blocages et extraction du contenu réel. Un résumé fourni par le flux ne remplace pas la lecture de l’article. Les statuts existants sont conservés et les articles déjà chargés ne sont pas relus. Les PDF et sources bloquées restent `forbidden`.
+Les variables utilisent la syntaxe `{{nom}}` :
 
-**Author feed** fournit uniquement les publications récentes de l’auteur pour éviter les répétitions et permettre les références : cinq publications par flux, sans doublons entre flux. Elles ne sont pas ajoutées aux articles collectés. L’ancien champ **Flux RSS complémentaire** est repris automatiquement dans **Author feed**. Les deux champs sont vides par défaut et désactivés lorsqu’ils restent vides.
+| Variable | Contenu fourni par le plugin |
+| --- | --- |
+| `{{language}}` | Langue choisie dans les réglages. |
+| `{{articles}}` | Articles avec leur texte, leurs métadonnées et leurs identifiants : disponibles pour la sélection, retenus pour la rédaction. |
+| `{{previousNewsletters}}` | Texte des cinq dernières newsletters des autres jours, pour éviter les répétitions. Disponible dans la sélection et la rédaction. |
+| `{{AuthorFeed}}` | Titres, liens et textes des cinq publications récentes par flux d’auteur. Disponible dans la sélection, la rédaction et la révision. |
+| `{{now}}` | Date et heure courantes, réservées à la sélection pour vérifier les annonces d’événements. |
+| `{{article}}` | Texte finalisé transmis au prompt de titre et de chapeau. |
 
-Dans `prompts/writer.md`, placez les variables suivantes là où vous voulez insérer leurs valeurs. Le plugin les remplace avant l’envoi à l’IA, sans transmettre les données une seconde fois :
+Pour la révision, **En bref** et l’illustration, le plugin joint directement les données nécessaires : inutile d’ajouter une variable pour leur contenu.
 
-- `{{language}}` : langue choisie dans les réglages.
-- `{{articles}}` : articles à examiner, avec leurs IDs et leur contenu. Cette variable est obligatoire.
-- `{{previousNewsletters}}` : texte des cinq dernières notes `text-machine-*.md` du dossier TextMachine configuré, en excluant celles du jour. Le plugin lit les notes ; l’IA n’a pas à ouvrir leurs chemins.
-- `{{AuthorFeed}}` : titres, liens et textes des cinq dernières publications par flux **Author feed**. `{{recentPosts}}` reste disponible comme autre nom pour le même contenu. Le plugin lit les flux et fournit leur contenu à l’IA. Les **Include feeds** alimentent `{{articles}}`.
+## Une illustration par jour
 
-`{{articles}}` reste disponible dans `sélection.md`, `resume.md` et `writer.md`. `{{now}}` est réservé à `sélection.md` : il fournit la date et l’heure courantes, avec le fuseau local, pour refuser les articles annonçant un événement passé avant les étapes de résumé et de rédaction. Ce contrôle ne constitue pas un filtre sur l’âge des analyses, études ou comptes rendus. `{{language}}` est aussi disponible dans `bref.md` et `image.md`.
+L’illustration est un **PNG noir et blanc au format horizontal 4/3**, de 1600 × 1200 pixels. Elle est enregistrée dans `illustrations/text-machine-AAAA-MM-JJ.png`, à côté des notes dans le dossier des données.
 
-Les listes vides deviennent `[]`. Dans `writer.md`, une variable inconnue arrête la génération avec son nom. La lecture des flux d’auteur n’a lieu que si `writer.md` ou `rewriter.md` utilise `{{AuthorFeed}}` ou `{{recentPosts}}`. Le contenu est lu une seule fois par génération, même si les deux prompts l’utilisent. Supprimer `{{previousNewsletters}}` désactive la lecture des anciennes notes. `prompts/image.md` accepte aussi `{{language}}` pour la légende. Le format JSON de réponse est fourni automatiquement ; aucune variable technique n’est nécessaire dans le prompt.
+La génération d’images utilise l’API OpenAI et sa clé, quel que soit le modèle choisi pour le texte. Si l’image du jour existe déjà, elle est réutilisée, même après modification du texte ou du prompt. Un échec de création de l’image empêche l’enregistrement de la nouvelle édition.
 
-L’interface suit la langue d’Obsidian : français (`locales/fr.json`) ou anglais (`locales/en.json`). Les variantes régionales, comme `fr-CA`, utilisent leur langue de base ; les autres langues utilisent l’anglais. Réactivez le plugin après un changement de langue. Les réglages, erreurs, messages de connexion et libellés de source sont traduits. Les noms de dossiers restent inchangés. Les catalogues utilisent des clés communes et des paramètres nommés, comme Bookbinder.
+## Régénérer et garder le suivi
 
-## Installation et configuration de la distribution
+Relancer **Text Machine** réécrit la note du jour avec les articles disponibles pour cette date et les nouveaux articles collectés. L’image existante est conservée.
 
-Obsidian 1.11.4 ou plus récent sur ordinateur est nécessaire. Le build utilise directement l’entrée TypeScript `plugin/main.ts`. Les modules internes sont regroupés dans `plugin/`. Le build inclut les traductions, le catalogue IA, Readability et la Public Suffix List dans `main.js`. Les trois fichiers installables sont `main.js`, `manifest.json` et `styles.css` ; `main.js` est généré et exclu de Git.
+Après une édition enregistrée, tous les articles disponibles pour cette génération reçoivent une date `usedAt`, y compris ceux que la sélection n’a pas retenus. Cela évite leur retour dans une édition suivante, tout en permettant de régénérer celle du jour. Leur état de lecture reste distinct : un article inaccessible conserve le statut `forbidden`.
 
-```sh
-npm ci
-npm run typecheck
-npm run lint
-npm test
-npm run build
-```
+Si vous supprimez les newsletters des jours précédents, les articles de ces journées redeviennent utilisables, jusqu’à la dernière édition encore présente. Les données restent dans `textmachine.json` ; le plugin détermine leur disponibilité à partir des notes restantes.
 
-Readability 0.6.0 provient de [Mozilla](https://github.com/mozilla/readability/tree/0.6.0), avec sa licence Apache 2.0 dans `scripts/vendor/readability/`. `npm run dev` reconstruit le plugin à chaque modification des sources.
+Activer **Debug**, en bas des réglages, conserve `brouillon-AAAA-MM-JJ.md` et `revision-AAAA-MM-JJ.md` pour comparer l’écriture et la révision. Ce mode est désactivé par défaut.
 
-`./release.sh` suit la procédure de Finition : découverte du dépôt et de sa branche par défaut, préparation des ressources publiques, vérifications TypeScript, lint, build, commit et push des changements, première publication du tag `0.0.1`, puis incrément du patch dans manifest/package/lock/versions pour les suivantes, nouveau push, comparaison du manifest distant, puis création et push du tag. Aucun fichier `main.js` local n’est téléversé.
+## Choisir son IA
 
-Pour la toute première publication `0.0.1`, tant qu’aucune release n’existe, `release.sh` détecte aussi l’historique divergent ou les fichiers ignorés encore suivis et exécute la remise à zéro déjà demandée. Il garde les fichiers locaux, reste sur `main`, aligne le distant sur un commit initial propre, retire les anciens tags puis publie `0.0.1`. Après une release publiée, ce nettoyage destructif ne se déclenche plus automatiquement.
+Les réglages reprennent le fonctionnement de Finition :
 
-Le tag lance `.github/workflows/release.yml` : installation par `npm ci`, contrôle des versions, vérifications et tests, double build avec comparaison SHA-256, contrôle de la taille, attestation de provenance, publication des ressources publiques dans une prerelease `resources-<version>` puis des trois fichiers du plugin dans la release `<version>`. Les prompts, les modèles Markdown et JSON et les licences sont inclus dans le catalogue de ressources avec tailles et empreintes ; ni `oauth-client.json`, ni `data.json`, ni les environnements ou caches locaux ne sont publiés.
+- **OpenAI ou Anthropic** : choisir ou créer une clé dans le gestionnaire de secrets d’Obsidian, puis sélectionner le modèle. Les champs affichent les références des clés, partageables avec d’autres plugins.
+- **Codex** : installer et connecter Codex CLI sur la machine. TextMachine propose les modèles disponibles et leur effort de raisonnement. Ce choix reste propre au plugin.
+- **Serveur local compatible OpenAI** : renseigner son adresse et le nom du modèle déjà installé sur ce serveur.
 
-`npm run test:release` vérifie les scénarios de publication avec des dépôts temporaires et un faux client GitHub, sans publication réelle.
+Codex est prioritaire lorsqu’il est choisi ; sinon, un serveur local renseigné prend la priorité sur le modèle cloud. Une erreur ne provoque pas de bascule automatique vers un autre fournisseur. L’illustration nécessite toujours une clé OpenAI lorsqu’elle doit être générée.
 
-La connexion Gmail utilise une configuration locale de client OAuth Google pour ordinateur dans `oauth-client.json`, au format JSON `installed` fourni par Google. Ce fichier local reste exclu du dépôt et des releases publiques. Sans client OAuth configuré, les réglages indiquent que la connexion Google n’est pas encore disponible ; aucune connexion factice n’est présentée comme réussie.
+## Confidentialité et publication
 
-Le mainteneur active Gmail API, configure l’écran de consentement et l’autorisation `https://www.googleapis.com/auth/gmail.modify`, puis crée le client OAuth de bureau. Pendant les tests, les comptes autorisés doivent figurer dans les utilisateurs tests. La diffusion publique est soumise aux exigences Google de validation des accès Gmail. Voir le [parcours OAuth pour ordinateur](https://developers.google.com/identity/protocols/oauth2/native-app) et les [autorisations Gmail](https://developers.google.com/workspace/gmail/api/auth/scopes).
+Les liens, les textes extraits, les dates d’utilisation, les notes et les images sont enregistrés dans votre coffre. Les clés API et la session Gmail sont conservées dans le gestionnaire de secrets d’Obsidian. Le mot de passe Google est saisi chez Google.
 
-Le retour OAuth utilise un serveur temporaire sur `127.0.0.1`, PKCE et une valeur `state` aléatoire. Le serveur ferme après réception de l’autorisation, annulation, désactivation du plugin ou expiration de trois minutes. L’adresse saisie est transmise à Google comme indication de compte ; l’identité finale est celle confirmée par Gmail.
+L’autorisation Gmail permet de lire et de modifier les messages du compte ; TextMachine limite sa collecte au libellé choisi et marque les messages traités comme lus. Les pages d’articles sont chargées dans une fenêtre isolée, sans accès à votre coffre ni aux sessions de votre navigateur habituel. Les PDF ne sont pas lus.
 
-## Vérification
+La sélection et la rédaction transmettent les textes des articles et l’historique utilisé au fournisseur choisi. Un serveur exécuté sur votre machine permet de traiter le texte localement ; Codex utilise le service auquel il est connecté. La génération d’images transmet le texte final à OpenAI. Les titres des sources inaccessibles sont envoyés séparément pour traduction.
 
-```sh
-npm test
-npm run check
-```
+**La commande prépare une note à relire. Elle ne publie pas sur Substack et n’envoie rien aux abonnés.** Les scripts RSS et Substack présents dans le dépôt sont des outils séparés du plugin.
 
-Sur macOS, `venv/bin/python -B scripts/tests/settings_ui.py` vérifie les réglages dans une instance isolée d’Obsidian avec Playwright : compte déconnecté, choix du libellé, enregistrement, résultat et erreur, choix du dossier, extraction HTML, reprise après interruption et absence de doublons.
+## Sources et développement
 
-`venv/bin/python -B scripts/tests/crawler_ui.py` vérifie le rendu JavaScript dans Chromium, l’extraction Readability, les métadonnées et l’isolation avec des pages simulées.
+Le code du plugin est dans [`plugin/`](plugin/), les tests et les outils dans [`scripts/`](scripts/). L’extraction du texte s’appuie sur [Readability](scripts/vendor/readability/LICENSE.md) ; les domaines des sites bloqués sont regroupés grâce à la [Public Suffix List](scripts/vendor/MPL-2.0.txt).
 
-`venv/bin/python -B scripts/tests/newsletter_ui.py` vérifie la commande complète dans un coffre isolé : contexte du prompt, flux RSS, rendu du modèle, récupération des anciennes entrées utilisées, régénération du jour avec de nouveaux articles, conservation des anciennes notes et statuts datés.
+Les commandes de vérification sont `npm test`, `npm run typecheck` et `npm run lint`. `npm run build` construit le fichier installable `main.js`.
 
-Les tests simulent les réponses Google et IA. La connexion réelle exige un client OAuth actif et le consentement du titulaire du compte.
-
-Les scripts Python restent disponibles pour le traitement RSS et Substack ; ils ne sont pas encore pilotés depuis le plugin. L’ancien workflow de conversion des issues est supprimé ; seule la publication du plugin sur tag reste automatisée.
-
-Les tests sont regroupés dans `scripts/tests/`, les bibliothèques tierces dans `scripts/vendor/`. Les outils de développement sont dans `scripts/`, les sources du plugin dans `plugin/`. Les lanceurs `release.sh`, `git.sh` et `subs.sh` restent à la racine. `_doc.md` reste local et ignoré par Git.
-
-Pour repartir volontairement d’un historique neuf : `bash scripts/reset-github.sh`. Le script reste sur `main`, conserve les fichiers locaux ignorés, prépare un seul commit initial sans ces fichiers et remplace atomiquement le `main` distant en retirant les anciens tags. La branche locale est alignée uniquement après réussite de l’envoi. Cette commande ne lance pas de release.
+Un problème ou une idée ? [Ouvrir un ticket](https://github.com/tcrouzet/textmachine/issues), avec la version d’Obsidian, le système et l’étape concernée.

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 require('../../plugin/i18n').setLocale('en');
-const {day,availableArticles,briefArticles,briefRequest,parseBrief,renderPrompt,writerRequest,parseNewsletter,selectionRequest,parseSelection,isAuthorSource,assertNoAuthorSources,summaryRequest,parseSummary,parseEditorial,publisherRequest,parsePublisher,renderNewsletter,applyStatuses,feedUrl,feedUrls} = require('../../plugin/newsletter');
+const {day,availableArticles,briefArticles,briefRequest,parseBrief,renderPrompt,writerRequest,selectionRequest,parseSelection,isAuthorSource,assertNoAuthorSources,parseEditorial,publisherRequest,parsePublisher,renderNewsletter,applyStatuses,feedUrl,feedUrls} = require('../../plugin/newsletter');
 const illustrated = result=>({...result,image:{url:'illustrations/text-machine-2026-11-03.png',source:'',caption:'Original caption',verified:true,generated:true}});
 const {generate} = require('../../plugin/ai/generate');
 const template = fs.readFileSync(path.join(__dirname,'../../models/newsletter.md'),'utf8');
@@ -12,9 +12,8 @@ const articles = [article('a',{id:1,image:'https://example.com/image.jpg',imageC
 const data = JSON.stringify({version:1,notes:'Keep notes',articles});
 const prompt = '{"instructions":"Editorial instructions","language":"{{language}}","articles":{{articles}},"previousNewsletters":{{previousNewsletters}},"recentPosts":{{recentPosts}}}';
 const result = {title:'A new angle',chapeau:'Books and AI.',paragraphs:['First paragraph.','Second paragraph. [Source](https://example.com/a)','Last paragraph.'],
-    lead:1,image:null,
-    groups:[{title:'Literature',articles:[{id:1,summary:'Summary of the article.'}]}],discard:[2]};
-const empty = {title:'',chapeau:'',paragraphs:[],lead:null,image:null,groups:[],discard:articles.map((_article,index)=>index+1)};
+    image:null,used:[articles[0].url],discard:[articles[1].url]};
+const empty = {title:'',chapeau:'',paragraphs:[],image:null,used:[],discard:articles.map(article=>article.url)};
 
 test('additional feeds accept Substack home pages and explicit RSS URLs',()=>{
     assert.equal(feedUrl(''),'');
@@ -31,13 +30,28 @@ test('additional feeds accept Substack home pages and explicit RSS URLs',()=>{
     assert.throws(()=>feedUrls('https://example.com/rss.xml file:///tmp/feed'),/valid HTTP or HTTPS/);
 });
 
-test('selection includes new articles and today’s used articles, never those used on another day',()=>{
+test('without folder history selection includes only new articles and today’s used articles',()=>{
     const text = JSON.stringify({version:1,articles:[...articles,article('today',{status:'used',usedAt:'2026-11-03'}),
         article('yesterday',{status:'used',usedAt:'2026-11-02'}),article('legacy',{status:'used'}),
         article('blocked',{status:'404'}),article('report.pdf'),article('no-content',{content:''})]});
     assert.deepEqual(availableArticles(text,'','2026-11-03').map(article=>article.title),['a','b','today']);
     assert.deepEqual(availableArticles(text,'example.com','2026-11-03'),[]);
     assert.equal(day(new Date(2026,10,3,23,59)),'2026-11-03');
+});
+test('missing consecutive editions reopen dated articles only after the last surviving edition',()=>{
+    const entries=[article('new'),article('today',{usedAt:'2026-01-02'}),article('yesterday',{usedAt:'2026-01-01'}),
+        article('year-end',{usedAt:'2025-12-31'}),article('last-edition',{usedAt:'2025-12-30'}),
+        article('older',{usedAt:'2025-12-29'}),article('unknown',{usedAt:'unknown'}),article('future',{usedAt:'2026-01-03'}),
+        article('pdf.pdf',{usedAt:'2026-01-01'}),article('empty',{usedAt:'2026-01-01',content:''}),
+        article('blocked',{usedAt:'2026-01-01',status:'forbidden'}),article('old-blocked',{usedAt:'2025-12-30',status:'forbidden'})];
+    const text=JSON.stringify({version:1,articles:entries});
+    assert.deepEqual(availableArticles(text,'','2026-01-02',[],'2025-12-30').map(row=>row.title),['new','today','yesterday','year-end']);
+    assert.deepEqual(briefArticles(text,'','2026-01-02','2025-12-30').map(row=>row.title),['blocked']);
+    assert.deepEqual(availableArticles(text,'','2026-01-02',[],'2026-01-01').map(row=>row.title),['new','today']);
+    assert.deepEqual(availableArticles(text,'','2026-01-02',[],'').map(row=>row.title),['new','today','yesterday','year-end','last-edition','older']);
+    assert.deepEqual(briefArticles(text,'','2026-01-02','').map(row=>row.title),['blocked','old-blocked']);
+    assert.deepEqual(availableArticles(text,'example.com','2026-01-02',[],'2025-12-30'),[]);
+    assert.equal(JSON.parse(text).articles[2].usedAt,'2026-01-01');
 });
 test('legacy used articles are recovered only when explicitly linked from today’s newsletter',()=>{
     const text = JSON.stringify({version:1,articles:[article('legacy',{status:'used'}),article('other',{status:'used'})]});
@@ -85,30 +99,20 @@ test('writer gets JSON requirements and editorial context without the Markdown t
     assert.equal(context.recentPosts[0].title,'Latest blog post');
     assert.throws(()=>writerRequest('',articles,[],[]),/writer.md/);
 });
-test('structured output classifies every article once and rejects invented images or source URLs',()=>{
-    const normalized = parseNewsletter(JSON.stringify(result),articles);
-    assert.deepEqual(normalized.used,[articles[0].url]);
-    assert.deepEqual(normalized.discard,[articles[1].url]);
-    assert.equal(normalized.groups[0].articles[0].url,articles[0].url);
-    assert.equal(normalized.image,null);
+test('selection classifies every article once and rejects invented sources or extra fields',()=>{
+    const answer={selected:[1],discard:[2]};
+    const normalized=parseSelection(JSON.stringify(answer),articles);
+    assert.deepEqual(normalized.selected,[articles[0]]);
+    assert.deepEqual(normalized.discard,[2]);
     for (const changed of [
-        {...result,discard:[]},
-        {...result,groups:[...result.groups,...result.groups]},
-        {...result,discard:[3]},
-        {...result,discard:['2']},
-        {...result,discard:[1.5]},
-        {...result,lead:99},
-        {...result,lead:2},
-        {...result,image:{...result.image,url:'https://example.com/invented.jpg'}},
-        {...result,groups:[{title:'Books',articles:[{id:0,summary:'Summary'}]}]},
-        {...result,groups:[{title:'Books',articles:[{id:1,status:'used',summary:'Summary'}]}]},
-        {...result,status:'used'},
-        {...result,paragraphs:['Only one paragraph']},
-        {...result,paragraphs:['![Extra image](https://example.com/image.jpg)','Second paragraph']},
-        {...result,title:''},
+        {...answer,discard:[]},{...answer,selected:[1,1]},{...answer,discard:[3]},
+        {...answer,discard:['2']},{...answer,discard:[1.5]},{...answer,selected:[99]},
+        {...answer,selected:[2]},{...answer,image:{url:'https://example.com/invented.jpg'}},
+        {...answer,selected:[0]},{...answer,status:'used'},
         {markdown:'# Old output',used:[articles[0].url],discard:[articles[1].url]},
-    ]) assert.throws(()=>parseNewsletter(JSON.stringify(changed),articles),/Invalid AI response/);
+    ]) assert.throws(()=>parseSelection(JSON.stringify(changed),articles),/Invalid AI response/);
 });
+
 test('a custom writer prompt expands AuthorFeed, history and language without duplicating data',()=>{
     const source = 'Rédige en {{language}}.\n{{articles}}\nAnciennes notes : {{previousNewsletters}}\nPublications : {{AuthorFeed}}';
     const original = [{...articles[0],content:'Article body {{language}}'}];
@@ -136,43 +140,43 @@ test('prompt substitution accepts spaces, preserves inserted text and rejects un
     assert.throws(()=>renderPrompt('{{toString}}',{}),/\{\{toString\}\}/);
     assert.throws(()=>renderPrompt('{{unknown-variable}}',{}),/\{\{unknown-variable\}\}/);
 });
-test('translated review titles are rendered without changing original article titles',()=>{
-    const answer = {...result,groups:[{title:'Libros',articles:[{id:1,title:'Título traducido',summary:'Resumen.'}]}]};
-    const normalized = parseNewsletter(JSON.stringify(answer),articles);
-    const markdown = renderNewsletter(template,normalized,articles);
-    assert.ok(markdown.includes('#### Título traducido'));
-    assert.ok(markdown.includes('Source : [example.com](https://example.com/a)'));
+test('translated brief titles are rendered without changing original article titles',()=>{
+    const translated=parseBrief(JSON.stringify({titles:[{id:1,title:'Título traducido'}]}),[articles[0]]);
+    const markdown=renderNewsletter(template,result,translated);
+    assert.ok(markdown.includes('* [Título traducido](https://example.com/a)'));
     assert.equal(articles[0].title,'a');
     for (const title of ['',null,{}]) {
-        assert.throws(()=>parseNewsletter(JSON.stringify({...answer,groups:[{title:'Libros',articles:[{id:1,title,summary:'Summary'}]}]}),articles),/Invalid AI response/);
+        assert.throws(()=>parseBrief(JSON.stringify({titles:[{id:1,title}]}),[articles[0]]),/Translation.*incomplete or invalid/);
     }
 });
-test('Markdown comes from the template, with its image after paragraph two and grouped sources',()=>{
-    const parsed = illustrated(parseNewsletter(JSON.stringify(result),articles));
-    const markdown = renderNewsletter(template,parsed,articles);
+
+test('Markdown comes from the template, with its image after paragraph two and no separate summaries',()=>{
+    const parsed = illustrated(result);
+    const markdown = renderNewsletter(template,parsed);
     assert.ok(markdown.startsWith('# A new angle\n\n*Books and AI.*'));
     assert.ok(markdown.indexOf('Second paragraph.') < markdown.indexOf('![Original caption]'));
     assert.ok(markdown.indexOf('![Original caption]') < markdown.indexOf('Last paragraph.'));
-    assert.ok(markdown.includes('## Revue de presse\n\n### Literature\n\n#### a'));
-    assert.ok(markdown.includes('Source : [example.com](https://example.com/a)'));
+    assert.ok(!markdown.includes('## Revue de presse'));
+    assert.ok(!markdown.includes('Source :'));
+    assert.ok(markdown.includes('[Source](https://example.com/a)'));
     assert.equal((markdown.match(/!\[/g)||[]).length,1);
     assert.ok(!markdown.includes('{{'));
-    const withoutImage = renderNewsletter(template,{...parsed,image:null},articles);
+    const withoutImage = renderNewsletter(template,{...parsed,image:null});
     assert.ok(!withoutImage.includes('!['));
-    assert.ok(!renderNewsletter(template,{...parsed,image:{...parsed.image,caption:''}},articles).includes('!['));
+    assert.ok(!renderNewsletter(template,{...parsed,image:{...parsed.image,caption:''}}).includes('!['));
     assert.equal(markdown.split('Original caption').length-1,1);
     assert.ok(!markdown.includes('\n\n*Original caption*'));
-    assert.ok(!renderNewsletter(template,parseNewsletter(JSON.stringify(result),articles),articles).includes('!['));
+    assert.ok(!renderNewsletter(template,result).includes('!['));
     for (const bad of ['# {{unknown}}','# {{title}}\n{{#title}}bad{{/title}}','# {{title}}\n{{#groups}}']) {
-        assert.throws(()=>renderNewsletter(bad,parsed,articles),/template/);
+        assert.throws(()=>renderNewsletter(bad,parsed),/template/);
     }
-    assert.ok(renderNewsletter(template,{...parsed,paragraphs:['Literal {{title}}','Second paragraph']},articles).includes('Literal {{title}}'));
+    assert.ok(renderNewsletter(template,{...parsed,paragraphs:['Literal {{title}}','Second paragraph']}).includes('Literal {{title}}'));
 });
 test('status updates timestamp today and preserve annotations and concurrent edits',()=>{
     const changed = JSON.parse(data);
     changed.articles[0].custom = 'Keep annotation';
     changed.articles[1].content = 'Edited in the meantime';
-    const parsed = parseNewsletter(JSON.stringify(result),articles);
+    const parsed = result;
     const saved = JSON.parse(applyStatuses(JSON.stringify(changed),articles,parsed,'2026-11-03'));
     assert.equal(saved.notes,'Keep notes');
     assert.equal(saved.articles[0].status,'');
@@ -184,7 +188,7 @@ test('status updates timestamp today and preserve annotations and concurrent edi
     assert.equal(JSON.parse(applyStatuses(JSON.stringify(changed),articles,parsed,'2026-11-03')).articles[0].status,'discard');
 });
 test('all irrelevant articles can be discarded without generating a note',()=>{
-    const classified = parseNewsletter(JSON.stringify(empty),articles);
+    const classified = empty;
     assert.ok(JSON.parse(applyStatuses(data,articles,classified)).articles.every(article=>article.status==='discard'));
 });
 test('OpenAI responses are collected across output blocks; local and Claude use their own protocols',async()=>{
@@ -259,7 +263,7 @@ test('AI input uses stored IDs and excludes persistent state, images and private
 });
 
 test('stored AI IDs resolve through the original snapshot even if the article file is reordered',()=>{
-    const normalized = parseNewsletter(JSON.stringify(result),articles);
+    const normalized = result;
     const current = {version:1,articles:[{...articles[1],privateNotes:'Keep B'},{...articles[0],privateNotes:'Keep A'}]};
     const saved = JSON.parse(applyStatuses(JSON.stringify(current),articles,normalized,'2026-11-03'));
     assert.equal(saved.articles[0].url,articles[1].url);
@@ -321,13 +325,13 @@ test('forbidden articles appear only as translated linked titles in the brief se
     const brief = briefArticles(text,'','2026-11-03');
     assert.deepEqual(brief.map(article=>article.title),['Blocked title']);
     assert.deepEqual(availableArticles(text,'','2026-11-03').map(article=>article.title),['a','b']);
-    const parsed = illustrated(parseNewsletter(JSON.stringify(result),articles));
+    const parsed = illustrated(result);
     const translated=brief.map(article=>({...article,title:'Titre traduit'}));
-    const markdown = renderNewsletter(template,parsed,articles,translated);
+    const markdown = renderNewsletter(template,parsed,translated);
     assert.ok(markdown.includes('### In brief\n\n* [Titre traduit](https://example.com/Blocked%20title)'));
     assert.ok(!markdown.includes('Unverified private content'));
     assert.ok(!markdown.includes('wrong.jpg'));
-    assert.ok(markdown.indexOf('### In brief') > markdown.indexOf('Source :'));
+    assert.ok(markdown.indexOf('### In brief') > markdown.indexOf('Last paragraph.'));
     const saved = JSON.parse(applyStatuses(text,articles,parsed,'2026-11-03',brief));
     assert.equal(saved.articles[2].status,'forbidden');
     assert.equal(saved.articles[2].usedAt,'2026-11-03');
@@ -335,12 +339,11 @@ test('forbidden articles appear only as translated linked titles in the brief se
 });
 
 test('source photo availability does not change the selected source or provide the illustration',()=>{
-    const answer={...result,lead:2,paragraphs:['First [B](https://example.com/b)','Second [A](https://example.com/a)'],
-        groups:[{title:'Books',articles:[{id:1,summary:'First'},{id:2,summary:'Second'}]}],discard:[]};
-    const parsed=parseNewsletter(JSON.stringify(answer),articles);
-    assert.equal(parsed.lead,articles[1].url);
-    assert.equal(parsed.image,null);
-    assert.deepEqual(parsed.used,articles.map(article=>article.url));
+    const parsed=parseSelection(JSON.stringify({selected:[2,1],discard:[]}),articles);
+    assert.deepEqual(parsed.selected.map(article=>article.url),articles.map(article=>article.url));
+    const input=JSON.parse(writerRequest(prompt,parsed.selected,[],[]).input);
+    assert.ok(input.articles.every(article=>!Object.hasOwn(article,'image')));
+    assert.ok(!renderNewsletter(template,result).includes('!['));
 });
 
 test('the writer schema contains only article fields and no source or illustration selection',()=>{
@@ -358,21 +361,24 @@ test('stored article IDs stay the same in the AI input and resolve independently
     const sources = [{...articles[0],id:41},{...articles[1],id:7}];
     const input = JSON.parse(writerRequest(prompt,sources,[],[]).input);
     assert.deepEqual(input.articles.map(article=>article.id),[41,7]);
-    const response = {...result,lead:41,groups:[{title:'Books',articles:[{id:41,summary:'Summary'}]}],discard:[7]};
-    assert.deepEqual(parseNewsletter(JSON.stringify(response),sources).used,[sources[0].url]);
-    assert.throws(()=>parseNewsletter(JSON.stringify({...response,lead:1}),sources),/Invalid AI response/);
+    const response = {selected:[41],discard:[7]};
+    assert.deepEqual(parseSelection(JSON.stringify(response),sources).selected.map(article=>article.url),[sources[0].url]);
+    assert.throws(()=>parseSelection(JSON.stringify({...response,selected:[1]}),sources),/Invalid AI response/);
 });
 
 test('article JSON cannot override the generated illustration with source-image metadata',()=>{
-    assert.throws(()=>parseNewsletter(JSON.stringify({...result,image:{caption:'Source photo'}}),articles),/Invalid AI response/);
-    const parsed=parseNewsletter(JSON.stringify(result),articles);
+    assert.throws(()=>parseEditorial(JSON.stringify({paragraphs:result.paragraphs,image:{caption:'Source photo'}})),/Invalid AI response/);
+    const parsed=result;
     assert.equal(parsed.image,null);
-    assert.ok(!renderNewsletter(template,parsed,articles).includes('!['));
+    assert.ok(!renderNewsletter(template,parsed).includes('!['));
 });
 
 test('editorial parsing rejects summaries, classifications and illustration fields',()=>{
     const article={paragraphs:['First','Second']};
     assert.deepEqual(parseEditorial(JSON.stringify(article)),article);
+    for (const paragraphs of [[],['Only one paragraph'],['![Extra image](https://example.com/image.jpg)','Second paragraph']]) {
+        assert.throws(()=>parseEditorial(JSON.stringify({paragraphs})),/Invalid AI response/);
+    }
     for (const extra of [{title:'Premature title'},{chapeau:'Premature introduction'},{groups:[]},{discard:[]},{image:null},{lead:1}]) assert.throws(()=>parseEditorial(JSON.stringify({...article,...extra})),/Invalid AI response/);
 });
 test('publisher receives only the final body and returns a separate title and introduction',()=>{
@@ -470,7 +476,7 @@ test('reference domains identify preferred sources in selection and writing with
     assert.equal(JSON.stringify(candidates),before);
 });
 
-test('event chronology belongs to selection and is not passed to summaries or writing',t=>{
+test('event chronology belongs to selection and is not passed to writing',t=>{
     const instant=Date.parse('2026-11-03T14:00:00Z');
     t.mock.timers.enable({apis:['Date'],now:instant});
     const sources=[{...articles[0],title:'Le prix sera remis mardi',publish:'2026-11-02T18:00:00Z'}];
@@ -480,41 +486,22 @@ test('event chronology belongs to selection and is not passed to summaries or wr
     assert.ok(input.now.includes('GMT'));
     assert.equal(input.articles[0].publish,'2026-11-02T18:00:00Z');
     assert.equal(input.articles[0].title,'Le prix sera remis mardi');
-    assert.throws(()=>summaryRequest('Summarize {{now}}: {{article}}',sources[0],'français'),/Unknown prompt variable: \{\{now\}\}/);
     assert.throws(()=>writerRequest(prompt,sources,[],[],'français'),/Unknown prompt variable: \{\{now\}\}/);
 });
 
-test('summary receives only one title and text and returns only a summary of at most 30 words',()=>{
-    const request=summaryRequest('Résume en {{language}} : {{article}}',articles[0],'français');
-    assert.equal(request.input,'Résume en français : '+JSON.stringify({title:articles[0].title,content:articles[0].content}));
-    assert.deepEqual(request.schema,require('../../models/resume.json'));
-    assert.deepEqual(request.schema.required,['summary']);
-    assert.deepEqual(Object.keys(request.schema.properties),['summary']);
-    const thirty=Array.from({length:30},(_,i)=>'mot'+i).join(' ');
-    for (const summary of ['Un résultat concret.',thirty,thirty.replaceAll(' ','\u00a0')]) {
-        assert.equal(parseSummary(JSON.stringify({summary})),summary);
-    }
-    for (const response of ['', '{broken','null','[]','Plain text',JSON.stringify({summary:thirty+' extra'}),
-        JSON.stringify({summary:''}),JSON.stringify({summary:'  '}),JSON.stringify({summary:42}),
-        JSON.stringify({summary:'Résumé',title:'Titre inutile'}),JSON.stringify({summary:'Résumé',id:1}),
-        JSON.stringify({summary:'![Image](https://example.com/image.jpg)'})]) {
-        assert.throws(()=>parseSummary(response),/Invalid AI response/);
-    }
-    assert.throws(()=>summaryRequest('{{articles}}',articles[0],'français'),/\{\{article\}\}/);
-});
 
 test('the original illustration is rendered even by a template that omits the image slot or has only brief items',()=>{
     const generated={url:'illustrations/illustration-0000000000000000.png',source:'',caption:'Original TextMachine illustration',verified:true,generated:true};
-    const parsed={...parseNewsletter(JSON.stringify(result),articles),image:generated};
-    const custom=renderNewsletter('# {{title}}\n\n{{chapeau}}',parsed,articles);
+    const parsed={...result,image:generated};
+    const custom=renderNewsletter('# {{title}}\n\n{{chapeau}}',parsed);
     assert.ok(custom.includes('](illustrations/illustration-0000000000000000.png)'));
     assert.ok(custom.includes('![Original TextMachine illustration]('));
     assert.equal(custom.split('Original TextMachine illustration').length-1,1);
-    const brief=renderNewsletter(template,{title:'',chapeau:'',paragraphs:[],lead:null,image:generated,groups:[],used:[],discard:[]},[],[{title:'Brief item',url:'https://example.com/brief'}]);
+    const brief=renderNewsletter(template,{title:'',chapeau:'',paragraphs:[],image:generated,used:[],discard:[]},[{title:'Brief item',url:'https://example.com/brief'}]);
     assert.ok(brief.includes('](illustrations/illustration-0000000000000000.png)'));
 });
 
 test('article prose is independent of the availability of source photos',()=>{
-    const response = {...result,paragraphs:['First paragraph','Second paragraph with no citation']};
-    assert.deepEqual(parseNewsletter(JSON.stringify(response),articles).paragraphs,response.paragraphs);
+    const response = {paragraphs:['First paragraph','Second paragraph with no citation']};
+    assert.deepEqual(parseEditorial(JSON.stringify(response)).paragraphs,response.paragraphs);
 });

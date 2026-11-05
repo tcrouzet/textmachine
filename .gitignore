@@ -29,3 +29,5 @@ __pycache__/
 
 # Installed JavaScript dependencies
 /node_modules/
+
+/doc/RP-FranceInter/

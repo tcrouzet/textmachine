@@ -14,9 +14,10 @@ test('public resources include the newsletter template and the schemas used by e
     assert.ifError(result.error);
     assert.equal(result.status,0,result.stderr);
     const catalog = JSON.parse(fs.readFileSync(path.join(output,'text-machine-resources.json'),'utf8'));
+    assert.ok(catalog.files.every(file=>!file.path.endsWith('/resume.md') && !file.path.endsWith('/resume.json')));
     assert.deepEqual(catalog.files.filter(file=>file.path.startsWith('models/')).map(file=>file.path).sort(),
-        ['models/newsletter.md','models/selection.json','models/writer.json','models/publisher.json','models/bref.json','models/resume.json','models/rewriter.json'].sort());
-    for (const name of ['models/newsletter.md','models/selection.json','models/writer.json','models/publisher.json','models/bref.json','models/resume.json','models/rewriter.json','prompts/sélection.md','prompts/resume.md','prompts/writer.md','prompts/publisher.md','prompts/bref.md','prompts/image.md']) {
+        ['models/newsletter.md','models/selection.json','models/writer.json','models/publisher.json','models/bref.json','models/rewriter.json'].sort());
+    for (const name of ['models/newsletter.md','models/selection.json','models/writer.json','models/publisher.json','models/bref.json','models/rewriter.json','prompts/sélection.md','prompts/writer.md','prompts/publisher.md','prompts/bref.md','prompts/image.md']) {
         const resource = catalog.files.find(file=>file.path===name);
         assert.ok(resource,name);
         const bytes = fs.readFileSync(path.join(output,resource.asset));

@@ -2,10 +2,14 @@ import {t} from '../i18n';
 import models from './models.json';
 import {Settings, AIProvider, Connection} from '../types';
 const CODEX_MODEL = '__codex__';
-const defaults = {aiModel:models[0].value, codexModel:'', localAIServer:'', localAIModel:''};
+const defaults = {aiModel:models[0].value, codexModel:'', codexEffort:'low', localAIServer:'', localAIModel:''};
 
 function getConnection(settings: Settings, secrets: (provider: AIProvider)=>string): Connection {
-    if (settings.aiModel === CODEX_MODEL) return {provider:'codex', apiKey:'', model:settings.codexModel.trim()};
+    if (settings.aiModel === CODEX_MODEL) {
+        const effort=settings.codexEffort.trim();
+        if (!/^[a-z][a-z0-9_-]{0,31}$/.test(effort)) throw new Error(t('aiCodexEffortInvalid'));
+        return {provider:'codex', apiKey:'', model:settings.codexModel.trim(), effort};
+    }
     if (settings.localAIServer.trim()) {
         let url;
         try { url = new URL(settings.localAIServer.trim()); } catch { throw new Error(t('aiInvalidServer')); }

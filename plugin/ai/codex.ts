@@ -8,7 +8,7 @@ import process from 'node:process';
 import {spawn} from 'node:child_process';
 import {Model, Progress, record} from '../types';
 
-interface Generation {system: string; input: string; model: string; progress?: Progress; schema?: object; imageUrl?: string}
+interface Generation {system: string; input: string; model: string; progress?: Progress; schema?: object; imageUrl?: string; effort?: string}
 
 async function findCodex() {
     const home = homedir(), name = process.platform === 'win32' ? 'codex.exe' : 'codex';
@@ -122,14 +122,14 @@ async function run(executable: string | null, signal?: AbortSignal, generation?:
                 cwd:tmpdir(), ephemeral:true, approvalPolicy:'never', sandbox:'read-only',
                 baseInstructions:generation.system,
                 developerInstructions:'Return only the requested response. Never use tools or access files.',
-                config:{project_doc_max_bytes:0,web_search:'disabled',mcp_servers:Object.fromEntries(Object.keys(servers).map(name=>[name,{enabled:false}]))},
+                config:{project_doc_max_bytes:0,web_search:'disabled',...(generation.effort ? {model_reasoning_effort:generation.effort} : {}),mcp_servers:Object.fromEntries(Object.keys(servers).map(name=>[name,{enabled:false}]))},
             });
             const details = record(thread.thread);
             if (typeof details.id !== 'string' || !details.id || record(thread.sandbox).type !== 'readOnly'
                 || thread.approvalPolicy !== 'never' || details.ephemeral !== true) throw new Error(t('aiCodexToolsDenied'));
             threadId = details.id;
             if (typeof thread.model === 'string' && thread.model.trim() && thread.model.length <= 200) generation.progress?.('',false,false,'Codex · '+thread.model);
-            await request('turn/start',{threadId,input:[{type:'text',text:generation.input,text_elements:[]},...(generation.imageUrl ? [{type:'image',url:generation.imageUrl}] : [])],sandboxPolicy:{type:'readOnly',networkAccess:false},...(generation.schema ? {outputSchema:generation.schema} : {})});
+            await request('turn/start',{threadId,input:[{type:'text',text:generation.input,text_elements:[]},...(generation.imageUrl ? [{type:'image',url:generation.imageUrl}] : [])],...(generation.effort ? {effort:generation.effort} : {}),sandboxPolicy:{type:'readOnly',networkAccess:false},...(generation.schema ? {outputSchema:generation.schema} : {})});
             return await completed;
         }
         const models = new Map<string,Model>(), cursors = new Set<string>();
@@ -144,7 +144,14 @@ async function run(executable: string | null, signal?: AbortSignal, generation?:
                 if (model?.hidden === true) continue;
                 if (typeof model?.model !== 'string' || !model.model.trim() || model.model.length > 200
                     || typeof model.displayName !== 'string' || !model.displayName.trim() || model.displayName.length > 200) throw new Error(t('aiCodexInvalid'));
-                models.set(model.model, {value:model.model,label:model.displayName});
+                const supported=model.supportedReasoningEfforts;
+                if (supported!==undefined && !Array.isArray(supported)) throw new Error(t('aiCodexInvalid'));
+                const efforts=Array.isArray(supported) ? supported.map((entry: unknown)=>{
+                    const effort=record(entry).reasoningEffort;
+                    if (typeof effort!=='string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(effort)) throw new Error(t('aiCodexInvalid'));
+                    return effort;
+                }) : [];
+                models.set(model.model, {value:model.model,label:model.displayName,...(efforts.length ? {efforts:[...new Set(efforts)]} : {})});
             }
             cursor = typeof page.nextCursor==='string' ? page.nextCursor || null : null;
         } while (cursor);
@@ -163,5 +170,5 @@ async function run(executable: string | null, signal?: AbortSignal, generation?:
 }
 
 const listModels = (executable: string | null, signal?: AbortSignal) => run(executable, signal);
-const generate = (executable: string | null, system: string, input: string, model: string, signal?: AbortSignal, progress?: Progress, schema?: object, imageUrl?: string) => run(executable,signal,{system,input,model,progress,schema,imageUrl});
+const generate = (executable: string | null, system: string, input: string, model: string, signal?: AbortSignal, progress?: Progress, schema?: object, imageUrl?: string, effort?: string) => run(executable,signal,{system,input,model,progress,schema,imageUrl,effort});
 export {findCodex, listModels, generate};

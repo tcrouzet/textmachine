@@ -11,12 +11,12 @@
     "title": {
       "type": "string",
       "minLength": 1,
-      "description": "Titre court et concret annonçant les sujets de cette édition, sans répéter IA, AI ou intelligence artificielle, sans morale ni référence à TextMachine."
+      "description": "Titre court et concret appuyé sur un fait saillant du texte, sans répéter IA, AI ou intelligence artificielle, sans morale ni référence à TextMachine."
     },
     "chapeau": {
       "type": "string",
       "minLength": 1,
-      "description": "Chapeau clair de moins de 25 mots annonçant les principales informations ou voix de la revue de presse."
+      "description": "Chapeau de moins de 25 mots, compréhensible seul, donnant une information précise du texte sans énumérer tous ses sujets."
     }
   }
 }

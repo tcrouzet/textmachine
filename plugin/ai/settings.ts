@@ -39,9 +39,19 @@ function renderAI(plugin: TextMachine, tab: GmailSettings): SettingsGroup {
         items.push({name:label,desc:t('aiKeyDescription'),render:setting=>{
             setting.descEl.append(' ');
             setting.descEl.createEl('a', {text:t('aiGetKey'),href:url,attr:{target:'_blank',rel:'noopener noreferrer'}});
-            setting.addComponent(el => new SecretComponent(plugin.app, el)
-                .setValue(plugin.settings[`${provider}SecretId`] || '')
-                .onChange(id => save(() => plugin.setAISecret(provider, id))));
+            setting.addComponent(el => {
+                const showReference=(id: string | null) => {
+                    // The native badge reveals the secret on click; keep only its reference.
+                    el.querySelector('.setting-password')?.replaceWith(el.createSpan({text:id || ''}));
+                };
+                const id=plugin.settings[`${provider}SecretId`] || '';
+                const component=new SecretComponent(plugin.app,el).setValue(id).onChange(value=>{
+                    showReference(value);
+                    return save(()=>plugin.setAISecret(provider,value));
+                });
+                showReference(id);
+                return component;
+            });
         }});
     }
     for (const [key,label,description,placeholder] of [
@@ -67,9 +77,30 @@ function renderAI(plugin: TextMachine, tab: GmailSettings): SettingsGroup {
             }
             dropdown.setValue(selected).setDisabled(tab.aiLoading || plugin.busy).onChange(value => save(async () => {
                 plugin.settings.codexModel = value;
+                const efforts=tab.codexModels.find(model=>model.value===value)?.efforts;
+                if (efforts?.length && !efforts.includes(plugin.settings.codexEffort)) plugin.settings.codexEffort=efforts.includes('low') ? 'low' : efforts[0];
                 await plugin.saveData(plugin.settings);
+                redraw();
             }));
         }).addButton(button => button.setButtonText(t('aiReload')).setDisabled(tab.aiLoading || plugin.busy).onClick(loadModels));
+    }});
+    if (tab.codexPath) items.push({name:t('aiCodexEffort'),desc:t('aiCodexEffortDescription'),render:setting=>{
+        setting.addDropdown(dropdown=>{
+            dropdown.selectEl.setAttribute('aria-label',t('aiCodexEffort'));
+            const labels: Record<string,string>={none:t('aiEffortNone'),minimal:t('aiEffortMinimal'),low:t('aiEffortLow'),medium:t('aiEffortMedium'),high:t('aiEffortHigh'),xhigh:t('aiEffortXhigh'),max:t('aiEffortMax'),ultra:t('aiEffortUltra')};
+            const supported=tab.codexModels.find(model=>model.value===plugin.settings.codexModel)?.efforts;
+            const efforts=supported || ['low','medium','high','xhigh','max'];
+            for (const effort of efforts) dropdown.addOption(effort,labels[effort] || effort);
+            const selected=plugin.settings.codexEffort;
+            if (!efforts.includes(selected)) {
+                dropdown.addOption(selected,(labels[selected] || selected)+(supported ? ' ('+t('aiUnavailable')+')' : ''));
+                if (supported) dropdown.selectEl.lastElementChild?.setAttribute('disabled','');
+            }
+            dropdown.setValue(selected).setDisabled(tab.aiLoading || plugin.busy).onChange(value=>save(async()=>{
+                plugin.settings.codexEffort=value;
+                await plugin.saveData(plugin.settings);
+            }));
+        });
     }});
     const choices = [...models];
     if (tab.codexPath || plugin.settings.aiModel === CODEX_MODEL) choices.push({value:CODEX_MODEL,label:tab.codexPath || !tab.aiDiscoveryComplete ? 'Codex' : 'Codex (' + t('aiUnavailable') + ')'});

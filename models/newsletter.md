@@ -9,22 +9,6 @@
 
 {{paragraphs_after_image}}
 
-## Revue de presse
-
-{{#groups}}
-{{#heading}}
-### {{title}}
-{{/heading}}
-
-{{#articles}}
-#### {{title}}
-
-{{summary}}
-
-Source : [{{domain}}]({{url}})
-{{/articles}}
-{{/groups}}
-
 {{/editorial}}
 
 {{#brief}}
