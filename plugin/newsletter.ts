@@ -262,10 +262,19 @@ function feedUrls(value = '') {
     return [...new Set(value.trim().split(/\s+/).filter(Boolean).map(feedUrl))];
 }
 
-function readFeed(xml: string, limit = 5, base = ''): FeedEntry[] {
+function readFeed(xml: string, limit = 5, base = '', accept?: (entry: Pick<FeedEntry,'url' | 'publish'>)=>boolean): FeedEntry[] {
     const doc = new DOMParser().parseFromString(xml,'text/xml');
     if (doc.querySelector('parsererror') || !doc.querySelector('rss, feed')) throw new Error(t('newsletterFeedFailed'));
-    return [...doc.querySelectorAll('item, entry')].slice(0,limit).map(item => {
+    return [...doc.querySelectorAll('item, entry')].slice(0,limit).flatMap(item => {
+        const links = [...item.querySelectorAll('link')];
+        const link = links.find(node=>!node.getAttribute('rel') || node.getAttribute('rel')==='alternate') || links[0];
+        let url = link?.getAttribute('href') || link?.textContent?.trim() || '';
+        if (url) {try {url = new URL(url,base || undefined).href;} catch {url='';}}
+        const published = item.querySelector('pubDate, published')?.textContent?.trim()
+            || item.getElementsByTagName('dc:date')[0]?.textContent?.trim() || '';
+        const timestamp = publicationDate(published) ? Date.parse(published) : NaN;
+        const publish=Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '';
+        if (accept && !accept({url,publish})) return [];
         const encoded = item.getElementsByTagName('content:encoded')[0];
         const atomContent = item.querySelector('content');
         const content = encoded?.textContent
@@ -277,13 +286,6 @@ function readFeed(xml: string, limit = 5, base = ''): FeedEntry[] {
         };
         const body = plain(content);
         const title = plain(item.querySelector('title')?.textContent || '');
-        const links = [...item.querySelectorAll('link')];
-        const link = links.find(node=>!node.getAttribute('rel') || node.getAttribute('rel')==='alternate') || links[0];
-        let url = link?.getAttribute('href') || link?.textContent?.trim() || '';
-        if (url) {try {url = new URL(url,base || undefined).href;} catch {url='';}}
-        const published = item.querySelector('pubDate, published')?.textContent?.trim()
-            || item.getElementsByTagName('dc:date')[0]?.textContent?.trim() || '';
-        const timestamp = publicationDate(published) ? Date.parse(published) : NaN;
         let html = encoded?.textContent || '';
         if (!html && atomContent && !atomContent.hasAttribute('src')) {
             const type = atomContent.getAttribute('type') || 'text';
@@ -299,9 +301,7 @@ function readFeed(xml: string, limit = 5, base = ''): FeedEntry[] {
             ...[...item.getElementsByTagName('dc:creator')].map(node=>node.textContent),
             ...[...item.querySelectorAll('author')].map(node=>node.querySelector('name')?.textContent || node.textContent),
         ]);
-        return {title,
-            url,publish:Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '',
-            content:body,html,authors};
+        return [{title,url,publish,content:body,html,authors}];
     });
 }
 

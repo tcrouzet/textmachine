@@ -1,7 +1,7 @@
 import { App, Plugin, PluginSettingTab, Setting, ButtonComponent, Notice, addIcon, setIcon, requestUrl, requireApiVersion, Modal, TFolder, TFile, getLanguage } from 'obsidian';
 import { shell } from 'electron';
 import { BrowserWindow } from '@electron/remote';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import * as i18n from './i18n';
 import * as gmail from './gmail';
 import * as articles from './articles';
@@ -422,7 +422,7 @@ export default class TextMachine extends Plugin {
         try {
             for (const article of articles) {
                 if (this.disposed) throw new Error(t('pluginDisabled'));
-                if (article.status === 'forbidden') continue;
+                if (article.status === 'forbidden' || article.status === 'discard' || (!article.content && article.usedAt)) continue;
                 if (!article.content && article.source.startsWith('RSS: ') && !this.articles.recentPublication(article.publish,now)) continue;
                 if (this.articles.isPdf(article.url) || article.status === '404' || this.crawler.isBlocked(article.url,blocked)) {
                     await vault.process(log,text => {
@@ -479,7 +479,23 @@ export default class TextMachine extends Plugin {
             titles.set(keys.titleKey,article);
         };
         try {
-            for (const article of this.articles.parseData(await this.app.vault.read(log)).articles) remember(article);
+            const data=this.articles.parseData(await this.app.vault.read(log));
+            const hash=(url: string)=>createHash('sha256').update(this.articles.articleKeys({url,title:''}).urlKey).digest('hex');
+            const filters=createHash('sha256').update(JSON.stringify([this.settings.excludedSources,this.settings.authorFeeds])).digest('hex');
+            const stored=record(data.rssSeen);
+            const seen=new Set<string>(stored.filters===filters && Array.isArray(stored.urls)
+                ? stored.urls.filter((value): value is string=>typeof value==='string' && /^[a-f0-9]{64}$/.test(value)) : []);
+            for (const article of data.articles) {
+                remember(article);
+                if (article.content || article.status || article.usedAt) seen.add(hash(article.url));
+            }
+            const accept=(entry: Pick<FeedEntry,'url' | 'publish'>) => {
+                if (!this.articles.recentPublication(entry.publish,now)) {ignored++;return false;}
+                const url=this.articles.articleUrl(entry.url);
+                if (!url) {ignored++;return false;}
+                if (seen.has(hash(url))) {duplicates++;return false;}
+                return true;
+            };
             for (const url of feeds) {
                 if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));
                 progress?.(t('readingIncludeFeed',{source:new URL(url).hostname}));
@@ -487,7 +503,7 @@ export default class TextMachine extends Plugin {
                 try {
                     const response = await generation.requestWithSignal({url,throw:false},this.request,controller.signal);
                     if (response.status!==200) throw new Error(t('newsletterFeedFailed'));
-                    entries = this.newsletter.readFeed(response.text,Infinity,url);
+                    entries = this.newsletter.readFeed(response.text,Infinity,url,accept);
                 } catch (caught) {
                     if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));
                     failed++;
@@ -497,7 +513,8 @@ export default class TextMachine extends Plugin {
                 if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));
                 const incoming: Omit<Article,'id'>[] = [];
                 for (const entry of entries) {
-                    if (!this.articles.recentPublication(entry.publish,now)) {ignored++;continue;}
+                    if (!accept(entry)) continue;
+                    seen.add(hash(entry.url));
                     const article = this.articles.feedArticles([entry],url,this.newsletter.day())[0];
                     if (!article || this.articles.isExcluded(article,this.settings.excludedSources)
                         || this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds)) continue;
@@ -528,13 +545,18 @@ export default class TextMachine extends Plugin {
                     } else remember(article);
                     incoming.push(article);
                 }
-                if (incoming.length) {
-                    let result!: ReturnType<typeof articles.mergeArticles>;
+                const rssSeen={filters,urls:[...seen]};
+                if (incoming.length || JSON.stringify(rssSeen)!==JSON.stringify(stored)) {
+                    let count=0;
                     await this.app.vault.process(log,text=>{
-                        result = this.articles.mergeArticles(text,incoming);
-                        return result.text;
+                        const result=incoming.length ? this.articles.mergeArticles(text,incoming) : {text,count:0};
+                        count=result.count;
+                        const current=this.articles.parseData(result.text);
+                        current.rssSeen=rssSeen;
+                        return JSON.stringify(current,null,2)+'\n';
                     });
-                    added += result.count;
+                    added += count;
+                    Object.assign(stored,rssSeen);
                 }
                 if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));
                 succeeded++;

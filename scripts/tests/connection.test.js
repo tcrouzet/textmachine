@@ -1979,3 +1979,65 @@ test('brief titles explicitly rejected as off-topic never appear in test newslet
     assert.equal(await p.writeNewsletter(),null);
     assert.equal(contents.get(p.dataPath),JSON.stringify(data));
 });
+
+test('RSS URL fingerprints survive reopening and retain rejected URLs and syndicated aliases',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.settings.includeFeeds='https://publisher.example/feed';
+    p.settings.excludedSources='ignored.example';
+    const data=JSON.parse(contents.get(p.dataPath));
+    data.articles.push({...entries[0],id:4,title:'Discarded',url:'https://example.com/discarded',status:'discard',content:''},
+        {...entries[0],id:5,title:'Consumed',url:'https://example.com/consumed',usedAt:'unknown',content:''});
+    data.nextId=6;contents.set(p.dataPath,JSON.stringify(data));
+    const publish=new Date(Date.now()-1000).toISOString();
+    const rows=[{title:'Used',url:'https://www.example.com/used/?utm_source=feed',publish},
+        {title:'Discarded',url:'https://example.com/discarded',publish},
+        {title:'Excluded',url:'https://ignored.example/post',publish},
+        {title:'Fresh story',url:'https://example.com/fresh',publish},
+        {title:'Fresh story',url:'https://other.example/reprint',publish},
+        {title:'Consumed',url:'https://example.com/consumed',publish}];
+    const wire=(plugin,items,decoded,crawled)=>{
+        plugin.request=async()=>({status:200,text:'feed'});
+        plugin.newsletter={...plugin.newsletter,readFeed:(_xml,_limit,_base,accept)=>items.filter(accept).map(entry=>{decoded.push(entry.url);return entry;})};
+        plugin.crawler={...plugin.crawler,crawl:async article=>{crawled.push(article.url);return {...article,content:'Retrieved full article'};}};
+    };
+    const decoded=[],crawled=[];
+    wire(p,rows,decoded,crawled);
+    assert.equal(await p.importFeeds(),1);
+    await p.crawlArticles();
+    assert.equal(decoded.length,3);
+    assert.deepEqual(crawled,['https://example.com/fresh']);
+    const stored=JSON.parse(contents.get(p.dataPath));
+    assert.ok(stored.rssSeen.urls.length>=5);
+    assert.ok(stored.rssSeen.urls.every(value=>/^[a-f0-9]{64}$/.test(value)));
+    assert.ok(!stored.articles.some(article=>article.url==='https://ignored.example/post'));
+    const second=await newsletterFixture();
+    second.contents.set(second.p.dataPath,contents.get(p.dataPath));
+    second.p.settings.includeFeeds=p.settings.includeFeeds;
+    second.p.settings.excludedSources=p.settings.excludedSources;
+    const decodedAgain=[],crawledAgain=[];
+    wire(second.p,rows.map(row=>row.url.includes('reprint') ? {...row,title:'Changed syndication title'} : row),decodedAgain,crawledAgain);
+    assert.equal(await second.p.importFeeds(),0);
+    await second.p.crawlArticles();
+    assert.deepEqual(decodedAgain,[]);
+    assert.deepEqual(crawledAgain,[]);
+    second.p.settings.excludedSources='';
+    wire(second.p,[rows[2]],decodedAgain,crawledAgain);
+    assert.equal(await second.p.importFeeds(),1);
+    assert.deepEqual(decodedAgain,['https://ignored.example/post']);
+});
+
+test('failed RSS writes never acknowledge URLs as processed',async()=>{
+    const {p,contents}=await newsletterFixture();
+    p.settings.includeFeeds='https://publisher.example/feed';
+    const before=contents.get(p.dataPath),process=p.app.vault.process;
+    p.request=async()=>({status:200,text:'feed'});
+    p.newsletter={...p.newsletter,readFeed:(_xml,_limit,_base,accept)=>[
+        {title:'Fresh',url:'https://example.com/new',publish:new Date(Date.now()-1000).toISOString()},
+    ].filter(accept)};
+    p.app.vault.process=async()=>{throw new Error('Disk full');};
+    await assert.rejects(p.importFeeds(),/Disk full/);
+    assert.equal(contents.get(p.dataPath),before);
+    p.app.vault.process=process;
+    assert.equal(await p.importFeeds(),1);
+    assert.ok(JSON.parse(contents.get(p.dataPath)).rssSeen.urls.length>0);
+});

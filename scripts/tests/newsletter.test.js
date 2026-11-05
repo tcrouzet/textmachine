@@ -544,3 +544,29 @@ test('brief selection accepts explicit rejection but never silent omissions or u
     for(const titles of [[{id:1,title:null}],[{id:1,title:null},{id:1,title:null}],[{id:1,title:null},{id:99,title:null}]])
         assert.throws(()=>parseBrief(JSON.stringify({titles}),sources),/incomplete or invalid/);
 });
+
+test('cached RSS entries are rejected before their bodies or titles are decoded',()=>{
+    const {readFeed}=require('../../plugin/newsletter');
+    const Original=global.DOMParser;
+    const link={getAttribute:name=>name==='href' ? 'https://example.com/already-read' : null,textContent:''};
+    global.DOMParser=class {
+        parseFromString(){return {
+            querySelector:selector=>selector==='parsererror' ? null : {},
+            querySelectorAll:()=>[{
+                querySelectorAll:selector=>{assert.equal(selector,'link');return [link];},
+                querySelector:selector=>{
+                    assert.equal(selector,'pubDate, published','No title or body may be decoded');
+                    return {textContent:'Thu, 05 Nov 2026 10:00:00 GMT'};
+                },
+                getElementsByTagName:()=>{throw new Error('A cached body must not be decoded');},
+            }],
+        };}
+    };
+    try {
+        let checked=0;
+        assert.deepEqual(readFeed('RSS',Infinity,'https://example.com/feed',entry=>{
+            assert.equal(entry.url,'https://example.com/already-read');checked++;return false;
+        }),[]);
+        assert.equal(checked,1);
+    } finally {global.DOMParser=Original;}
+});
