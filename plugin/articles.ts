@@ -223,6 +223,20 @@ function withIds(text: string) {
         ? text : JSON.stringify(data,null,2)+'\n';
 }
 
+function recentPublication(publish: string, now: number) {
+    const time = Date.parse(publish);
+    return Number.isFinite(time) && time <= now && time >= now - 48 * 60 * 60 * 1000;
+}
+
+function articleKeys(article: Pick<Article,'url' | 'title'>) {
+    const url = new URL(articleUrl(article.url) || article.url);
+    url.searchParams.sort();
+    const urlKey = url.host.replace(/^www\./, '') + url.pathname.replace(/\/$/, '') + url.search;
+    const titleKey = article.title.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    return {urlKey,titleKey};
+}
+
 function mergeArticles(text: string, incoming: Omit<Article,'id'>[]) {
     const data = parseData(text);
     const records = incoming.map(article=>{const copy: Partial<Article> = {...article};delete copy.id;return copy;});
@@ -231,11 +245,7 @@ function mergeArticles(text: string, incoming: Omit<Article,'id'>[]) {
     const articles: Article[] = [];
     let count = 0;
     for (const [index, article] of [...data.articles, ...newArticles].entries()) {
-        const url = new URL(articleUrl(article.url) || article.url);
-        url.searchParams.sort();
-        const urlKey = url.host.replace(/^www\./, '') + url.pathname.replace(/\/$/, '') + url.search;
-        const titleKey = article.title.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
-            .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+        const {urlKey,titleKey} = articleKeys(article);
         const existing = urls.get(urlKey) ?? titles.get(titleKey);
         if (existing !== undefined) {
             const kept = articles[existing];
@@ -259,4 +269,4 @@ function mergeArticles(text: string, incoming: Omit<Article,'id'>[]) {
     return { text: JSON.stringify(assignIds({ ...data, articles }), null, 2) + '\n', count, added: count > 0 };
 }
 
-export { isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, feedArticles, parseData, withIds, mergeArticles };
+export { recentPublication, articleKeys, isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, feedArticles, parseData, withIds, mergeArticles };

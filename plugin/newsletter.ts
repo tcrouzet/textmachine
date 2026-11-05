@@ -6,6 +6,8 @@ import publisherSchema from '../models/publisher.json';
 import briefSchema from '../models/bref.json';
 import {Article, FeedEntry, record, array} from './types';
 import {parseHTML} from './html';
+import {authorNames} from './authors';
+import {publicationDate} from './crawler';
 import {domainOf} from './domains';
 
 interface Editorial {title: string; chapeau: string; paragraphs: string[]}
@@ -64,14 +66,14 @@ function parseBrief(text: string, articles: Article[]): Article[] {
     try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {return invalid();}
     if (!result || typeof result!=='object' || Array.isArray(result) || Object.keys(result).length!==1
         || !Array.isArray(result.titles) || result.titles.length!==articles.length) return invalid();
-    const known = new Set(articles.map(article=>article.id)), titles = new Map<number,string>();
+    const known = new Set(articles.map(article=>article.id)), titles = new Map<number,string | null>();
     for (const value of result.titles as unknown[]) {
         const row=record(value);
         if (Object.keys(row).length!==2 || typeof row.id!=='number' || !known.has(row.id)
-            || titles.has(row.id) || typeof row.title!=='string' || !row.title.trim()) return invalid();
-        titles.set(row.id,row.title.trim());
+            || titles.has(row.id) || (row.title!==null && (typeof row.title!=='string' || !row.title.trim()))) return invalid();
+        titles.set(row.id,row.title===null ? null : (row.title as string).trim());
     }
-    return articles.map(article=>({...article,title:titles.get(article.id)!}));
+    return articles.flatMap(article=>{const title=titles.get(article.id);return title ? [{...article,title}] : [];});
 }
 
 function renderPrompt(prompt: string, values: Record<string,string>) {
@@ -264,7 +266,9 @@ function readFeed(xml: string, limit = 5, base = ''): FeedEntry[] {
     const doc = new DOMParser().parseFromString(xml,'text/xml');
     if (doc.querySelector('parsererror') || !doc.querySelector('rss, feed')) throw new Error(t('newsletterFeedFailed'));
     return [...doc.querySelectorAll('item, entry')].slice(0,limit).map(item => {
-        const content = item.getElementsByTagName('content:encoded')[0]?.textContent
+        const encoded = item.getElementsByTagName('content:encoded')[0];
+        const atomContent = item.querySelector('content');
+        const content = encoded?.textContent
             || item.querySelector('description, content, summary')?.textContent || '';
         const plain = (html: string) => {
             const doc=parseHTML(html);
@@ -277,11 +281,27 @@ function readFeed(xml: string, limit = 5, base = ''): FeedEntry[] {
         const link = links.find(node=>!node.getAttribute('rel') || node.getAttribute('rel')==='alternate') || links[0];
         let url = link?.getAttribute('href') || link?.textContent?.trim() || '';
         if (url) {try {url = new URL(url,base || undefined).href;} catch {url='';}}
-        const published = item.querySelector('pubDate, published')?.textContent?.trim() || '';
-        const timestamp = Date.parse(published);
+        const published = item.querySelector('pubDate, published')?.textContent?.trim()
+            || item.getElementsByTagName('dc:date')[0]?.textContent?.trim() || '';
+        const timestamp = publicationDate(published) ? Date.parse(published) : NaN;
+        let html = encoded?.textContent || '';
+        if (!html && atomContent && !atomContent.hasAttribute('src')) {
+            const type = atomContent.getAttribute('type') || 'text';
+            if (type === 'html') html = atomContent.textContent || '';
+            else if (type === 'xhtml') html = [...atomContent.children].map(child=>new XMLSerializer().serializeToString(child)).join('');
+            else if (type === 'text') {
+                const doc=parseHTML('');
+                doc.body.textContent=atomContent.textContent;
+                html=new XMLSerializer().serializeToString(doc.body);
+            }
+        }
+        const authors=authorNames([
+            ...[...item.getElementsByTagName('dc:creator')].map(node=>node.textContent),
+            ...[...item.querySelectorAll('author')].map(node=>node.querySelector('name')?.textContent || node.textContent),
+        ]);
         return {title,
             url,publish:Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '',
-            content:body};
+            content:body,html,authors};
     });
 }
 

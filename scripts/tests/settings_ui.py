@@ -72,12 +72,14 @@ try:
         for index, (filename, label) in enumerate([
             ('sélection.md', 'Sélection des sources'), ('writer.md', 'Rédaction de l’article'),
             ('bref.md', 'En bref'), ('rewriter.md', 'Révision du texte'),
-            ('publisher.md', 'Titre et chapeau'), ('image.md', 'Illustration')]):
+            ('publisher.md', 'Titre et chapeau'), ('image.md', 'Illustration'),
+            ('newsletter.md', 'Modèle de newsletter')]):
+            directory = 'models' if filename == 'newsletter.md' else 'prompts'
             row=page.locator('.setting-item').filter(has=page.get_by_text(label, exact=True))
             row.get_by_role('button', name='Modifier', exact=True).click()
             editor=page.locator('.text-machine-prompt-editor')
-            field=editor.get_by_role('textbox', name='Consignes du prompt', exact=True)
-            original=(root / 'prompts' / filename).read_text()
+            field=editor.get_by_role('textbox', name='Modèle Markdown' if filename == 'newsletter.md' else 'Consignes du prompt', exact=True)
+            original=(root / directory / filename).read_text()
             expect(field).to_have_value(original)
             layout=field.evaluate("""el => {
                 const parent=el.parentElement, style=getComputedStyle(parent), box=el.getBoundingClientRect();
@@ -100,11 +102,16 @@ try:
                     expect(editor.get_by_role('alert')).to_contain_text(reason)
                     expect(field).to_have_value(invalid)
                     assert not (plugin / 'prompts' / filename).exists()
+            if filename == 'newsletter.md':
+                field.fill(original+'\n{{unknown}}')
+                editor.get_by_role('button', name='Enregistrer', exact=True).click()
+                expect(editor.get_by_role('alert')).to_contain_text('variables invalides')
+                assert not (plugin / directory / filename).exists()
             custom=original+'\nConsigne personnalisée pour '+filename+'\n'
             field.fill(custom)
             editor.get_by_role('button', name='Enregistrer', exact=True).click()
             expect(editor).not_to_be_visible()
-            assert (plugin / 'prompts' / filename).read_text() == custom
+            assert (plugin / directory / filename).read_text() == custom
             row.get_by_role('button', name='Modifier', exact=True).click()
             expect(field).to_have_value(custom)
             if filename == 'image.md':
@@ -115,7 +122,7 @@ try:
                 expect(editor.get_by_role('alert')).to_contain_text('modifié ailleurs')
                 assert (plugin / 'prompts' / filename).read_text() == external
             editor.get_by_role('button', name='Annuler', exact=True).click()
-        print('Prompt editors verified without Gmail: six defaults, full-width fields, cancellation without writes, validation, file persistence, reopening and concurrent-edit protection.', flush=True)
+        print('Prompt and template editors verified without Gmail: defaults, full-width fields, cancellation without writes, validation, file persistence, reopening and concurrent-edit protection.', flush=True)
         page.locator('.setting-item-heading .setting-item-name').filter(has_text='Intelligence artificielle').wait_for()
         debug = page.locator('.setting-item').filter(has=page.get_by_text('Debug', exact=True)).locator('.checkbox-container')
         assert not page.evaluate("app.plugins.plugins['text-machine'].settings.debug")
@@ -349,13 +356,19 @@ try:
         assert (vault / 'Research/textmachine.json').exists()
         expect(page.get_by_role('textbox', name='Sites bloqués', exact=True)).to_have_value('')
         expect(page.get_by_role('textbox', name='Sites bloqués', exact=True)).to_have_attribute('placeholder', 'Aucun site bloqué.')
-        page.get_by_role('button', name='Changer de dossier…', exact=True).click()
+        page.get_by_role('button', name='Déplacer…', exact=True).click()
+        assert page.get_by_role('textbox', name='Nom du nouveau dossier', exact=True).count() == 0
+        page.get_by_role('button', name='Annuler', exact=True).click()
+        # Exercise initial creation again with a configured path that does not yet exist.
+        page.evaluate('() => { app.plugins.plugins["text-machine"].settings.outputFolder = "Research/Veille"; app.setting.openTabById("text-machine"); }')
+        page.get_by_role('button', name='Créer le dossier', exact=True).click()
+        page.get_by_role('button', name='Ouvrir le dossier Research', exact=True).click()
         assert page.get_by_role('button', name='Nouveau dossier', exact=True).count() == 0
         assert page.get_by_role('textbox', name='Nom du nouveau dossier', exact=True).input_value() == 'TextMachine'
         page.get_by_role('textbox', name='Nom du nouveau dossier', exact=True).fill('../invalid')
         page.get_by_role('button', name='Créer ici', exact=True).click()
         page.get_by_role('alert').filter(has_text='Saisissez un nom').wait_for()
-        assert page.evaluate('app.plugins.plugins["text-machine"].settings.outputFolder') == 'Research'
+        assert page.evaluate('app.plugins.plugins["text-machine"].settings.outputFolder') == 'Research/Veille'
         page.get_by_role('textbox', name='Nom du nouveau dossier', exact=True).fill('Veille')
         page.get_by_role('button', name='Créer ici', exact=True).click()
         page.get_by_text('Fichier prêt : Research/Veille/textmachine.json.', exact=True).wait_for()
@@ -467,6 +480,8 @@ try:
         assert_full_width(exclusions)
         exclusions.fill('example.com')
         page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).excludedSources === 'example.com'")
+        expect(page.get_by_role('button', name='Réinitialiser le JSON', exact=True)).to_have_count(0)
+        debug.click()
         page.get_by_role('button', name='Réinitialiser le JSON', exact=True).click()
         page.get_by_role('button', name='Annuler', exact=True).click()
         assert (vault / 'Research/Veille/textmachine.json').read_text() == log
@@ -475,6 +490,7 @@ try:
         page.get_by_text('JSON réinitialisé. Vous pouvez relancer l’extraction.', exact=True).wait_for()
         assert json.loads((vault / 'Research/Veille/textmachine.json').read_text()) == {'version':1,'articles':[]}
         assert page.get_by_role('textbox', name='Sources exclues', exact=True).input_value() == 'example.com'
+        debug.click()
         context_menu()
         page.get_by_text('Messages ajoutés : 0 · Liens : 0 · Messages déjà présents : 3 · Fichier : Research/Veille/textmachine.json.', exact=True).wait_for()
         settings()
@@ -503,16 +519,20 @@ try:
             return before === await app.vault.read(app.vault.getAbstractFileByPath('Research/Veille/textmachine.json'));
         }""")
         assert (vault / 'Research/Veille/textmachine.json').read_text() == log
-        page.get_by_role('button', name='Changer de dossier…', exact=True).click()
+        page.get_by_role('button', name='Déplacer…', exact=True).click()
         page.locator('.text-machine-folders').get_by_role('button', name='Racine du coffre', exact=True).click()
         page.get_by_role('button', name='Annuler', exact=True).click()
         assert page.evaluate('app.plugins.plugins["text-machine"].settings.outputFolder') == 'Research/Veille'
-        page.get_by_role('button', name='Changer de dossier…', exact=True).click()
+        page.get_by_role('button', name='Déplacer…', exact=True).click()
         page.locator('.text-machine-folders').get_by_role('button', name='Racine du coffre', exact=True).click()
-        assert page.get_by_role('button', name='Choisir ce dossier', exact=True).is_disabled()
+        page.get_by_role('button', name='Déplacer ici', exact=True).click()
+        page.wait_for_function('app.plugins.plugins["text-machine"].settings.outputFolder === "Veille"')
+        assert (vault / 'Veille/textmachine.json').read_text() == log
+        assert not (vault / 'Research/Veille').exists()
+        page.get_by_role('button', name='Déplacer…', exact=True).click()
         page.get_by_role('button', name='Ouvrir le dossier Research', exact=True).click()
-        assert page.get_by_role('button', name='Choisir ce dossier', exact=True).is_disabled()
-        page.get_by_role('button', name='Annuler', exact=True).click()
+        page.get_by_role('button', name='Déplacer ici', exact=True).click()
+        page.wait_for_function('app.plugins.plugins["text-machine"].settings.outputFolder === "Research/Veille"')
         assert not (vault / 'textmachine.json').exists()
         assert (vault / 'Research/Veille/textmachine.json').read_text() == log
         assert page.evaluate(r"""async () => {
@@ -576,7 +596,7 @@ try:
             i18n.setLocale('en-US');
             app.setting.openTabById('text-machine');
         }""")
-        page.locator('.setting-item-heading .setting-item-name').filter(has_text='3. Choose where to store your data').wait_for()
+        page.locator('.setting-item-heading .setting-item-name').filter(has_text='Choose where to store your data').wait_for()
         assert page.get_by_role('textbox', name='Reference sources', exact=True).input_value() == 'theguardian.com\nbbc.co.uk'
         page.locator('.setting-item').filter(has=page.get_by_text('Article writing', exact=True)).get_by_role('button', name='Edit', exact=True).click()
         editor=page.locator('.text-machine-prompt-editor')

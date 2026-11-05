@@ -11,12 +11,12 @@
     "title": {
       "type": "string",
       "minLength": 1,
-      "description": "Titre court et concret appuyé sur un fait saillant du texte, sans répéter IA, AI ou intelligence artificielle, sans morale ni référence à TextMachine."
+      "description": "Titre court et immédiatement compréhensible : un acteur, une action, une situation concrète ou une citation exacte du texte. Sans répéter IA, AI ou intelligence artificielle, sans morale ni référence à TextMachine."
     },
     "chapeau": {
       "type": "string",
       "minLength": 1,
-      "description": "Chapeau de moins de 25 mots, compréhensible seul, donnant une information précise du texte sans énumérer tous ses sujets."
+      "description": "Une ou deux phrases autour de 20 à 35 mots, claires même sans lire le titre. Développer la même accroche avec des acteurs nommés et un détail supplémentaire du texte, sans énumérer les sujets. La clarté prime sur la longueur."
     }
   }
 }

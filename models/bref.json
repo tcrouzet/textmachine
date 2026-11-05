@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Titres de la rubrique En bref",
-  "description": "Chaque ID fourni apparaît exactement une fois avec son titre traduit, sans résumé ni URL ajoutée.",
+  "description": "Chaque ID fourni apparaît exactement une fois : titre traduit si pertinent, title à null si hors sujet ou trop incertain. Sans résumé ni URL ajoutée.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -24,9 +24,9 @@
             "minimum": 1
           },
           "title": {
-            "type": "string",
+            "type": ["string", "null"],
             "minLength": 1,
-            "description": "Titre dans la langue demandée, avec une casse de phrase."
+            "description": "Titre pertinent traduit dans la langue demandée, avec une casse de phrase ; null si le titre ne montre pas un lien clair entre l’IA et la littérature, l’écriture ou les métiers du livre."
           }
         }
       }

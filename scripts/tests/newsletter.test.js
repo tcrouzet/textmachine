@@ -169,7 +169,7 @@ test('translated brief titles are rendered without changing original article tit
     assert.ok(subdomain.includes('* [Research \\[results\\]](https://news.example.co.uk/article?q=1#section) - [example.co.uk](https://example.co.uk/)'));
     assert.ok(!subdomain.includes('Google Alerts'));
     assert.equal(articles[0].title,'a');
-    for (const title of ['',null,{}]) {
+    for (const title of ['',{},false,0]) {
         assert.throws(()=>parseBrief(JSON.stringify({titles:[{id:1,title}]}),[articles[0]]),/Translation.*incomplete or invalid/);
     }
 });
@@ -528,4 +528,19 @@ test('the original illustration is rendered even by a template that omits the im
 test('article prose is independent of the availability of source photos',()=>{
     const response = {paragraphs:['First paragraph','Second paragraph with no citation']};
     assert.deepEqual(parseEditorial(JSON.stringify(response)).paragraphs,response.paragraphs);
+});
+
+
+test('brief selection accepts explicit rejection but never silent omissions or unknown IDs',()=>{
+    const sources=[{...articles[0],title:'Midterms 2026: Wall Street',status:'forbidden'},
+        {...articles[1],title:'Novelists discuss AI writing',status:'forbidden'}];
+    const before=JSON.stringify(sources);
+    const selected=parseBrief(JSON.stringify({titles:[{id:1,title:null},{id:2,title:'Les romanciers face à l’écriture avec l’IA'}]}),sources);
+    assert.equal(selected.length,1);
+    assert.equal(selected[0].id,2);
+    assert.equal(selected[0].url,sources[1].url);
+    assert.equal(JSON.stringify(sources),before);
+    assert.deepEqual(parseBrief(JSON.stringify({titles:[{id:1,title:null},{id:2,title:null}]}),sources),[]);
+    for(const titles of [[{id:1,title:null}],[{id:1,title:null},{id:1,title:null}],[{id:1,title:null},{id:99,title:null}]])
+        assert.throws(()=>parseBrief(JSON.stringify({titles}),sources),/incomplete or invalid/);
 });

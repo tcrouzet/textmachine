@@ -129,7 +129,6 @@ function renderAI(plugin: TextMachine, tab: GmailSettings): SettingsGroup {
             await plugin.saveData(plugin.settings);
         }));
     });}});
-    items.push({name:t('aiPromptsDescription'),searchable:false});
     if (tab.aiError) items.push({name:tab.aiError,searchable:false,render:setting=>{setting.settingEl.setAttribute('role','alert');}});
     return {type:'group',heading:t('aiHeading'),cls:'text-machine-section',items};
 }

@@ -16,8 +16,8 @@ async function fixture(initialSecrets = {}) {
         register() {}
     }
     let secret = JSON.stringify({email:'reader@example.com',clientId:'123-test.apps.googleusercontent.com',refreshToken:'old',scope:'https://www.googleapis.com/auth/gmail.readonly'});
-    const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},setIcon:()=>{},Plugin,PluginSettingTab:class {},Modal:class {},Notice:class {},getLanguage:()=> 'en',requireApiVersion:()=>false};
-    const context = {module:{exports:{}},AbortController,URL,setTimeout,clearTimeout,structuredClone,window:{setTimeout,clearTimeout},
+    const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},setIcon:()=>{},Plugin,PluginSettingTab:class {},Modal:class {open() {}},Notice:class {},getLanguage:()=> 'en',requireApiVersion:()=>false};
+    const context = {module:{exports:{}},AbortController,URL,Date,performance,setTimeout,clearTimeout,structuredClone,window:{setTimeout,clearTimeout,setInterval,clearInterval},
         MutationObserver:class {observe() {} disconnect() {}},
         document:{body:{},querySelectorAll:()=>[]},CSS:{escape:value=>value},
         require:name=> name==='obsidian' ? obsidian : name==='electron' ? {shell:{}} : name==='@electron/remote' ? {BrowserWindow:class {}} : require(name)};
@@ -33,7 +33,7 @@ async function fixture(initialSecrets = {}) {
         constructor(credentials,request,save) {super(credentials,responses,save);}
     }};
     p.client.request = responses;
-    return {p,profile,stored:()=>JSON.parse(secret),obsidian,layoutReady:()=>layoutReady()};
+    return {p,context,profile,stored:()=>JSON.parse(secret),obsidian,layoutReady:()=>layoutReady()};
 }
 
 test('prompt editing reads bundled defaults without writing and saves each stage independently',async()=>{
@@ -101,6 +101,57 @@ test('a prompt saved by the editor is used by the next newsletter generation',as
     await p.writeNewsletter();
     assert.equal(seen.length,1);
     assert.equal(seen[0].tone,'My editorial choice');
+});
+
+test('newsletter model editing preserves the default and rejects invalid templates without writes',async()=>{
+    const {p}=await fixture();
+    const files=new Map(),folders=new Set();
+    p.app.vault.adapter={exists:async path=>files.has(path) || folders.has(path),read:async path=>files.get(path),
+        mkdir:async path=>folders.add(path),write:async(path,text)=>files.set(path,text)};
+    const original=await p.readPrompt('newsletter.md');
+    assert.equal(original,require('node:fs').readFileSync(path.join(root,'models/newsletter.md'),'utf8'));
+    assert.equal(files.size,0);
+    const custom=original+'\nMy newsletter footer\n';
+    await p.savePrompt('newsletter.md',custom,original);
+    assert.equal(await p.readPrompt('newsletter.md'),custom);
+    assert.deepEqual([...folders],['./models']);
+    assert.equal(files.get('./models/newsletter.md'),custom);
+    assert.equal(files.size,1);
+    const invalid=[' ', '# {{unknown}}', '# {{title}}\n{{#editorial}}{{unknown}}{{/editorial}}',
+        '# {{title}}\n{{#brief}}{{#articles}}{{unknown}}{{/articles}}{{/brief}}',
+        '# {{title}}\n{{#articles}}{{title}}', 'Missing heading'];
+    for (const text of invalid) {
+        await assert.rejects(p.savePrompt('newsletter.md',text,custom),/template.*invalid/);
+        assert.equal(files.get('./models/newsletter.md'),custom);
+    }
+    files.set('./models/newsletter.md',custom+'External change');
+    await assert.rejects(p.savePrompt('newsletter.md',original,custom),/changed/);
+    assert.equal(files.get('./models/newsletter.md'),custom+'External change');
+    files.set('./models/newsletter.md',custom);
+    p.busy=true;
+    await assert.rejects(p.savePrompt('newsletter.md',original,custom),/running/);
+    p.busy=false;
+    p.app.vault.adapter.write=async()=>{throw new Error('Disk write failed');};
+    await assert.rejects(p.savePrompt('newsletter.md',original,custom),/Disk write failed/);
+    assert.equal(files.get('./models/newsletter.md'),custom);
+    assert.ok(p.settingsTab.getSettingDefinitions().flatMap(item=>item.items || [item]).some(row=>row.name==='Newsletter template'));
+});
+
+test('the edited newsletter model assembles the next edition without entering AI requests',async()=>{
+    const {p,contents}=await newsletterFixture();
+    const adapter=p.app.vault.adapter,read=adapter.read,files=new Map();
+    adapter.read=async path=>files.has(path) ? files.get(path) : read(path);
+    adapter.write=async(path,text)=>files.set(path,text);
+    const original=await p.readPrompt('newsletter.md');
+    const marker='My personal newsletter signature';
+    await p.savePrompt('newsletter.md',original+'\n'+marker,original);
+    const generate=p.generate;
+    p.generate=async(connection,system,input,...rest)=>{
+        assert.ok(!system.includes(marker) && !input.includes(marker));
+        return generate(connection,system,input,...rest);
+    };
+    const note=await p.writeNewsletter();
+    assert.ok(contents.get(note.path).includes(marker));
 });
 
 test('plugin loading persists missing article IDs without Gmail or an AI run',async()=>{
@@ -971,6 +1022,7 @@ test('AuthorFeed works in both prompts and author content is fetched only once',
 });
 
 test('include feeds share email deduplication, exclusions, forbidden statuses and article crawling',async()=>{
+    const publish=new Date().toISOString();
     const {p,contents,entries} = await newsletterFixture();
     p.settings.includeFeeds = 'https://first.example/rss https://second.example/rss';
     p.settings.excludedSources = 'ignored.example';
@@ -983,9 +1035,9 @@ test('include feeds share email deduplication, exclusions, forbidden statuses an
     p.newsletter.readFeed = (url,limit)=>{
         assert.equal(limit,Infinity);
         return url.includes('first.example')
-            ? [{title:'New story',url:'https://example.com/new-story?utm_source=rss',publish:'2026-11-01T10:00:00.000Z',content:'Unverified summary'},entries[0]]
-            : [{title:'New story',url:'https://other.example/repost'}, {title:'PDF',url:'https://example.com/report.pdf'},
-                {title:'Blocked',url:'https://blocked.example/article'}, {title:'Excluded',url:'https://ignored.example/article'}];
+            ? [{title:'New story',url:'https://example.com/new-story?utm_source=rss',publish,content:'Unverified summary'}, {...entries[0],publish}]
+            : [{title:'New story',url:'https://other.example/repost',publish}, {title:'PDF',url:'https://example.com/report.pdf',publish},
+                {title:'Blocked',url:'https://blocked.example/article',publish}, {title:'Excluded',url:'https://ignored.example/article',publish}];
     };
     p.crawler = {...p.crawler,crawl:async article=>{crawled.push(article.url);return {...article,content:'Verified article text'};}};
     const result = await p.importUnread();
@@ -994,7 +1046,7 @@ test('include feeds share email deduplication, exclusions, forbidden statuses an
     assert.equal(saved.length,6);
     const story = saved.find(article=>article.title==='New story');
     assert.equal(story.source,'RSS: first.example');
-    assert.equal(story.publish,'2026-11-01T10:00:00.000Z');
+    assert.equal(story.publish,publish);
     assert.equal(story.content,'Verified article text');
     assert.equal(saved.find(article=>article.title==='PDF').status,'forbidden');
     assert.equal(saved.find(article=>article.title==='Blocked').status,'forbidden');
@@ -1010,8 +1062,10 @@ test('a failed include feed preserves previously collected entries and resumes w
     p.settings.includeFeeds = 'https://first.example/rss https://second.example/rss';
     let fail = true;
     p.request = async options=>({status:fail && options.url.includes('second.example') ? 503 : 200,text:options.url});
-    p.newsletter.readFeed = url=>[{title:url.includes('first.example') ? 'First story' : 'Second story',url:url+'/article'}];
-    await assert.rejects(p.importFeeds(),/Unable to read/);
+    p.newsletter.readFeed = url=>[{title:url.includes('first.example') ? 'First story' : 'Second story',url:url+'/article',publish:new Date(Date.now()-1000).toISOString()}];
+    const progress=[];
+    assert.equal(await p.importFeeds(message=>progress.push(message)),1);
+    assert.ok(progress.some(message=>message.includes('second.example') && message.includes('Unable to read')));
     assert.equal(JSON.parse(contents.get(p.dataPath)).articles.length,4);
     fail = false;
     assert.equal(await p.importFeeds(),1);
@@ -1021,6 +1075,8 @@ test('a failed include feed preserves previously collected entries and resumes w
 test('cancelling RSS collection keeps saved articles and releases the collection controller',async()=>{
     const {p,contents} = await newsletterFixture();
     p.settings.includeFeeds = 'https://first.example/rss';
+    p.request=async()=>({status:200,text:'feed'});
+    p.newsletter.readFeed=()=>[{title:'Recent blog post',url:'https://tcrouzet.substack.com/post',publish:new Date(Date.now()-1000).toISOString()}];
     const process = p.app.vault.process;
     p.app.vault.process = async(file,action)=>{await process(file,action);p.crawlController.abort();};
     await assert.rejects(p.importFeeds(),/cancelled/);
@@ -1634,4 +1690,292 @@ test('settings definitions are searchable without IO and redraw uses the declara
     tab.renderLegacy=()=>assert.fail('Modern settings must use update()');
     tab.redraw();
     assert.equal(updates,1);
+});
+
+
+test('RSS age filtering skips archives and undated entries without changing Gmail or cached text',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    const now=Date.now(), publish=new Date(now-3600000).toISOString();
+    p.settings.includeFeeds='https://publisher.example/feed';
+    p.request=async()=>({status:200,text:'feed'});
+    const incoming=[{title:'Fresh',url:'https://example.com/fresh',publish},
+        ...['', 'invalid',new Date(now-49*3600000).toISOString(),new Date(now+3600000).toISOString()].map((publish,i)=>({title:'Skip '+i,url:'https://example.com/skip-'+i,publish}))];
+    p.newsletter.readFeed=()=>incoming;
+    assert.equal(await p.importFeeds(),1);
+    const saved=JSON.parse(contents.get(p.dataPath));
+    assert.deepEqual(saved.articles.slice(0,3),entries);
+    assert.equal(saved.articles.length,4);
+    saved.articles.push({...entries[0],id:5,title:'Old pending RSS',url:'https://example.com/old-rss',source:'RSS: publisher.example',content:''},
+        {...entries[0],id:6,title:'Old mail',url:'https://example.com/old-mail',content:''});
+    saved.nextId=7;
+    contents.set(p.dataPath,JSON.stringify(saved));
+    const crawled=[];
+    p.crawler={...p.crawler,crawl:async article=>{crawled.push(article.url);return {...article,content:'Full text'};}};
+    await p.crawlArticles();
+    assert.deepEqual(crawled,['https://example.com/fresh','https://example.com/old-mail']);
+});
+
+test('complete RSS bodies are reused once, summaries crawled and forbidden sources preserved',async()=>{
+    const {p,contents}=await newsletterFixture();
+    const publish=new Date().toISOString();
+    p.settings.includeFeeds='https://first.example/feed https://second.example/feed';
+    p.request=async options=>({status:200,text:options.url});
+    p.newsletter.readFeed=url=>url.includes('first') ? [
+        {title:'Full body',url:'https://example.com/full?utm_source=rss',publish,html:'complete',authors:['An Author']},
+        {title:'Summary',url:'https://example.com/summary',publish,content:'Summary only'},
+        {title:'Restricted',url:'https://example.com/restricted',publish,html:'paywall'},
+    ] : [{title:'Full body',url:'https://www.example.com/full/',publish,html:'complete'}];
+    const extracted=[],crawled=[];
+    p.crawler={...p.crawler,extractPage:(html,url)=>{extracted.push(url);return html==='complete' ? {content:'Readable full body'} : {blocked:true};},
+        crawl:async article=>{crawled.push(article.url);return {...article,content:'Crawled full body'};}};
+    assert.equal(await p.importFeeds(),3);
+    await p.crawlArticles();
+    const full=JSON.parse(contents.get(p.dataPath)).articles.find(a=>a.title==='Full body');
+    assert.equal(full.content,'Readable full body');
+    assert.deepEqual(full.authors,['An Author']);
+    assert.deepEqual(extracted,['https://example.com/full','https://example.com/restricted']);
+    assert.deepEqual(crawled,['https://example.com/summary','https://example.com/restricted']);
+    assert.equal(await p.importFeeds(),0);
+    await p.crawlArticles();
+    assert.equal(extracted.length,2);
+    assert.equal(crawled.length,2);
+});
+
+test('feed failure does not stop later feeds but disk failure does',async()=>{
+    const {p}=await newsletterFixture();
+    p.settings.includeFeeds='https://first.example/feed https://second.example/feed';
+    const requests=[];
+    p.request=async options=>{requests.push(options.url);if(options.url.includes('first')) throw new Error('Offline');return {status:200,text:'feed'};};
+    p.newsletter.readFeed=()=>[{title:'Good feed',url:'https://example.com/good',publish:new Date(Date.now()-1000).toISOString()}];
+    assert.equal(await p.importFeeds(),1);
+    assert.equal(requests.length,2);
+    p.request=async()=>({status:200,text:'feed'});
+    p.app.vault.process=async()=>{throw new Error('Disk full');};
+    p.newsletter.readFeed=()=>[{title:'Another',url:'https://example.com/another',publish:new Date(Date.now()-1000).toISOString()}];
+    await assert.rejects(p.importFeeds(),/Disk full/);
+    assert.equal(p.crawlController,null);
+});
+
+
+test('execution timer spans collection and AI, freezes on completion and cleans up on close or error',async()=>{
+    for (const outcome of ['success','error','close']) {
+        const {p,context}=await fixture();
+        let now=0, tick, cleared=0;
+        context.performance={now:()=>now};
+        context.window.setInterval=callback=>{tick=callback;return 42;};
+        context.window.clearInterval=id=>{assert.equal(id,42);cleared++;};
+        p.openTextMachine('Data');
+        const dialog=p.runDialog;
+        dialog.render=()=>{};
+        dialog.clockEl={setText(text){this.text=text;}};
+        let finish;
+        const pending=new Promise(resolve=>{finish=resolve;});
+        const work=dialog.perform(async()=>{
+            dialog.startClock();
+            await pending;
+            if(outcome==='error') throw new Error('Generation failed');
+        },false);
+        assert.equal(dialog.clockEl.text,'Elapsed time: 00:00');
+        now=65000;tick();
+        assert.equal(dialog.clockEl.text,'Elapsed time: 01:05');
+        now=3661000;tick();
+        assert.equal(dialog.clockEl.text,'Elapsed time: 01:01:01');
+        if(outcome==='close') dialog.onClose();
+        finish();await work;
+        assert.equal(cleared,1);
+        const frozen=dialog.clockEl.text;
+        now+=10000;dialog.updateClock();
+        assert.equal(dialog.clockEl.text,frozen);
+        if(outcome==='error') assert.equal(dialog.error,'Generation failed');
+        if(outcome!=='close') {
+            dialog.startClock();
+            assert.equal(dialog.clockEl.text,'Elapsed time: 00:00');
+            dialog.onClose();
+            assert.equal(cleared,2);
+        }
+    }
+});
+
+
+test('settings show the configured folder path and invite creation only when no data folder exists',async()=>{
+    const {p}=await newsletterFixture();
+    let groups=p.settingsTab.getSettingDefinitions();
+    let group=groups.find(row=>row.heading==='Data folder');
+    assert.ok(group);
+    assert.equal(group.items[0].name,'Data');
+    assert.ok(!group.items.some(row=>row.name==='Choose an empty folder'));
+    assert.ok(!group.items.some(row=>['Data','Reset JSON'].includes(row.name) && row!==group.items[0]));
+    p.settings.debug=true;
+    const debugGroup=p.settingsTab.getSettingDefinitions().find(row=>row.heading==='Data folder');
+    assert.ok(debugGroup.items.some(row=>row.name==='Data' && row!==debugGroup.items[0]));
+    assert.ok(debugGroup.items.some(row=>row.name==='Reset JSON'));
+    p.settings.debug=false;
+    p.settings.outputFolder='';
+    groups=p.settingsTab.getSettingDefinitions();
+    group=groups.find(row=>row.heading==='Choose where to store your data');
+    assert.equal(group.items[0].name,'Choose an empty folder');
+});
+
+test('moving the data folder uses Obsidian rename and preserves all files and their contents',async()=>{
+    const {p,contents}=await newsletterFixture();
+    const original=p.settings.outputFolder,folder=p.app.vault.getAbstractFileByPath(original);
+    folder.name='Data';
+    const parent=new folder.constructor();
+    parent.path='Archives';
+    const get=p.app.vault.getAbstractFileByPath;
+    p.app.vault.getAbstractFileByPath=path=>path==='Archives' ? parent : get(path);
+    const before=JSON.stringify([...contents]);
+    const moves=[];
+    p.app.fileManager={renameFile:async(file,destination)=>{assert.equal(file,folder);assert.equal(p.busy,true);moves.push(destination);}};
+    p.ensureData=async()=>{throw new Error('Must not create an empty database');};
+    await p.moveData('Archives');
+    assert.deepEqual(moves,['Archives/Data']);
+    assert.equal(p.settings.outputFolder,'Archives/Data');
+    assert.equal(p.savedSettings.outputFolder,'Archives/Data');
+    assert.equal(p.busy,false);
+    assert.equal(JSON.stringify([...contents]),before);
+});
+
+test('folder moves reject collisions and descendants and preserve settings when rename fails',async()=>{
+    const {p}=await newsletterFixture();
+    const folder=p.app.vault.getAbstractFileByPath('Data');folder.name='Data';
+    const parent=new folder.constructor();
+    const get=p.app.vault.getAbstractFileByPath;
+    p.app.vault.getAbstractFileByPath=path=>['Parent','Parent/Data','Data/Child'].includes(path) ? parent : get(path);
+    let calls=0;
+    p.app.fileManager={renameFile:async()=>{calls++;throw new Error('Rename failed');}};
+    for(const path of ['Parent','Data','Data/Child','missing']) await assert.rejects(p.moveData(path));
+    assert.equal(calls,0);
+    p.app.vault.getRoot=()=>parent;
+    // The current parent is a harmless no-op.
+    await p.moveData('');
+    assert.equal(calls,0);
+    p.app.vault.getAbstractFileByPath=path=>path==='NewParent' ? parent : get(path);
+    await assert.rejects(p.moveData('NewParent'),/Rename failed/);
+    assert.equal(p.settings.outputFolder,'Data');
+    assert.equal(p.busy,false);
+    p.app.fileManager.renameFile=async()=>{};
+    p.saveData=async()=>{throw new Error('Disk full');};
+    await assert.rejects(p.moveData('NewParent'),/Folder moved to NewParent\/Data.*Disk full/);
+    assert.equal(p.settings.outputFolder,'NewParent/Data');
+    assert.equal(p.busy,false);
+});
+
+
+test('debug collection leaves mail unread, deduplicates repeated runs and normal mode marks it read',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.settings.debug=true;
+    p.account.scope=p.gmail.SCOPE;
+    let read=0;
+    p.client={unreadMessages:async function*(){yield 'mail';},message:async()=>({labelIds:['UNREAD','Label_1']}),markRead:async()=>{read++;}};
+    p.articles={...p.articles,messageArticles:()=>[{...entries[0],title:'New mail',url:'https://example.com/new-mail'}]};
+    await p.importUnread();
+    await p.importUnread();
+    assert.equal(read,0);
+    assert.equal(JSON.parse(contents.get(p.dataPath)).articles.length,4);
+    p.settings.debug=false;
+    await p.importUnread();
+    assert.equal(read,1);
+    assert.equal(JSON.parse(contents.get(p.dataPath)).articles.length,4);
+});
+
+test('debug newsletters bypass the minimum and preserve real editions, images and article usage',async()=>{
+    const {p,contents,seen}=await newsletterFixture();
+    p.settings.minimumSources=10;
+    p.settings.debug=true;
+    const day=p.newsletter.day(),real='Data/text-machine-'+day+'.md';
+    const realImage='Data/illustrations/text-machine-'+day+'.png';
+    await p.app.vault.create(real,'# Real newsletter');
+    await p.app.vault.create(realImage,'Real illustration');
+    const before=contents.get(p.dataPath);
+    const note=await p.writeNewsletter();
+    assert.equal(note.path,'Data/test-text-machine-'+day+'.md');
+    assert.ok(contents.get(note.path).includes('illustrations/test-text-machine-'+day+'.png'));
+    assert.equal(contents.get(real),'# Real newsletter');
+    assert.equal(contents.get(realImage),'Real illustration');
+    assert.equal(contents.get(p.dataPath),before);
+    await p.writeNewsletter();
+    assert.equal(contents.get(p.dataPath),before);
+    assert.ok(seen.every(context=>context.previousNewsletters.every(note=>!note.name.startsWith('test-'))));
+    p.settings.debug=false;
+    await assert.rejects(p.writeNewsletter(),/at least 10 required/);
+    p.settings.minimumSources=1;
+    assert.equal((await p.writeNewsletter()).path,real);
+    assert.notEqual(contents.get(p.dataPath),before);
+});
+
+test('debug selection discards remain repeatable without recording statuses',async()=>{
+    const {p,contents}=await newsletterFixture();
+    p.settings.debug=true;
+    p.settings.minimumSources=10;
+    const before=contents.get(p.dataPath);
+    p.generate=async(_connection,_system,input)=>JSON.stringify({selected:[],discard:JSON.parse(input).articles.map(article=>article.id)});
+    assert.equal(await p.writeNewsletter(),null);
+    assert.equal(contents.get(p.dataPath),before);
+    assert.equal(await p.writeNewsletter(),null);
+    assert.equal(contents.get(p.dataPath),before);
+});
+
+
+test('debug includes today’s real edition in both AI histories and excludes its sources without consuming articles',async()=>{
+    const {p,contents,entries,seen}=await newsletterFixture();
+    const readResource=p.app.vault.adapter.read;
+    p.app.vault.adapter.read=async path=>path.endsWith('/prompts/sélection.md')
+        ? '{"instructions":"Runtime selection","previousNewsletters":{{previousNewsletters}},"articles":{{articles}}}' : readResource(path);
+    p.settings.debug=true;
+    const day=p.newsletter.day();
+    const today='Data/text-machine-'+day+'.md';
+    const coverage='# Goncourt 2026: Jaenada already discussed\n[Already covered](https://www.example.com/used/?utm_source=publication)';
+    await p.app.vault.create(today,coverage);
+    await p.app.vault.create('Data/test-text-machine-'+day+'.md','# Previous test should be regenerated');
+    const data=JSON.parse(contents.get(p.dataPath));
+    data.articles.push({...entries[0],id:4,title:'New angle',url:'https://example.com/new-angle'});
+    data.nextId=5;
+    contents.set(p.dataPath,JSON.stringify(data));
+    const before=contents.get(p.dataPath),generate=p.generate;
+    let selections=0;
+    p.generate=async(connection,system,input,...rest)=>{
+        if(input.includes('Runtime selection')) {
+            const request=JSON.parse(input);
+            assert.ok(request.previousNewsletters.some(note=>note.content===coverage));
+            assert.ok(!request.articles.some(article=>article.url==='https://example.com/used'));
+            assert.ok(request.previousNewsletters.every(note=>!note.name.startsWith('test-')));
+            selections++;
+        }
+        return generate(connection,system,input,...rest);
+    };
+    const note=await p.writeNewsletter();
+    assert.equal(note.path,'Data/test-text-machine-'+day+'.md');
+    assert.equal(selections,1);
+    assert.ok(seen[0].previousNewsletters.some(note=>note.name==='text-machine-'+day+'.md' && note.content===coverage));
+    assert.ok(!seen[0].articles.some(article=>article.url==='https://example.com/used'));
+    assert.equal(contents.get(today),coverage);
+    assert.equal(contents.get(p.dataPath),before);
+});
+
+
+test('brief titles explicitly rejected as off-topic never appear in test newsletters or consume articles',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.settings.debug=true;
+    const unrelated='Midterms 2026: Wall Street celebrates the vote';
+    const relevant='Novelists disclose their AI writing practices';
+    const data=JSON.parse(contents.get(p.dataPath));
+    data.articles.push({...entries[0],id:4,title:unrelated,url:'https://example.com/wall-street',status:'forbidden',content:''},
+        {...entries[0],id:5,title:relevant,url:'https://example.com/novelists',status:'forbidden',content:''});
+    data.nextId=6;contents.set(p.dataPath,JSON.stringify(data));
+    const before=contents.get(p.dataPath),generate=p.generate;
+    p.generate=async(connection,system,input,...rest)=>system.startsWith('Runtime brief')
+        ? JSON.stringify({titles:JSON.parse(input).map(row=>({id:row.id,title:row.id===4 ? null : 'Les romanciers déclarent leurs usages de l’IA'}))})
+        : generate(connection,system,input,...rest);
+    const note=await p.writeNewsletter();
+    assert.ok(!contents.get(note.path).includes('wall-street'));
+    assert.ok(!contents.get(note.path).includes('Midterms'));
+    assert.ok(contents.get(note.path).includes('https://example.com/novelists'));
+    assert.equal(contents.get(p.dataPath),before);
+    data.articles=data.articles.slice(3);
+    contents.set(p.dataPath,JSON.stringify(data));
+    p.generateIllustration=async()=>{throw new Error('An empty edition must not generate an image');};
+    p.generate=async()=>JSON.stringify({titles:[{id:4,title:null},{id:5,title:null}]});
+    assert.equal(await p.writeNewsletter(),null);
+    assert.equal(contents.get(p.dataPath),JSON.stringify(data));
 });

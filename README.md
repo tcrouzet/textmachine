@@ -10,7 +10,9 @@ Vous choisissez les sources, les consignes et le modèle d’IA. La newsletter r
 
 ## De la collecte à la newsletter
 
-[![Organigramme vertical : alertes Google, autres services et mails personnels rejoignent un libellé Gmail ; les flux RSS complètent la collecte. Les liens sont filtrés et les articles lus, puis les prompts sélectionnent les sources, rédigent et révisent le texte, créent le titre, le chapeau et l’illustration. Les sources inaccessibles passent par une branche En bref. Les anciennes publications servent à éviter les répétitions. Le plugin assemble et enregistre la note finale.](doc/processus.svg)](doc/processus.svg)
+[![Organigramme vertical : alertes Google, autres services d’alerte et envois directs arrivent dans Gmail. Les filtres appliquent un libellé choisi et archivent les messages sans les marquer comme lus. Dans Obsidian, TextMachine collecte et dédoublonne les liens, les enregistre, marque les messages comme lus et récupère les articles ; les flux complémentaires enrichissent la collecte. Après vérification des sources disponibles et du seuil de textes, les prompts sélectionnent, rédigent, traduisent les titres En bref, révisent, créent le titre, le chapeau et l’illustration. L’historique évite les répétitions. Le plugin valide les réponses, assemble le modèle Markdown, corrige la typographie française, enregistre l’édition et date l’utilisation des sources. Vous relisez et publiez.](doc/processus.svg)](doc/processus.svg)
+
+Dans Gmail, créez des filtres pour les alertes et les envois directs : **Appliquer le libellé** de votre choix, par exemple `TextMachine`, et **Ne pas afficher dans la boîte de réception (Archiver)**. Laissez les messages **non lus** : le plugin les marquera comme lus après avoir enregistré leurs liens. Choisissez ce même libellé dans les réglages de TextMachine. [Configurer les filtres Gmail](https://support.google.com/a/users/answer/9282734?hl=fr).
 
 ## Installer TextMachine
 
@@ -29,10 +31,10 @@ Obsidian **1.11.4 ou ultérieur**, sur ordinateur, est requis. Le plugin est gra
 Dans **Réglages → TextMachine** :
 
 1. Saisir son adresse Gmail, cliquer sur **Connecter** et autoriser l’accès dans la fenêtre Google.
-2. Choisir le **Libellé source**. Lui affecter les alertes, les messages de veille et les mails contenant des liens à lire. Un lien envoyé à votre propre adresse peut ainsi rejoindre la collecte.
+2. Choisir comme **Libellé source** celui appliqué par vos filtres Gmail, par exemple `TextMachine`. Les alertes et les envois directs y restent non lus et archivés, hors de la boîte de réception, jusqu’à leur traitement.
 3. Créer le dossier des données, nommé `TextMachine` par défaut, ou choisir un dossier existant vide.
 4. Configurer l’IA pour le texte et une clé OpenAI pour l’illustration.
-5. Choisir la **Langue de la newsletter** et le **Minimum d’articles avec texte** : **10 par défaut**, avant la sélection éditoriale. Les titres seuls, les PDF et les articles inaccessibles ne comptent pas dans ce minimum.
+5. Choisir la **Langue de la newsletter** et le **Minimum d’articles avec texte** : **10 par défaut**, avant la sélection éditoriale. Les titres seuls et les articles inaccessibles ne comptent pas dans ce minimum.
 
 La section **Newsletter → Sources** permet d’affiner la collecte :
 
@@ -50,7 +52,7 @@ TextMachine traite les messages **non lus** du libellé choisi et les flux compl
 
 Une fois le minimum d’articles lisibles atteint, les étapes IA démarrent. La fenêtre de traitement affiche le fournisseur, le modèle, l’avancement et le texte reçu progressivement. Fermer cette fenêtre annule le traitement.
 
-Le résultat s’ouvre dans **`text-machine-AAAA-MM-JJ.md`** : titre, chapeau, article avec liens vers les sources, illustration après le deuxième paragraphe, puis **En bref**. Cette dernière rubrique contient uniquement les titres traduits et les liens des articles inaccessibles ou non vérifiables, y compris les PDF. Leur contenu n’est pas envoyé à l’IA.
+Le résultat s’ouvre dans **`text-machine-AAAA-MM-JJ.md`** : titre, chapeau, article avec liens vers les sources, illustration après le deuxième paragraphe, puis **En bref**. Cette dernière rubrique contient uniquement les titres traduits et les liens des articles inaccessibles ou non vérifiables, accompagnés d’un lien vers le domaine de chaque source. Leur contenu n’est pas envoyé à l’IA.
 
 Pour une newsletter en français, les corrections typographiques de Finition sont appliquées localement : apostrophes, guillemets, espaces insécables, notamment avant les deux-points, et ponctuation. Finition n’a pas besoin d’être installé.
 
@@ -116,7 +118,7 @@ Codex est prioritaire lorsqu’il est choisi ; sinon, un serveur local renseign�
 
 Les liens, les textes extraits, les dates d’utilisation, les notes et les images sont enregistrés dans votre coffre. Les clés API et la session Gmail sont conservées dans le gestionnaire de secrets d’Obsidian. Le mot de passe Google est saisi chez Google.
 
-L’autorisation Gmail permet de lire et de modifier les messages du compte ; TextMachine limite sa collecte au libellé choisi et marque les messages traités comme lus. Les pages d’articles sont chargées dans une fenêtre isolée, sans accès à votre coffre ni aux sessions de votre navigateur habituel. Les PDF ne sont pas lus.
+L’autorisation Gmail permet de lire et de modifier les messages du compte ; TextMachine limite sa collecte au libellé choisi et marque les messages traités comme lus. Les pages d’articles sont chargées dans une fenêtre isolée, sans accès à votre coffre ni aux sessions de votre navigateur habituel.
 
 La sélection et la rédaction transmettent les textes des articles et l’historique utilisé au fournisseur choisi. Un serveur exécuté sur votre machine permet de traiter le texte localement ; Codex utilise le service auquel il est connecté. La génération d’images transmet le texte final à OpenAI. Les titres des sources inaccessibles sont envoyés séparément pour traduction.
 

@@ -1,0 +1,14 @@
+https://danslesalgorithmes.net/feed/
+https://www.niemanlab.org/feed/
+https://theconversation.com/topics/intelligence-artificielle-ia-22176/articles.atom
+https://www.theguardian.com/technology/artificialintelligenceai/rss
+https://www.lemonde.fr/intelligence-artificielle/rss_full.xml
+https://www.numerama.com/tech/intelligence-artificielle/feed/
+https://www.technologyreview.com/topic/artificial-intelligence/feed/
+https://www.thecreativepenn.com/feed/
+https://idratherbewriting.com/feed.xml
+https://iapulse.substack.com/feed
+https://www.wired.com/feed/tag/ai/latest/rss
+https://www.blogdumoderateur.com/feed/
+https://techcrunch.com/category/artificial-intelligence/feed/
+https://www.nature.com/subjects/machine-learning.rss

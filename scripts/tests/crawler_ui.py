@@ -84,6 +84,12 @@ try:
         }""", proxy.server_port)
 
         page.evaluate("() => { const p = app.plugins.plugins['text-machine']; p.codex = {...p.codex, findCodex:async () => null}; }")
+
+        feed_checks = subprocess.check_output(['node', '-e', "process.stdout.write(require('esbuild').buildSync({entryPoints:['scripts/tests/feed-browser.js'],bundle:true,platform:'node',format:'iife',globalName:'feedChecks',write:false,loader:{'.dat':'text'}}).outputFiles[0].text)"], cwd=root, text=True)
+        page.add_script_tag(content=feed_checks)
+        assert page.evaluate('feedChecks.runFeedChecks().passed') == 16
+        print('RSS browser checks: 16 passed.', flush=True)
+
         html = """<!doctype html><html><head><title>Rendered article</title><meta property="article:published_time" content="2026-11-02T08:00:00Z"><meta property="og:image" content="/cover.jpg"></head><body><main id="article"></main>
         <script>setTimeout(() => {
             document.getElementById('article').innerHTML = '<h1>Rendered article</h1><p>' + 'This article was rendered by JavaScript. '.repeat(20) + '</p>';

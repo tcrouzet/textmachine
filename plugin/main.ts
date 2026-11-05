@@ -10,7 +10,7 @@ import * as browser from './browser';
 import * as ai from './ai/config';
 import * as codex from './ai/codex';
 import {renderAI} from './ai/settings';
-import {Settings, Account, Label, Progress, Action, AIProvider, Article, Model, HttpOptions, SettingRow, SettingsGroup, errorOf, record} from './types';
+import {Settings, Account, Label, Progress, Action, AIProvider, Article, FeedEntry, Model, HttpOptions, SettingRow, SettingsGroup, errorOf, record} from './types';
 import * as newsletter from './newsletter';
 import * as generation from './ai/generate';
 import * as imageGeneration from './ai/image';
@@ -29,7 +29,7 @@ const {t} = i18n;
 const prompts = {'sélection.md':selectionPrompt,'writer.md':writerPrompt,'bref.md':brefPrompt,
     'rewriter.md':rewriterPrompt,'publisher.md':publisherPrompt,'image.md':imagePrompt};
 type PromptName = keyof typeof prompts;
-interface PromptDefinition {file: PromptName; name: string; desc: string; variables: string}
+interface PromptDefinition {file: PromptName | 'newsletter.md'; name: string; desc: string; variables: string}
 interface SourceAttempt {
     method: 'http' | 'browser';
     httpStatus: number | null;
@@ -326,6 +326,28 @@ export default class TextMachine extends Plugin {
         return await vault.create(folderPath + '/textmachine.json', JSON.stringify({ version: 1, articles: [] }, null, 2) + '\n');
     }
 
+    async moveData(parentPath: string) {
+        if (this.busy) throw new Error(t('promptBusy'));
+        if (!this.dataReady) throw new Error(t('createFolderFirst'));
+        const vault=this.app.vault, source=this.settings.outputFolder;
+        const folder=vault.getAbstractFileByPath(source);
+        if (!(folder instanceof TFolder)) throw new Error(t('parentMoved'));
+        const parent=parentPath ? vault.getAbstractFileByPath(parentPath) : vault.getRoot();
+        if (!(parent instanceof TFolder)) throw new Error(t('parentMoved'));
+        const destination=(parentPath ? parentPath+'/' : '')+folder.name;
+        if (destination===source) return;
+        if (parentPath===source || parentPath.startsWith(source+'/')) throw new Error(t('folderMoveInside'));
+        if (vault.getAbstractFileByPath(destination)) throw new Error(t('folderNameExists'));
+        this.busy=true;
+        try {
+            await this.app.fileManager.renameFile(folder,destination);
+            this.settings.outputFolder=destination;
+            this.updateFolderIcon();
+            try {await this.saveData(this.settings);}
+            catch (caught) {throw new Error(t('folderMovedSaveFailed',{path:destination,error:errorOf(caught).message}));}
+        } finally {this.busy=false;}
+    }
+
     get blockedPath() {
         return this.settings.outputFolder + '/blocked.json';
     }
@@ -395,11 +417,13 @@ export default class TextMachine extends Plugin {
         if (blockedFile && !(blockedFile instanceof TFile)) throw new Error(t('invalidBlockedFile'));
         if (blockedFile) await vault.process(blockedFile, text => JSON.stringify(this.crawler.parseBlocked(text), null, 2) + '\n');
         const articles = this.articles.parseData(await vault.read(log)).articles;
+        const now = Date.now();
         this.crawlController = new AbortController();
         try {
             for (const article of articles) {
                 if (this.disposed) throw new Error(t('pluginDisabled'));
                 if (article.status === 'forbidden') continue;
+                if (!article.content && article.source.startsWith('RSS: ') && !this.articles.recentPublication(article.publish,now)) continue;
                 if (this.articles.isPdf(article.url) || article.status === '404' || this.crawler.isBlocked(article.url,blocked)) {
                     await vault.process(log,text => {
                         const current = this.articles.parseData(text);
@@ -446,25 +470,76 @@ export default class TextMachine extends Plugin {
         const log = this.dataFile;
         const blocked = await this.readBlocked();
         const controller = this.crawlController = new AbortController();
-        let added = 0;
+        let added = 0, succeeded = 0, failed = 0, ignored = 0, duplicates = 0;
+        const now = Date.now();
+        const urls = new Map<string,Omit<Article,'id'>>(), titles = new Map<string,Omit<Article,'id'>>();
+        const remember = (article: Omit<Article,'id'>) => {
+            const keys = this.articles.articleKeys(article);
+            urls.set(keys.urlKey,article);
+            titles.set(keys.titleKey,article);
+        };
         try {
+            for (const article of this.articles.parseData(await this.app.vault.read(log)).articles) remember(article);
             for (const url of feeds) {
                 if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));
                 progress?.(t('readingIncludeFeed',{source:new URL(url).hostname}));
-                const response = await generation.requestWithSignal({url,throw:false},this.request,controller.signal);
+                let entries: FeedEntry[];
+                try {
+                    const response = await generation.requestWithSignal({url,throw:false},this.request,controller.signal);
+                    if (response.status!==200) throw new Error(t('newsletterFeedFailed'));
+                    entries = this.newsletter.readFeed(response.text,Infinity,url);
+                } catch (caught) {
+                    if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));
+                    failed++;
+                    progress?.(t('includeFeedError',{url,error:errorOf(caught).message}));
+                    continue;
+                }
                 if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));
-                if (response.status!==200) throw new Error(t('newsletterFeedFailed'));
-                const entries = this.articles.feedArticles(this.newsletter.readFeed(response.text,Infinity,url),url,this.newsletter.day())
-                    .filter((article: Omit<Article,'id'>)=>!this.articles.isExcluded(article,this.settings.excludedSources) && !this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds))
-                    .map((article: Omit<Article,'id'>)=>this.crawler.isBlocked(article.url,blocked) ? {...article,status:'forbidden'} : article);
-                let result!: ReturnType<typeof articles.mergeArticles>;
-                await this.app.vault.process(log,text=>{
-                    result = this.articles.mergeArticles(text,entries);
-                    return result.text;
-                });
+                const incoming: Omit<Article,'id'>[] = [];
+                for (const entry of entries) {
+                    if (!this.articles.recentPublication(entry.publish,now)) {ignored++;continue;}
+                    const article = this.articles.feedArticles([entry],url,this.newsletter.day())[0];
+                    if (!article || this.articles.isExcluded(article,this.settings.excludedSources)
+                        || this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds)) continue;
+                    const keys = this.articles.articleKeys(article);
+                    const known = urls.get(keys.urlKey) ?? titles.get(keys.titleKey);
+                    if (known) {
+                        duplicates++;
+                        urls.set(keys.urlKey,known);
+                        titles.set(keys.titleKey,known);
+                        if (known.content || known.status || !entry.html) continue;
+                    }
+                    if (this.crawler.isBlocked(article.url,blocked)) article.status='forbidden';
+                    article.authors=entry.authors || [];
+                    if (!article.status && entry.html) {
+                        const extracted=this.crawler.extractPage(entry.html,article.url);
+                        if (extracted.content && !extracted.blocked) {
+                            article.content=extracted.content;
+                            article.image=extracted.image || '';
+                            article.imageCaption=extracted.imageCaption;
+                            if (extracted.authors?.length) article.authors=extracted.authors;
+                        }
+                    }
+                    if (known) {
+                        // Enrich the existing identity when feeds syndicate the same title at another URL.
+                        article.url=known.url;
+                        article.title=known.title;
+                        Object.assign(known,{content:article.content});
+                    } else remember(article);
+                    incoming.push(article);
+                }
+                if (incoming.length) {
+                    let result!: ReturnType<typeof articles.mergeArticles>;
+                    await this.app.vault.process(log,text=>{
+                        result = this.articles.mergeArticles(text,incoming);
+                        return result.text;
+                    });
+                    added += result.count;
+                }
                 if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));
-                added += result.count;
+                succeeded++;
             }
+            progress?.(t('includeFeedsSummary',{succeeded,failed,added,ignored,duplicates}));
             return added;
         } finally {if (this.crawlController===controller) this.crawlController=null;}
     }
@@ -476,8 +551,10 @@ export default class TextMachine extends Plugin {
         const log = this.dataFile;
         await this.app.vault.process(log,text=>this.articles.withIds(text));
         const labelId = this.settings.labelId;
+        const debug = this.settings.debug;
         const blocked = await this.readBlocked();
         let added = 0, links = 0, skipped = 0, feedLinks = 0;
+        let feedSummary = '';
         try {
             for await (const id of this.client.unreadMessages(labelId)) {
                 if (this.disposed) throw new Error(t('pluginDisabled'));
@@ -494,10 +571,10 @@ export default class TextMachine extends Plugin {
                 });
                 if (result.added) { added++; links += result.count; } else skipped++;
                 if (this.disposed) throw new Error(t('pluginDisabled'));
-                await this.client.markRead(id);
+                if (!debug) await this.client.markRead(id);
                 progress?.(t('importProgress', { added, links }));
             }
-            feedLinks = await this.importFeeds(progress);
+            feedLinks = await this.importFeeds(message=>{feedSummary=message;progress?.(message);});
             await this.crawlArticles(progress);
         } catch (caught) {
             const error = errorOf(caught);
@@ -507,7 +584,7 @@ export default class TextMachine extends Plugin {
             throw failure;
         }
         const result = t('importComplete', { added, links, skipped, path: log.path });
-        return this.settings.includeFeeds.trim() ? result+'\n'+t('includeFeedsComplete',{count:feedLinks}) : result;
+        return this.settings.includeFeeds.trim() ? result+'\n'+t('includeFeedsComplete',{count:feedLinks})+(feedSummary ? '\n'+feedSummary : '') : result;
     }
 
     async readAuthorFeeds(signal: AbortSignal) {
@@ -516,20 +593,20 @@ export default class TextMachine extends Plugin {
             const response = await generation.requestWithSignal({url,throw:false},this.request,signal);
             if (this.disposed || signal.aborted) throw new Error(t('newsletterCancelled'));
             if (response.status!==200) throw new Error(t('newsletterFeedFailed'));
-            posts.push(...this.newsletter.readFeed(response.text,5,url));
+            posts.push(...this.newsletter.readFeed(response.text,5,url).map(entry=>{const post={...entry};delete post.html;return post;}));
         }
         return [...new Map(posts.map(post=>[post.url || post.title,post])).values()];
     }
 
-    async readPrompt(file: PromptName) {
-        const path=this.manifest.dir+'/prompts/'+file;
+    async readPrompt(file: PromptDefinition['file']) {
+        const path=this.manifest.dir+(file==='newsletter.md' ? '/models/' : '/prompts/')+file;
         const adapter=this.app.vault.adapter;
-        return await adapter.exists(path) ? adapter.read(path) : prompts[file];
+        return await adapter.exists(path) ? adapter.read(path) : file==='newsletter.md' ? newsletterTemplate : prompts[file];
     }
 
-    async savePrompt(file: PromptName, text: string, original: string) {
+    async savePrompt(file: PromptDefinition['file'], text: string, original: string) {
         if (this.busy || this.aiController) throw new Error(t('promptBusy'));
-        if (!text.trim()) throw new Error(t('newsletterPromptEmpty',{file}));
+        if (!text.trim()) throw new Error(file==='newsletter.md' ? t('newsletterTemplateInvalid') : t('newsletterPromptEmpty',{file}));
         const language=this.settings.newsletterLanguage;
         switch (file) {
             case 'sélection.md': this.newsletter.selectionRequest(text,[],language); break;
@@ -538,9 +615,13 @@ export default class TextMachine extends Plugin {
             case 'bref.md': this.newsletter.briefRequest(text,[],language); break;
             case 'rewriter.md': this.newsletter.renderPrompt(text,{language,AuthorFeed:'[]',recentPosts:'[]'}); break;
             case 'image.md': this.newsletter.renderPrompt(text,{language}); break;
+            case 'newsletter.md':
+                this.newsletter.renderNewsletter(text,{title:'Title',chapeau:'Introduction',paragraphs:['Article'],image:null,
+                    used:['https://example.com/article'],discard:[]},[{title:'Brief title',url:'https://example.com/brief'}]);
+                break;
         }
         if (await this.readPrompt(file)!==original) throw new Error(t('promptChanged'));
-        const folder=this.manifest.dir+'/prompts';
+        const folder=this.manifest.dir+(file==='newsletter.md' ? '/models' : '/prompts');
         const adapter=this.app.vault.adapter;
         if (!await adapter.exists(folder)) await adapter.mkdir(folder);
         await adapter.write(folder+'/'+file,text);
@@ -551,6 +632,8 @@ export default class TextMachine extends Plugin {
         const vault = this.app.vault;
         const log = this.dataFile;
         const day = this.newsletter.day();
+        const debug = this.settings.debug;
+        const editionName=(debug ? 'test-' : '')+'text-machine-'+day;
         const language = this.settings.newsletterLanguage.trim() || 'français';
         let connection: ReturnType<typeof ai.getConnection> | undefined;
         const folder = vault.getAbstractFileByPath(this.settings.outputFolder);
@@ -558,17 +641,26 @@ export default class TextMachine extends Plugin {
         const notes = folder.children.filter((file): file is TFile => file instanceof TFile && /^text-machine-\d{4}-\d{2}-\d{2}(?:-\d+)?\.md$/.test(file.name));
         const lastEdition=notes.map(file=>file.name.slice('text-machine-'.length,'text-machine-'.length+10)).filter(date=>date<day).sort().pop() || '';
         const todayNotes = await Promise.all(notes.filter(file=>file.name.startsWith('text-machine-'+day)).map(file=>vault.read(file)));
+        const historyNotes=notes.filter(file=>debug || !file.name.startsWith('text-machine-'+day))
+            .sort((a,b)=>debug ? b.name.localeCompare(a.name) : b.stat.mtime-a.stat.mtime).slice(0,5);
+        const testHistory=debug ? await Promise.all(historyNotes.map(async file=>({name:file.name,content:await vault.read(file)}))) : [];
+
         await vault.process(log,text=>this.articles.withIds(text));
         const data = await vault.read(log);
         let pending: Article[] = this.newsletter.availableArticles(data,this.settings.excludedSources,day,todayNotes,lastEdition);
         let brief: Article[] = this.newsletter.briefArticles(data,this.settings.excludedSources,day,lastEdition);
+        if (debug) {
+            const links=this.articles.extractLinks({payload:{},labelIds:[],bodies:[{type:'text/plain',text:testHistory.map(note=>note.content).join('\n')}]});
+            const published=new Set(links.map(link=>this.articles.articleKeys({url:link.url,title:''}).urlKey));
+            const unpublished=(article: Article)=>!published.has(this.articles.articleKeys(article).urlKey);
+            pending=pending.filter(unpublished);
+            brief=brief.filter(unpublished);
+        }
+
         if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
-        let template = newsletterTemplate;
-        const templatePath = this.manifest.dir + '/models/newsletter.md';
-        if (await vault.adapter.exists(templatePath)) template = await vault.adapter.read(templatePath);
+        const template = await this.readPrompt('newsletter.md');
         if (!template.trim()) throw new Error(t('newsletterTemplateInvalid'));
         const controller = this.aiController = new AbortController();
-        const debug = this.settings.debug;
         const check = () => {if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));};
         const saveSnapshot = async (name: string, text: string) => {
             check();
@@ -610,15 +702,13 @@ export default class TextMachine extends Plugin {
             pending=pending.filter(article=>!this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds,authorPosts));
             brief=brief.filter(article=>!this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds,authorPosts));
             if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
-            if (pending.length<this.settings.minimumSources)
+            if (!debug && pending.length<this.settings.minimumSources)
                 throw new Error(t('newsletterNotEnoughSources',{count:pending.length,minimum:this.settings.minimumSources}));
             if (pending.length) {
                 const prompt=await readPrompt('writer.md');
                 const selectionTemplate=await readPrompt('sélection.md');
-                const oldNotes=notes.filter(file=>!file.name.startsWith('text-machine-'+day))
-                    .sort((a,b)=>b.stat.mtime-a.stat.mtime).slice(0,5);
                 const previous=[prompt,selectionTemplate].some(text=>/\{\{\s*previousNewsletters\s*\}\}/.test(text))
-                    ? await Promise.all(oldNotes.map(async file=>({name:file.name,content:await vault.read(file)}))) : [];
+                    ? debug ? testHistory : await Promise.all(historyNotes.map(async file=>({name:file.name,content:await vault.read(file)}))) : [];
                 progress?.(t('newsletterReadingContext'));
                 check();
                 progress?.(t('newsletterSelecting'));
@@ -636,7 +726,7 @@ export default class TextMachine extends Plugin {
                     this.newsletter.assertNoAuthorSources(result.paragraphs,this.settings.authorFeeds,authorPosts);
                 }
                 if (!result.used.length && (!brief.length || pending.some(article=>!!article.usedAt))) {
-                    await vault.process(log,current=>this.newsletter.applyStatuses(current,pending.filter(article=>!article.usedAt),result,day));
+                    if (!debug) await vault.process(log,current=>this.newsletter.applyStatuses(current,pending.filter(article=>!article.usedAt),result,day));
                     new Notice(t('newsletterNoArticles'));
                     return null;
                 }
@@ -648,6 +738,11 @@ export default class TextMachine extends Plugin {
                 const request = this.newsletter.briefRequest(prompt,brief,language);
                 const response = await respond(request);
                 translatedBrief = this.newsletter.parseBrief(response,brief);
+            }
+            if (!result.used.length && !translatedBrief.length) {
+                if (!debug) await vault.process(log,current=>this.newsletter.applyStatuses(current,pending,result,day));
+                new Notice(t('newsletterNoArticles'));
+                return null;
             }
             if (result.used.length && connection) {
                 const original = result.paragraphs.join('\n\n');
@@ -683,7 +778,7 @@ export default class TextMachine extends Plugin {
                 this.newsletter.assertNoAuthorSources([publication.title,publication.chapeau],this.settings.authorFeeds,authorPosts);
                 Object.assign(result,publication);
             }
-            const illustrationName='text-machine-'+day+'.png';
+            const illustrationName=editionName+'.png';
             const imagePath=this.settings.outputFolder+'/illustrations/'+illustrationName;
             const cachedImage=vault.getAbstractFileByPath(imagePath);
             if (cachedImage && !(cachedImage instanceof TFile)) throw new Error(t('newsletterIllustrationFailed'));
@@ -701,7 +796,7 @@ export default class TextMachine extends Plugin {
             }
             result.image={url:'illustrations/'+illustrationName,source:'',caption:result.title || t('newsletterBriefTitle'),verified:true,generated:true};
             const markdown = correctNewsletterPunctuation(this.newsletter.renderNewsletter(template,result,translatedBrief),language);
-            const path = this.settings.outputFolder + '/text-machine-' + day + '.md';
+            const path = this.settings.outputFolder + '/' + editionName + '.md';
             const existing = vault.getAbstractFileByPath(path);
             check();
             if (generated) {
@@ -718,7 +813,7 @@ export default class TextMachine extends Plugin {
             let note: TFile;
             if (existing instanceof TFile) {await vault.modify(existing,markdown);note = existing;}
             else note = await vault.create(path,markdown);
-            try {await vault.process(log,current=>this.newsletter.applyStatuses(current,pending,result,day,brief));}
+            try {if (!debug) await vault.process(log,current=>this.newsletter.applyStatuses(current,pending,result,day,brief));}
             catch {throw new Error(t('newsletterStatusFailed',{path}));}
             try {await this.app.workspace.getLeaf(false).openFile(note);}
             catch {new Notice(t('newsletterCreated',{path}));}
@@ -749,6 +844,10 @@ class TextMachineRun extends Modal {
     modelText = '';
     aiText = '';
     notePath = '';
+    clockEl?: HTMLElement;
+    startedAt: number | null = null;
+    elapsed: number | null = null;
+    clockTimer?: number;
 
     constructor(app: App, plugin: TextMachine, folderPath: string) {
         super(app);
@@ -760,6 +859,7 @@ class TextMachineRun extends Modal {
 
     onClose() {
         this.closed = true;
+        this.stopClock();
         if (this.working) {this.plugin.auth?.abort();this.plugin.aiController?.abort();this.plugin.crawlController?.abort();}
         this.plugin.runDialog = null;
     }
@@ -781,6 +881,7 @@ class TextMachineRun extends Modal {
             if (error.code === 'AUTH_REQUIRED') p.authorizationRequired = true;
             this.error = error.message;
         } finally {
+            this.stopClock();
             p.busy = false;
             this.working = false;
             if (!this.closed) {
@@ -801,12 +902,37 @@ class TextMachineRun extends Modal {
         }
         await this.perform(async () => {
             const progress: Progress = (message,stream,reset,model) => this.showProgress(message,stream,reset,model);
+            this.startClock();
             const collected = await p.importUnread(progress);
             if (this.closed || p.disposed) return;
             const note = await p.writeNewsletter(progress);
             this.result = collected;
             this.notePath = note?.path || '';
         }, false);
+    }
+
+    startClock() {
+        this.stopClock();
+        this.elapsed=0;
+        this.startedAt=performance.now();
+        this.updateClock();
+        this.clockTimer=window.setInterval(()=>this.updateClock(),1000);
+    }
+
+    updateClock() {
+        if (this.startedAt!==null) this.elapsed=performance.now()-this.startedAt;
+        const seconds=Math.floor((this.elapsed || 0)/1000);
+        const parts=[Math.floor(seconds/60)%60,seconds%60];
+        if (seconds>=3600) parts.unshift(Math.floor(seconds/3600));
+        this.clockEl?.setText(t('elapsedTime',{time:parts.map(part=>String(part).padStart(2,'0')).join(':')}));
+        if (this.clockEl) this.clockEl.hidden=false;
+    }
+
+    stopClock() {
+        if (this.clockTimer!==undefined) window.clearInterval(this.clockTimer);
+        this.clockTimer=undefined;
+        if (this.startedAt!==null) this.updateClock();
+        this.startedAt=null;
     }
 
     showProgress(message: string, stream = false, reset = false, model?: string) {
@@ -838,6 +964,9 @@ class TextMachineRun extends Modal {
         el.empty();
         this.modelEl = el.createEl('p',{cls:'text-machine-run-model',text:this.modelText});
         this.modelEl.hidden = !this.modelText;
+        this.clockEl=el.createEl('p',{cls:'setting-item-description',attr:{role:'timer','aria-live':'off'}});
+        this.clockEl.hidden=true;
+        if (this.elapsed!==null) this.updateClock();
         if (this.error) el.createEl('p', {text:this.error, attr:{role:'alert'}});
         if (this.working) {
             const activity = el.createDiv('text-machine-activity');
@@ -900,7 +1029,7 @@ class FolderPicker extends Modal {
     working = false;
     error = '';
 
-    constructor(app: App, startPath: string, choose: (folder: string) => Promise<void>) {
+    constructor(app: App, startPath: string, choose: (folder: string) => Promise<void>, private moving = false) {
         super(app);
         this.choose = choose;
         const folder = app.vault.getAbstractFileByPath(startPath);
@@ -939,7 +1068,7 @@ class FolderPicker extends Modal {
     render() {
         const el = this.contentEl;
         el.empty();
-        el.createEl('h2', { text: t('journalFolder') });
+        el.createEl('h2', { text: this.moving ? t('moveFolder') : t('journalFolder') });
         el.createEl('p', { text: this.folder.isRoot() ? t('vaultRoot') : this.folder.path });
         const list = el.createDiv('text-machine-folders');
         const root = list.createEl('button', { text: t('vaultRoot') });
@@ -973,14 +1102,14 @@ class FolderPicker extends Modal {
             });
         }
 
-        new Setting(el).setName(t('newFolderName'))
+        if (!this.moving) new Setting(el).setName(t('newFolderName'))
             .addText(text => {
                 text.inputEl.setAttribute('aria-label', t('newFolderInput'));
                 text.setValue(this.newName).setDisabled(this.working).onChange(value => { this.newName = value; });
             })
             .addButton(button => button.setButtonText(t('createHere')).setCta().setDisabled(this.working).onClick(() => this.select(true)));
-        new Setting(el).setDesc(t('folderPickerDescription'))
-            .addButton(button => button.setButtonText(t('chooseFolder')).setDisabled(this.working || this.folder.isRoot() || this.folder.children.length > 0).onClick(() => this.select()))
+        new Setting(el).setDesc(this.moving ? t('moveFolderDescription') : t('folderPickerDescription'))
+            .addButton(button => button.setButtonText(this.moving ? t('moveHere') : t('chooseFolder')).setDisabled(this.working || (!this.moving && (this.folder.isRoot() || this.folder.children.length > 0))).onClick(() => this.select()))
             .addButton(button => button.setButtonText(t('cancel')).setDisabled(this.working).onClick(() => this.close()));
         if (this.error) el.createEl('p', { text: this.error, attr: { role: 'alert' } });
     }
@@ -996,7 +1125,7 @@ class PromptEditor extends Modal {
         this.titleEl.setText(this.prompt.name);
         this.contentEl.createEl('p',{text:this.prompt.desc});
         this.contentEl.createEl('p',{cls:'setting-item-description',text:t('promptVariables',{variables:this.prompt.variables})});
-        const input=this.contentEl.createEl('textarea',{cls:'text-machine-prompt-text',attr:{'aria-label':t('promptText')}});
+        const input=this.contentEl.createEl('textarea',{cls:'text-machine-prompt-text',attr:{'aria-label':this.prompt.file==='newsletter.md' ? t('newsletterTemplateText') : t('promptText')}});
         input.value=this.original;
         const error=this.contentEl.createDiv({cls:'text-machine-prompt-error',attr:{role:'alert'}});
         let saving=false;
@@ -1102,7 +1231,7 @@ export class GmailSettings extends PluginSettingTab {
         const group=(heading: string): SettingsGroup=>({type:'group',heading,cls:'text-machine-section',items:[]});
         const account=group(t('accountHeading'));
         const source=group(t('sourceHeading'));
-        const journal=group(t('folderHeading'));
+        const journal=group(p.dataReady ? t('journalFolder') : t('folderHeading'));
         const newsletterSettings=group(t('newsletterHeading'));
         const newsletterSources: SettingRow[]=[];
         const items: (SettingRow | SettingsGroup)[] = [{name:'TextMachine',desc:t('intro'),searchable:false,render:setting=>{
@@ -1179,10 +1308,18 @@ export class GmailSettings extends PluginSettingTab {
             }});
         }
         items.push(journal);
-        journal.items.push({name:t('chooseEmptyFolder'),render:setting=>{
+        journal.items.push({name:p.dataReady ? p.settings.outputFolder : t('chooseEmptyFolder'),render:setting=>{
             setting.addButton(button=>{
                 if (connected && !p.dataReady) button.setCta();
-                button.setButtonText(p.dataReady ? t('changeFolder') : t('createFolder')).setDisabled(!connected || p.busy).onClick(()=>{
+                button.setButtonText(p.dataReady ? t('moveFolder') : t('createFolder')).setDisabled(p.busy || (!p.dataReady && !connected)).onClick(()=>{
+                    if (p.dataReady) {
+                        const parent=p.settings.outputFolder.split('/').slice(0,-1).join('/');
+                        new FolderPicker(this.app,parent,async destination=>{
+                            try {await p.moveData(destination);}
+                            finally {this.redraw();}
+                        },true).open();
+                        return;
+                    }
                     new FolderPicker(this.app,p.settings.outputFolder,async folder=>{
                         const log=await p.ensureData(folder);
                         p.settings.outputFolder=folder;
@@ -1207,7 +1344,7 @@ export class GmailSettings extends PluginSettingTab {
                         });
                 });
             }});
-            journal.items.push({name:t('dataFile'),render:setting=>{
+            if (p.settings.debug) journal.items.push({name:t('dataFile'),render:setting=>{
                 setting.addButton(button=>button.setButtonText(t('openLog')).setDisabled(!connected || p.busy || !p.dataReady)
                     .onClick(()=>this.run(t('openingLog'),async()=>{
                         const file=p.dataFile;
@@ -1294,7 +1431,7 @@ export class GmailSettings extends PluginSettingTab {
                     setting.addButton(button=>button.setButtonText(t('cancel')).onClick(()=>p.crawlController?.abort()));
                 }
             }});
-            journal.items.push({name:t('resetData'),desc:t('resetDataDescription'),render:setting=>{
+            if (p.settings.debug) journal.items.push({name:t('resetData'),desc:t('resetDataDescription'),render:setting=>{
                 setting.addButton(button=>destructive(button).setButtonText(t('resetData')).setDisabled(!connected || p.busy).onClick(()=>{
                     if (!p.dataReady) {new Notice(t('createFolderFirst'));return;}
                     const file=p.dataFile;
@@ -1379,6 +1516,8 @@ export class GmailSettings extends PluginSettingTab {
             {file:'rewriter.md',name:t('promptRewriter'),desc:t('promptRewriterDescription'),variables:'{{language}}, {{AuthorFeed}}'},
             {file:'publisher.md',name:t('promptPublisher'),desc:t('promptPublisherDescription'),variables:'{{language}}, {{article}}'},
             {file:'image.md',name:t('promptImage'),desc:t('promptImageDescription'),variables:'{{language}}'},
+            {file:'newsletter.md',name:t('newsletterTemplate'),desc:t('newsletterTemplateDescription'),
+                variables:'{{title}}, {{chapeau}}, {{paragraphs_before_image}}, {{image}}, {{paragraphs_after_image}} ; {{#editorial}}…{{/editorial}}, {{#brief}}…{{/brief}} ({{heading}}), {{#articles}}…{{/articles}} ({{title}}, {{url}}, {{source}}, {{source_url}})'},
         ];
         newsletterSettings.items.push({name:t('newsletterPromptsHeading'),desc:t('newsletterPromptsDescription'),render:setting=>{setting.setHeading();}},
             ...promptDefinitions.map(prompt=>({name:prompt.name,desc:prompt.desc,render:(setting: Setting)=>{

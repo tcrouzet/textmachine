@@ -48,7 +48,7 @@ export type HttpRequest = (options: HttpOptions) => Promise<HttpResponse>;
 export type StreamRequest = (options: HttpOptions, onChunk?: (chunk: string) => void, signal?: AbortSignal, maxResponseBytes?: number) => Promise<HttpResponse>;
 export interface Connection {provider: 'openai' | 'anthropic' | 'codex'; apiKey: string; model: string; baseUrl?: string; effort?: string}
 export interface Model {value: string; label: string; efforts?: string[]}
-export interface FeedEntry {title: string; url: string; publish: string; content: string}
+export interface FeedEntry {title: string; url: string; publish: string; content: string; html?: string; authors?: string[]}
 export interface Message {payload: {headers?: {name: string; value: string}[]}; bodies: {type: string; text: string}[]; internalDate?: string; labelIds: string[]}
 export interface Database {version: number; nextId?: number; articles: Article[]; [key: string]: unknown}
 

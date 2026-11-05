@@ -185,3 +185,13 @@ test('IDs are persisted once, preserved by deduplication and never reused after 
     for (const id of ['1',-1,0,null]) assert.throws(()=>withIds(JSON.stringify({...original,articles:[{...original.articles[0],id}]})),/textmachine.json/);
     assert.throws(()=>withIds(JSON.stringify({...original,articles:[{...original.articles[0],id:1},{...original.articles[0],id:1}]})),/textmachine.json/);
 });
+
+
+test('RSS freshness uses exact elapsed hours, includes the boundary and rejects future or missing dates',()=>{
+    const {recentPublication}=require('../../plugin/articles');
+    const now=Date.parse('2026-11-05T12:00:00Z');
+    for(const publish of ['2026-11-03T12:00:00Z','2026-11-03T13:00:00+01:00','2026-11-05T12:00:00Z'])
+        assert.equal(recentPublication(publish,now),true,publish);
+    for(const publish of ['', 'invalid', '2026-11-03T11:59:59Z','2026-11-05T12:00:01Z'])
+        assert.equal(recentPublication(publish,now),false,publish);
+});
