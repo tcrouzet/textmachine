@@ -6,7 +6,7 @@ Google Alerts, Google Scholar, services de veille, liens envoyés par vous ou vo
 
 Vous choisissez les sources, les consignes et le modèle d’IA. La newsletter reste une note Markdown dans votre coffre, à relire et à modifier avant publication. Les prompts fournis portent sur l’intelligence artificielle, l’écriture et les métiers du livre ; vous pouvez les adapter à votre sujet.
 
-[Télécharger TextMachine](https://github.com/tcrouzet/textmachine/releases/latest) · [Signaler un problème](https://github.com/tcrouzet/textmachine/issues)
+[Installer TextMachine depuis Obsidian](https://community.obsidian.md/account/plugins/text-machine) · [Signaler un problème](https://github.com/tcrouzet/textmachine/issues)
 
 ## De la collecte à la newsletter
 
@@ -16,9 +16,11 @@ Vous choisissez les sources, les consignes et le modèle d’IA. La newsletter r
 
 Obsidian **1.11.4 ou ultérieur**, sur ordinateur, est requis. Le plugin est gratuit, sous [licence MIT](LICENSE). Les appels aux services d’IA dépendent de votre abonnement ou de votre facturation API.
 
-1. Télécharger `main.js`, `manifest.json` et `styles.css` depuis la [dernière release](https://github.com/tcrouzet/textmachine/releases/latest).
-2. Placer ces fichiers dans `.obsidian/plugins/text-machine/`, à l’intérieur du coffre.
-3. Recharger Obsidian, puis activer **TextMachine** dans **Réglages → Plugins communautaires**.
+1. Dans Obsidian, ouvrir **Réglages → Plugins communautaires → Parcourir**.
+2. Chercher **TextMachine**, puis choisir **Installer** et **Activer**.
+3. Ouvrir **Réglages → TextMachine** pour configurer la collecte et l’IA.
+
+[Ouvrir la fiche TextMachine sur Obsidian](https://community.obsidian.md/account/plugins/text-machine).
 
 **Connexion Gmail :** cette version exige un client OAuth Google pour ordinateur, avec l’API Gmail activée. Son fichier de configuration, au format Google `installed`, doit être placé dans `oauth-client.json` à la racine du dossier du plugin. Ce fichier n’est pas distribué avec les releases. Sans cette configuration, le bouton de connexion reste indisponible.
 
@@ -54,7 +56,9 @@ Pour une newsletter en français, les corrections typographiques de Finition son
 
 ## Des prompts pour chaque étape
 
-Les fichiers du dossier [`prompts/`](prompts/) définissent la ligne éditoriale. Ils sont relus à chaque lancement ; si un fichier local manque, le plugin utilise sa version embarquée.
+Dans **Réglages → TextMachine → Newsletter → Prompts**, cliquer sur **Modifier** en face de l’étape à personnaliser. Une grande zone de texte affiche les consignes actuelles et les variables disponibles. **Enregistrer** applique les changements à la prochaine génération ; **Annuler** conserve le prompt existant. Ces réglages restent accessibles sans connexion Gmail.
+
+Les consignes sont enregistrées dans les fichiers du dossier [`prompts/`](prompts/) du plugin, relus à chaque lancement. Si un fichier local manque, l’éditeur affiche la version embarquée et crée le fichier lors de l’enregistrement. Les prompts vides, les variables inconnues et l’absence des variables d’entrée obligatoires sont signalés avant la sauvegarde.
 
 | Prompt | Ce qu’il reçoit et produit |
 | --- | --- |
@@ -67,7 +71,7 @@ Les fichiers du dossier [`prompts/`](prompts/) définissent la ligne éditoriale
 
 Les étapes textuelles renvoient du JSON, validé avec les schémas de [`models/`](models/). Le plugin assemble leurs résultats dans [`models/newsletter.md`](models/newsletter.md) et met lui-même à jour le suivi des articles. Le modèle Markdown ne fait pas partie des consignes envoyées à l’IA.
 
-Pour personnaliser les prompts d’une installation, copier les fichiers souhaités depuis ce dépôt dans les dossiers `prompts/` et `models/` du plugin. Leur nom doit rester identique. Le thème, la longueur, le ton et le style du dessin se règlent dans ces fichiers.
+Le thème, la longueur, le ton et le style du dessin se règlent dans cet éditeur. Pour modifier aussi la mise en page, copier [`models/newsletter.md`](models/newsletter.md) dans le dossier `models/` du plugin et adapter ce fichier.
 
 Les variables utilisent la syntaxe `{{nom}}` :
 

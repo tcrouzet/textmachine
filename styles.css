@@ -80,6 +80,24 @@
     user-select: text;
 }
 
+.text-machine-prompt-editor {
+    width: min(900px, 90vw);
+}
+
+.text-machine-prompt-text {
+    display: block;
+    width: 100%;
+    height: 50vh;
+    margin-block: var(--size-4-4);
+    resize: vertical;
+    font: inherit;
+    line-height: var(--line-height-normal);
+}
+
+.text-machine-prompt-error {
+    color: var(--text-error);
+}
+
 .vertical-tab-nav-item[data-setting-id="text-machine"] .vertical-tab-nav-item-icon {
     display: flex;
 }

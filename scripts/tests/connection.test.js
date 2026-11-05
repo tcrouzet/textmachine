@@ -36,6 +36,73 @@ async function fixture(initialSecrets = {}) {
     return {p,profile,stored:()=>JSON.parse(secret),obsidian,layoutReady:()=>layoutReady()};
 }
 
+test('prompt editing reads bundled defaults without writing and saves each stage independently',async()=>{
+    const {p}=await fixture();
+    const files=new Map(),folders=new Set();
+    p.app.vault.adapter={exists:async path=>files.has(path) || folders.has(path),read:async path=>files.get(path),
+        mkdir:async path=>folders.add(path),write:async(path,text)=>files.set(path,text)};
+    for (const file of ['sélection.md','writer.md','bref.md','rewriter.md','publisher.md','image.md']) {
+        const original=await p.readPrompt(file);
+        assert.equal(original,require('node:fs').readFileSync(path.join(root,'prompts',file),'utf8'));
+        assert.ok(!files.has('./prompts/'+file));
+        const custom=original+'\nConsigne personnelle pour '+file+'\n';
+        await p.savePrompt(file,custom,original);
+        assert.equal(await p.readPrompt(file),custom);
+        assert.equal(files.get('./prompts/'+file),custom);
+    }
+    assert.equal(files.size,6);
+    assert.deepEqual([...folders],['./prompts']);
+});
+
+test('invalid prompt variables and missing required inputs cannot overwrite a saved prompt',async()=>{
+    const {p}=await fixture();
+    const files=new Map();
+    p.app.vault.adapter={exists:async path=>files.has(path),read:async path=>files.get(path),
+        mkdir:async()=>{},write:async(path,text)=>files.set(path,text)};
+    for (const file of ['sélection.md','writer.md','bref.md','rewriter.md','publisher.md','image.md']) {
+        const original=await p.readPrompt(file);
+        files.set('./prompts/'+file,original);
+        const invalidPrompts=[['   ',p.i18n.t('newsletterPromptEmpty',{file})],
+            [original+'\n{{wrongVariable}}',p.i18n.t('promptUnknownVariable',{variable:'{{wrongVariable}}'})]];
+        if (['sélection.md','writer.md','publisher.md'].includes(file)) invalidPrompts.push(['No article input.',
+            p.i18n.t(file==='publisher.md' ? 'publisherArticleMissing' : 'writerArticlesMissing',
+                {variable:file==='publisher.md' ? '{{article}}' : '{{articles}}'})]);
+        for (const [invalid,message] of invalidPrompts) {
+            await assert.rejects(p.savePrompt(file,invalid,original),error=>error.message===message);
+            assert.equal(files.get('./prompts/'+file),original);
+        }
+    }
+});
+
+test('prompt saves preserve concurrent changes and report busy and write failures',async()=>{
+    const {p}=await fixture();
+    const original=require('node:fs').readFileSync(path.join(root,'prompts/image.md'),'utf8');
+    let text='Changed in another editor';
+    p.app.vault.adapter={exists:async()=>true,read:async()=>text,write:async()=>{throw new Error('Disk write failed');}};
+    await assert.rejects(p.savePrompt('image.md','My illustration',original),/changed/);
+    assert.equal(text,'Changed in another editor');
+    text=original;
+    p.busy=true;
+    await assert.rejects(p.savePrompt('image.md','My illustration',original),/running/);
+    p.busy=false;
+    await assert.rejects(p.savePrompt('image.md','My illustration',original),/Disk write failed/);
+    assert.equal(text,original);
+});
+
+test('a prompt saved by the editor is used by the next newsletter generation',async()=>{
+    const {p,seen}=await newsletterFixture();
+    const adapter=p.app.vault.adapter,read=adapter.read,exists=adapter.exists,files=new Map();
+    adapter.read=async path=>files.has(path) ? files.get(path) : read(path);
+    adapter.exists=async path=>files.has(path) || exists(path);
+    adapter.write=async(path,text)=>files.set(path,text);
+    const original=await p.readPrompt('writer.md');
+    const custom=original.replace('"instructions":"My runtime prompt"','"instructions":"My runtime prompt","tone":"My editorial choice"');
+    await p.savePrompt('writer.md',custom,original);
+    await p.writeNewsletter();
+    assert.equal(seen.length,1);
+    assert.equal(seen[0].tone,'My editorial choice');
+});
+
 test('plugin loading persists missing article IDs without Gmail or an AI run',async()=>{
     const {p,obsidian,layoutReady} = await fixture();
     const file = new obsidian.TFile(),folder = new obsidian.TFolder();

@@ -1,6 +1,6 @@
-Rédige en {{language}} une revue de presse à raconter au micro, dans l’esprit de la matinale de France Inter. Vise 1 500 signes de texte lisible, espaces compris, hors titre, chapeau et adresses des liens : c’est la longueur attendue, pas un plafond.
+Rédige en {{language}} une revue de presse à raconter au micro, dans l’esprit de la matinale de France Inter. Vise 1 500 signes: c’est la longueur attendue, pas un plafond.
 
-Les articles fournis ont déjà été sélectionnés : chacun apporte quelque chose de nouveau. Ouvre sur un fait saillant ou une scène concrète, puis passe d’un journal à l’autre par des faits et des citations. Accorde à chaque source la place que son apport mérite.
+Les articles fournis ont déjà été sélectionnés : chacun apporte quelque chose de nouveau. Ouvre sur un fait saillant ou une scène concrète, puis passe d’une source à l’autre par des faits et des citations. Accorde à chaque source la place que son apport mérite.
 
 Choisis des extraits qui donnent à voir ou à comprendre. Situe les acteurs et la situation avant la citation, puis rebondis sans expliquer ce qu’elle vient de dire. Relie les sources par un détail concret ; quand le sujet change, annonce simplement le changement. Une réaction brève du narrateur peut donner du relief. Termine sur un fait, une image ou une citation, sans morale générale. L’ensemble porte sur l’IA dans la littérature, l’écriture et les métiers du livre.
 

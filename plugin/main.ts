@@ -26,6 +26,10 @@ import brefPrompt from '../prompts/bref.md';
 import selectionPrompt from '../prompts/sélection.md';
 import textMachineIcon from '../icon.svg';
 const {t} = i18n;
+const prompts = {'sélection.md':selectionPrompt,'writer.md':writerPrompt,'bref.md':brefPrompt,
+    'rewriter.md':rewriterPrompt,'publisher.md':publisherPrompt,'image.md':imagePrompt};
+type PromptName = keyof typeof prompts;
+interface PromptDefinition {file: PromptName; name: string; desc: string; variables: string}
 
 function destructive(button: ButtonComponent) {
     if (requireApiVersion('1.13.0')) return button.setDestructive();
@@ -446,6 +450,31 @@ export default class TextMachine extends Plugin {
         return [...new Map(posts.map(post=>[post.url || post.title,post])).values()];
     }
 
+    async readPrompt(file: PromptName) {
+        const path=this.manifest.dir+'/prompts/'+file;
+        const adapter=this.app.vault.adapter;
+        return await adapter.exists(path) ? adapter.read(path) : prompts[file];
+    }
+
+    async savePrompt(file: PromptName, text: string, original: string) {
+        if (this.busy || this.aiController) throw new Error(t('promptBusy'));
+        if (!text.trim()) throw new Error(t('newsletterPromptEmpty',{file}));
+        const language=this.settings.newsletterLanguage;
+        switch (file) {
+            case 'sélection.md': this.newsletter.selectionRequest(text,[],language); break;
+            case 'writer.md': this.newsletter.writerRequest(text,[],[],[],language); break;
+            case 'publisher.md': this.newsletter.publisherRequest(text,[],language); break;
+            case 'bref.md': this.newsletter.briefRequest(text,[],language); break;
+            case 'rewriter.md': this.newsletter.renderPrompt(text,{language,AuthorFeed:'[]',recentPosts:'[]'}); break;
+            case 'image.md': this.newsletter.renderPrompt(text,{language}); break;
+        }
+        if (await this.readPrompt(file)!==original) throw new Error(t('promptChanged'));
+        const folder=this.manifest.dir+'/prompts';
+        const adapter=this.app.vault.adapter;
+        if (!await adapter.exists(folder)) await adapter.mkdir(folder);
+        await adapter.write(folder+'/'+file,text);
+    }
+
     async writeNewsletter(progress?: Progress) {
         if (!this.dataReady) throw new Error(t('createFolderFirst'));
         const vault = this.app.vault;
@@ -482,9 +511,8 @@ export default class TextMachine extends Plugin {
             } catch {throw new Error(t('newsletterSnapshotFailed',{path}));}
             check();
         };
-        const readPrompt = async (name: string, fallback: string) => {
-            const path=this.manifest.dir+'/prompts/'+name;
-            const prompt=await vault.adapter.exists(path) ? await vault.adapter.read(path) : fallback;
+        const readPrompt = async (name: PromptName) => {
+            const prompt=await this.readPrompt(name);
             if (!prompt.trim()) throw new Error(t('newsletterPromptEmpty',{file:name}));
             return prompt;
         };
@@ -514,8 +542,8 @@ export default class TextMachine extends Plugin {
             if (pending.length<this.settings.minimumSources)
                 throw new Error(t('newsletterNotEnoughSources',{count:pending.length,minimum:this.settings.minimumSources}));
             if (pending.length) {
-                const prompt=await readPrompt('writer.md',writerPrompt);
-                const selectionTemplate=await readPrompt('sélection.md',selectionPrompt);
+                const prompt=await readPrompt('writer.md');
+                const selectionTemplate=await readPrompt('sélection.md');
                 const oldNotes=notes.filter(file=>!file.name.startsWith('text-machine-'+day))
                     .sort((a,b)=>b.stat.mtime-a.stat.mtime).slice(0,5);
                 const previous=[prompt,selectionTemplate].some(text=>/\{\{\s*previousNewsletters\s*\}\}/.test(text))
@@ -545,9 +573,7 @@ export default class TextMachine extends Plugin {
             let translatedBrief = brief;
             if (brief.length) {
                 progress?.(t('newsletterTranslatingBrief'));
-                let prompt = brefPrompt;
-                const path = this.manifest.dir + '/prompts/bref.md';
-                if (await vault.adapter.exists(path)) prompt = await vault.adapter.read(path);
+                const prompt = await this.readPrompt('bref.md');
                 const request = this.newsletter.briefRequest(prompt,brief,language);
                 const response = await respond(request);
                 translatedBrief = this.newsletter.parseBrief(response,brief);
@@ -556,9 +582,7 @@ export default class TextMachine extends Plugin {
                 const original = result.paragraphs.join('\n\n');
                 let revisedText=original, revisionError='';
                 try {
-                    let prompt = rewriterPrompt;
-                    const path = this.manifest.dir + '/prompts/rewriter.md';
-                    if (await vault.adapter.exists(path)) prompt = await vault.adapter.read(path);
+                    const prompt = await this.readPrompt('rewriter.md');
                     if (!prompt.trim()) throw new Error(t('newsletterRewriterEmpty'));
                     const serializedPosts = JSON.stringify(authorPosts || []);
                     const system = this.newsletter.renderPrompt(prompt,{language,AuthorFeed:serializedPosts,recentPosts:serializedPosts});
@@ -583,7 +607,7 @@ export default class TextMachine extends Plugin {
             }
             if (result.used.length) {
                 progress?.(t('newsletterPublishing'));
-                const request=this.newsletter.publisherRequest(await readPrompt('publisher.md',publisherPrompt),result.paragraphs,language);
+                const request=this.newsletter.publisherRequest(await readPrompt('publisher.md'),result.paragraphs,language);
                 const publication=this.newsletter.parsePublisher(await respond(request,progress));
                 this.newsletter.assertNoAuthorSources([publication.title,publication.chapeau],this.settings.authorFeeds,authorPosts);
                 Object.assign(result,publication);
@@ -595,7 +619,7 @@ export default class TextMachine extends Plugin {
             if (cachedImage) progress?.(t('newsletterReusingIllustration'));
             else {
                 progress?.(t('newsletterCreatingIllustration'));
-                const prompt=this.newsletter.renderPrompt(await readPrompt('image.md',imagePrompt),{language});
+                const prompt=this.newsletter.renderPrompt(await readPrompt('image.md'),{language});
                 const context=JSON.stringify({title:result.title,chapeau:result.chapeau,paragraphs:result.paragraphs,
                     brief:result.used.length ? [] : translatedBrief.map(article=>article.title)});
                 const bytes=await this.generateIllustration(this.getAIKey('openai'),prompt+'\n\n'+context,
@@ -891,6 +915,46 @@ class FolderPicker extends Modal {
     }
 }
 
+class PromptEditor extends Modal {
+    constructor(app: App, private plugin: TextMachine, private prompt: PromptDefinition, private original: string) {
+        super(app);
+    }
+
+    onOpen() {
+        this.modalEl.addClass('text-machine-prompt-editor');
+        this.titleEl.setText(this.prompt.name);
+        this.contentEl.createEl('p',{text:this.prompt.desc});
+        this.contentEl.createEl('p',{cls:'setting-item-description',text:t('promptVariables',{variables:this.prompt.variables})});
+        const input=this.contentEl.createEl('textarea',{cls:'text-machine-prompt-text',attr:{'aria-label':t('promptText')}});
+        input.value=this.original;
+        const error=this.contentEl.createDiv({cls:'text-machine-prompt-error',attr:{role:'alert'}});
+        let saving=false;
+        const actions=new Setting(this.contentEl);
+        const cancel=new ButtonComponent(actions.controlEl).setButtonText(t('cancel')).onClick(()=>this.close());
+        const save=new ButtonComponent(actions.controlEl).setButtonText(t('savePrompt')).setCta().onClick(async()=>{
+            if (saving) return;
+            saving=true;
+            error.empty();
+            input.disabled=true;
+            cancel.setDisabled(true);
+            save.setDisabled(true);
+            try {
+                await this.plugin.savePrompt(this.prompt.file,input.value,this.original);
+                this.close();
+            } catch (caught) {error.setText(errorOf(caught).message);}
+            finally {
+                saving=false;
+                input.disabled=false;
+                cancel.setDisabled(false);
+                save.setDisabled(false);
+            }
+        });
+        input.focus();
+    }
+
+    onClose() {this.contentEl.empty();}
+}
+
 export class GmailSettings extends PluginSettingTab {
     override icon = 'text-machine';
     plugin: TextMachine;
@@ -1177,6 +1241,23 @@ export class GmailSettings extends PluginSettingTab {
             });
         }});
         newsletterSettings.items.push({name:t('newsletterSourcesHeading'),render:setting=>{setting.setHeading();}},...newsletterSources);
+        const promptDefinitions: PromptDefinition[] = [
+            {file:'sélection.md',name:t('promptSelection'),desc:t('promptSelectionDescription'),variables:'{{language}}, {{articles}}, {{now}}, {{previousNewsletters}}, {{AuthorFeed}}'},
+            {file:'writer.md',name:t('promptWriter'),desc:t('promptWriterDescription'),variables:'{{language}}, {{articles}}, {{previousNewsletters}}, {{AuthorFeed}}'},
+            {file:'bref.md',name:t('promptBrief'),desc:t('promptBriefDescription'),variables:'{{language}}'},
+            {file:'rewriter.md',name:t('promptRewriter'),desc:t('promptRewriterDescription'),variables:'{{language}}, {{AuthorFeed}}'},
+            {file:'publisher.md',name:t('promptPublisher'),desc:t('promptPublisherDescription'),variables:'{{language}}, {{article}}'},
+            {file:'image.md',name:t('promptImage'),desc:t('promptImageDescription'),variables:'{{language}}'},
+        ];
+        newsletterSettings.items.push({name:t('newsletterPromptsHeading'),desc:t('newsletterPromptsDescription'),render:setting=>{setting.setHeading();}},
+            ...promptDefinitions.map(prompt=>({name:prompt.name,desc:prompt.desc,render:(setting: Setting)=>{
+                setting.addButton(button=>button.setButtonText(t('editPrompt')).setDisabled(p.busy).onClick(async()=>{
+                    try {
+                        const original=await p.readPrompt(prompt.file);
+                        if (!p.disposed) new PromptEditor(this.app,p,prompt,original).open();
+                    } catch (caught) {new Notice(errorOf(caught).message);}
+                }));
+            }})));
         items.push(p.renderAI(p,this));
         items.push({name:t('debug'),desc:t('debugDescription'),render:setting=>{
             setting.addToggle(toggle=>toggle.setValue(p.settings.debug).onChange(value=>{

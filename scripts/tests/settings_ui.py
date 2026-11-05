@@ -69,6 +69,53 @@ try:
             }""", theme)
 
         icon.locator('..').screenshot(path=str(temporary / 'settings-icon.png'))
+        for index, (filename, label) in enumerate([
+            ('sélection.md', 'Sélection des sources'), ('writer.md', 'Rédaction de l’article'),
+            ('bref.md', 'En bref'), ('rewriter.md', 'Révision du texte'),
+            ('publisher.md', 'Titre et chapeau'), ('image.md', 'Illustration')]):
+            row=page.locator('.setting-item').filter(has=page.get_by_text(label, exact=True))
+            row.get_by_role('button', name='Modifier', exact=True).click()
+            editor=page.locator('.text-machine-prompt-editor')
+            field=editor.get_by_role('textbox', name='Consignes du prompt', exact=True)
+            original=(root / 'prompts' / filename).read_text()
+            expect(field).to_have_value(original)
+            layout=field.evaluate("""el => {
+                const parent=el.parentElement, style=getComputedStyle(parent), box=el.getBoundingClientRect();
+                return {width:box.width, parent:parent.clientWidth, height:box.height,
+                    paddingLeft:parseFloat(style.paddingLeft),paddingRight:parseFloat(style.paddingRight)};
+            }""")
+            editor.screenshot(path=str(temporary / 'prompt-editor.png'))
+            assert layout['width'] >= layout['parent'] - 4 and layout['height'] >= 200, layout
+            if index == 0:
+                field.fill('Do not save this draft')
+                editor.get_by_role('button', name='Annuler', exact=True).click()
+                expect(editor).not_to_be_visible()
+                assert not (plugin / 'prompts').exists()
+                row.get_by_role('button', name='Modifier', exact=True).click()
+                expect(field).to_have_value(original)
+            if filename == 'writer.md':
+                for invalid, reason in [(' ', 'est vide'), ('No article variable', '{{articles}}'), (original+'\n{{unknown}}', '{{unknown}}')]:
+                    field.fill(invalid)
+                    editor.get_by_role('button', name='Enregistrer', exact=True).click()
+                    expect(editor.get_by_role('alert')).to_contain_text(reason)
+                    expect(field).to_have_value(invalid)
+                    assert not (plugin / 'prompts' / filename).exists()
+            custom=original+'\nConsigne personnalisée pour '+filename+'\n'
+            field.fill(custom)
+            editor.get_by_role('button', name='Enregistrer', exact=True).click()
+            expect(editor).not_to_be_visible()
+            assert (plugin / 'prompts' / filename).read_text() == custom
+            row.get_by_role('button', name='Modifier', exact=True).click()
+            expect(field).to_have_value(custom)
+            if filename == 'image.md':
+                external=custom+'Modification dans un autre éditeur.\n'
+                (plugin / 'prompts' / filename).write_text(external)
+                field.fill(custom+'My unsaved changes')
+                editor.get_by_role('button', name='Enregistrer', exact=True).click()
+                expect(editor.get_by_role('alert')).to_contain_text('modifié ailleurs')
+                assert (plugin / 'prompts' / filename).read_text() == external
+            editor.get_by_role('button', name='Annuler', exact=True).click()
+        print('Prompt editors verified without Gmail: six defaults, full-width fields, cancellation without writes, validation, file persistence, reopening and concurrent-edit protection.', flush=True)
         page.locator('.setting-item-heading .setting-item-name').filter(has_text='Intelligence artificielle').wait_for()
         debug = page.locator('.setting-item').filter(has=page.get_by_text('Debug', exact=True)).locator('.checkbox-container')
         assert not page.evaluate("app.plugins.plugins['text-machine'].settings.debug")
@@ -379,7 +426,7 @@ try:
         assert 'filtrage' in page.locator('.setting-item').filter(has=blocked).inner_text()
         exclusions = page.get_by_role('textbox', name='Sources exclues', exact=True)
         newsletter = page.locator('.text-machine-section').filter(has=page.get_by_role('textbox', name='Sources de référence', exact=True))
-        assert newsletter.locator('.setting-item-heading .setting-item-name').all_text_contents() == ['Newsletter', 'Sources']
+        assert newsletter.locator('.setting-item-heading .setting-item-name').all_text_contents() == ['Newsletter', 'Sources', 'Prompts']
         assert newsletter.get_by_role('textbox', name='Sources exclues', exact=True).count() == 1
         assert newsletter.get_by_role('textbox', name='Sites bloqués', exact=True).count() == 1
         assert newsletter.get_by_role('textbox', name='Include feeds', exact=True).count() == 1
@@ -498,6 +545,11 @@ try:
         }""")
         page.locator('.setting-item-heading .setting-item-name').filter(has_text='3. Choose where to store your data').wait_for()
         assert page.get_by_role('textbox', name='Reference sources', exact=True).input_value() == 'theguardian.com\nbbc.co.uk'
+        page.locator('.setting-item').filter(has=page.get_by_text('Article writing', exact=True)).get_by_role('button', name='Edit', exact=True).click()
+        editor=page.locator('.text-machine-prompt-editor')
+        expect(editor.get_by_role('textbox', name='Prompt instructions', exact=True)).to_have_value((plugin / 'prompts/writer.md').read_text())
+        assert editor.get_by_role('button', name='Save', exact=True).is_enabled()
+        editor.get_by_role('button', name='Cancel', exact=True).click()
         page.get_by_role('button', name='Create folder', exact=True).click()
         page.get_by_role('heading', name='Data folder', exact=True).wait_for()
         assert page.get_by_role('textbox', name='New folder name', exact=True).input_value() == 'TextMachine'
