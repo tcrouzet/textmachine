@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="4270" viewBox="0 0 1000 4270" role="img" aria-labelledby="title description">
-  <title id="title">TextMachine : de la veille à la newsletter</title>
-  <desc id="description">Alertes Google, autres services d’alerte et envois directs arrivent dans Gmail. Les filtres configurés par l’utilisateur appliquent un libellé au choix, par exemple TextMachine, et archivent les messages sans les marquer comme lus. Dans Obsidian, l’utilisateur connecte Gmail, choisit ce libellé, un dossier et son IA, puis lance Text Machine. Le plugin extrait les liens, applique les exclusions, élimine les doublons et enregistre les sources avant de marquer les messages comme lus. Les flux RSS ou Atom complètent la collecte. Les textes déjà disponibles sont réutilisés ; les autres articles sont chargés. Les titres inaccessibles sont conservés pour En bref. Le plugin détermine les sources disponibles pour l’édition, exclut les publications des flux d’auteur et vérifie le minimum de dix articles avec texte, seuil réglable. Les prompts sélection.md, writer.md, bref.md, rewriter.md et publisher.md sélectionnent les sources, rédigent l’article, traduisent les titres En bref, révisent le corps du texte, puis produisent le titre et le chapeau. L’historique évite les répétitions et les réponses JSON sont validées. Une révision rejetée conserve le brouillon. Le prompt image.md crée une illustration, sauf si celle du jour existe déjà. Le plugin assemble le modèle Markdown, corrige la typographie française, enregistre la note et l’image, puis date l’utilisation de tous les articles disponibles. L’utilisateur relit, modifie et publie. Une relance régénère l’édition du jour ; les articles d’éditions supprimées redeviennent disponibles jusqu’à la dernière édition conservée.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="4076" viewBox="0 0 1000 4076" role="img" aria-labelledby="title description">
+  <title id="title">Text Machine</title>
+  <desc id="description">Text Machine : les alertes Google, autres alertes comme alerts.talkwalker.com et envois directs arrivent dans Gmail. Les filtres Gmail appliquent un libellé et archivent les messages non lus. Dans Obsidian, un clic droit sur le dossier Text Machine lance la commande. Chaque étape indique son responsable : utilisateur, Gmail, plugin ou prompt. Le plugin collecte les liens, élimine les doublons, mémorise les URL traitées et ne retraite pas les articles déjà lus ou écartés. Les flux RSS ou Atom sont limités aux dernières 48 heures. Les articles disponibles et l’historique alimentent sélection.md puis writer.md. Le prompt bref.md écarte les titres hors sujet et traduit ceux retenus. rewriter.md révise le corps du texte ; publisher.md produit le titre et le chapeau ; image.md guide l’illustration. Le plugin assemble models/newsletter.md, corrige la typographie française et enregistre la note et son illustration dans Obsidian. L’utilisateur relit, modifie et publie.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; fill: #243b34; }
@@ -20,29 +20,25 @@
       .mono { font-family: 'Courier New', monospace; font-size: 21px; }
     </style>
   </defs>
-  <rect width="1000" height="4270" rx="24" fill="#f7f5ef"/>
-  <text x="48" y="59" class="label accent">TEXTMACHINE / OBSIDIAN</text>
-  <text x="48" y="115" class="title">De la veille à la newsletter</text>
-  <text x="48" y="154" class="body muted">Vos sources, vos consignes, une note à relire.</text>
-  <g transform="translate(892 48) scale(2.5)" fill="none" stroke="#934b2a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M7 10V2h10v8M10 5h4M10 8h4"/>
-    <path d="M3 10h18M2 9v2m20-2v2M5 10l-3 9v3h20v-3l-3-9"/>
-    <path d="M7 14h1m3 0h1m3 0h1M6 17h1m3 0h1m3 0h1m3 0h1M8 20h8"/>
-  </g>
+  <rect width="1000" height="4076" rx="24" fill="#f7f5ef"/>
+  <text x="500" y="108" text-anchor="middle" class="title">Text Machine</text>
   <g id="google-alerts">
     <rect x="48" y="200" width="280" height="112" rx="14" class="source"/>
     <text x="72" y="241" class="body">Alertes Google</text>
     <text x="72" y="276" class="small muted">Google Alerts · Scholar</text>
+    <text x="314" y="217" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">MAIL</text>
   </g>
   <g id="other-alerts">
     <rect x="360" y="200" width="280" height="112" rx="14" class="source"/>
-    <text x="384" y="241" class="body">Autres services</text>
-    <text x="384" y="276" class="body">d’alerte</text>
+    <text x="384" y="241" class="body">Autres alertes</text>
+    <text x="384" y="276" class="small muted">alerts.talkwalker.com</text>
+    <text x="626" y="217" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">MAIL</text>
   </g>
   <g id="direct-submissions">
     <rect x="672" y="200" width="280" height="112" rx="14" class="source"/>
     <text x="696" y="241" class="body">Envois directs</text>
     <text x="696" y="276" class="small muted">Vous, vos lecteurs…</text>
+    <text x="938" y="217" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">MAIL</text>
   </g>
   <path d="M188 312V338H812V312M500 312V338" class="bus"/>
   <path d="M500 338V364" class="line"/>
@@ -51,6 +47,7 @@
     <rect x="48" y="364" width="904" height="96" rx="14" class="source"/>
     <text x="72" y="405" class="heading">Gmail</text>
     <text x="72" y="438" class="body muted">Un point d’arrivée commun pour les messages de veille.</text>
+    <text x="938" y="381" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">GMAIL</text>
   </g>
   <path d="M500 460V512" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(500 512) rotate(90)" fill="#52645e"/>
@@ -61,6 +58,7 @@
     <text x="72" y="615" class="body">Appliquer un libellé au choix, par exemple « TextMachine ».</text>
     <text x="72" y="645" class="body">Ne pas afficher dans la boîte de réception (Archiver).</text>
     <text x="72" y="672" class="small muted">Garder les messages non lus jusqu’à leur collecte par le plugin.</text>
+    <text x="938" y="529" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">VOUS / GMAIL</text>
   </g>
   <path d="M500 688V714H344V740" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(344 740) rotate(90)" fill="#52645e"/>
@@ -68,6 +66,7 @@
     <rect x="48" y="740" width="592" height="116" rx="14" class="auto"/>
     <text x="72" y="782" class="heading">Libellé Gmail choisi</text>
     <text x="72" y="818" class="body muted">Messages archivés et non lus.</text>
+    <text x="626" y="757" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">GMAIL</text>
   </g>
   <g id="plugin-settings">
     <rect x="686" y="740" width="266" height="288" rx="14" class="source"/>
@@ -79,14 +78,16 @@
     <text x="710" y="942" class="small muted">Choisir l’IA, la langue</text>
     <text x="710" y="969" class="small muted">et le seuil de sources.</text>
     <text x="710" y="1003" class="small muted">Personnaliser les prompts.</text>
+    <text x="938" y="757" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">VOUS / PLUGIN</text>
   </g>
   <path d="M344 856V908" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(344 908) rotate(90)" fill="#52645e"/>
   <g id="launch">
     <rect x="48" y="908" width="592" height="120" rx="14" class="source"/>
     <text x="72" y="938" class="label">À VOTRE DEMANDE</text>
-    <text x="72" y="977" class="heading">Lancer Text Machine</text>
-    <text x="72" y="1010" class="body muted">Clic droit sur le dossier dans Obsidian.</text>
+    <text x="72" y="977" class="heading">Clic droit sur le dossier</text>
+    <text x="72" y="1010" class="body muted">Text Machine dans Obsidian → Text Machine.</text>
+    <text x="626" y="925" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">VOUS / OBSIDIAN</text>
   </g>
   <path d="M686 968H640" class="line" stroke-dasharray="6 6"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(640 968) rotate(180)" fill="#52645e"/>
@@ -98,13 +99,15 @@
     <text x="72" y="1149" class="heading">Extraire et filtrer les liens</text>
     <text x="72" y="1183" class="body muted">Liens d’articles, origine, sources exclues.</text>
     <text x="72" y="1212" class="small muted">Doublons éliminés par URL ou titre.</text>
+    <text x="626" y="1097" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <g id="include-feeds">
     <rect x="686" y="1080" width="266" height="150" rx="14" class="source"/>
-    <text x="710" y="1110" class="label">FLUX COMPLÉMENTAIRES</text>
-    <text x="710" y="1149" class="body">RSS ou Atom</text>
+    <text x="710" y="1110" class="label">COLLECTE / PLUGIN</text>
+    <text x="710" y="1149" class="body">RSS / Atom · 48 h</text>
     <text x="710" y="1182" class="small muted">Include feeds</text>
-    <text x="710" y="1209" class="small muted">Lecture directe du flux.</text>
+    <text x="710" y="1209" class="small muted">URL connues ignorées.</text>
+    <text x="938" y="1097" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <path d="M686 1155H640" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(640 1155) rotate(180)" fill="#52645e"/>
@@ -113,8 +116,9 @@
   <g id="save-links">
     <rect x="48" y="1282" width="592" height="132" rx="14" class="auto"/>
     <text x="72" y="1321" class="heading">Enregistrer les liens</text>
-    <text x="72" y="1355" class="body muted">textmachine.json · identifiants stables.</text>
-    <text x="72" y="1387" class="small muted">Puis marquer les messages traités comme lus.</text>
+    <text x="72" y="1355" class="body muted">textmachine.json · URL et identifiants mémorisés.</text>
+    <text x="72" y="1387" class="small muted">Puis marquer les messages comme lus.</text>
+    <text x="626" y="1299" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <path d="M344 1414V1466" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(344 1466) rotate(90)" fill="#52645e"/>
@@ -123,7 +127,8 @@
     <text x="72" y="1496" class="label">LECTURE / PLUGIN</text>
     <text x="72" y="1535" class="heading">Récupérer les articles</text>
     <text x="72" y="1569" class="body muted">Enregistrer le texte, les auteurs et la date.</text>
-    <text x="72" y="1599" class="small muted">Réutiliser les textes déjà récupérés.</text>
+    <text x="72" y="1599" class="small muted">Ne pas retraiter les articles déjà lus ou écartés.</text>
+    <text x="626" y="1483" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <g id="unavailable-text">
     <rect x="686" y="1466" width="266" height="154" rx="14" class="source"/>
@@ -131,6 +136,7 @@
     <text x="710" y="1534" class="body">Conserver le titre</text>
     <text x="710" y="1563" class="body">et le lien pour En bref.</text>
     <text x="710" y="1598" class="small muted">Sites bloqués mémorisés.</text>
+    <text x="938" y="1483" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <path d="M640 1543H686" class="branch"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(686 1543) rotate(0)" fill="#a05a35"/>
@@ -139,24 +145,27 @@
   <g id="available-sources">
     <rect x="48" y="1672" width="592" height="138" rx="14" class="auto"/>
     <text x="72" y="1711" class="heading">Préparer l’édition du jour</text>
-    <text x="72" y="1745" class="body muted">Nouveaux articles + sources encore disponibles.</text>
-    <text x="72" y="1775" class="small muted">Réutiliser celles du jour ou des éditions supprimées.</text>
+    <text x="72" y="1745" class="body muted">Nouveaux articles et sources non encore utilisées.</text>
+    <text x="72" y="1775" class="small muted">En régénération : sources de l’édition du jour.</text>
     <text x="72" y="1798" class="small muted">Exclure vos publications des flux Author feeds.</text>
+    <text x="626" y="1689" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <path d="M344 1810V1862" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(344 1862) rotate(90)" fill="#52645e"/>
   <g id="minimum-sources">
     <rect x="48" y="1862" width="592" height="146" rx="14" class="auto"/>
     <text x="72" y="1892" class="label">CONDITION AVANT LES ÉTAPES IA</text>
-    <text x="72" y="1931" class="heading">10 articles avec texte minimum</text>
+    <text x="72" y="1931" class="heading">Minimum d’articles avec texte</text>
     <text x="72" y="1965" class="body muted">Seuil réglable dans les paramètres.</text>
-    <text x="72" y="1992" class="small muted">Compter uniquement les sources disponibles avec texte.</text>
+    <text x="72" y="1992" class="small muted">Compter uniquement les articles avec texte.</text>
+    <text x="626" y="1879" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <g id="wait-for-sources">
     <rect x="686" y="1870" width="266" height="128" rx="14" class="source"/>
     <text x="710" y="1908" class="body">Seuil non atteint ?</text>
     <text x="710" y="1942" class="body">Attendre de</text>
     <text x="710" y="1973" class="body">nouvelles sources.</text>
+    <text x="938" y="1887" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <path d="M640 1935H686" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(686 1935) rotate(0)" fill="#52645e"/>
@@ -168,15 +177,17 @@
     <text x="72" y="2129" class="heading">Choisir les sources</text>
     <text x="72" y="2163" class="body muted">Complémentarité, nouveautés, sources de référence.</text>
     <text x="72" y="2193" class="small muted">Écarter répétitions et annonces d’événements passés.</text>
+    <text x="626" y="2077" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PROMPT</text>
   </g>
   <g id="history">
     <rect x="686" y="2060" width="266" height="212" rx="14" class="source"/>
     <text x="710" y="2090" class="label">HISTORIQUE FOURNI</text>
     <text x="710" y="2127" class="body">Anciennes newsletters</text>
     <text x="710" y="2157" class="body">+ Author feeds</text>
-    <text x="710" y="2192" class="small muted">Lus par le plugin pour</text>
-    <text x="710" y="2219" class="small muted">éviter de reprendre</text>
-    <text x="710" y="2246" class="small muted">les sujets déjà traités.</text>
+    <text x="710" y="2192" class="small muted">Lecture par le plugin ;</text>
+    <text x="710" y="2219" class="small muted">exclusion des sujets</text>
+    <text x="710" y="2246" class="small muted">déjà traités.</text>
+    <text x="938" y="2077" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <path d="M686 2140H640" class="line" stroke-dasharray="6 6"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(640 2140) rotate(180)" fill="#52645e"/>
@@ -190,6 +201,7 @@
     <text x="72" y="2341" class="heading">Écrire la revue de presse</text>
     <text x="72" y="2375" class="body muted">Faits, citations attribuées, liens vers les articles.</text>
     <text x="72" y="2400" class="small muted">À partir des sources retenues et de l’historique.</text>
+    <text x="626" y="2289" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PROMPT</text>
   </g>
   <path d="M344 2414V2466" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(344 2466) rotate(90)" fill="#52645e"/>
@@ -197,8 +209,9 @@
     <rect x="48" y="2466" width="592" height="144" rx="14" class="ai"/>
     <text x="72" y="2496" class="label accent">IA / bref.md · SI DES TITRES SONT À TRAITER</text>
     <text x="72" y="2535" class="heading">Préparer « En bref »</text>
-    <text x="72" y="2569" class="body muted">Traduire les titres dans la langue choisie.</text>
+    <text x="72" y="2569" class="body muted">Écarter les titres hors sujet, puis les traduire.</text>
     <text x="72" y="2596" class="small muted">Seuls les titres sont transmis à cette étape.</text>
+    <text x="626" y="2483" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PROMPT</text>
   </g>
   <path d="M952 1543H976V2538H640" class="branch" stroke-dasharray="6 6"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(640 2538) rotate(180)" fill="#a05a35"/>
@@ -210,16 +223,8 @@
     <text x="72" y="2731" class="heading">Réviser le corps de l’article</text>
     <text x="72" y="2765" class="body muted">Sans image, titre ni chapeau.</text>
     <text x="72" y="2792" class="small muted">Révision refusée ou échouée : conserver le brouillon.</text>
+    <text x="626" y="2679" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PROMPT</text>
   </g>
-  <g id="debug">
-    <rect x="686" y="2662" width="266" height="142" rx="14" class="source"/>
-    <text x="710" y="2692" class="label">SI DEBUG EST ACTIVÉ</text>
-    <text x="710" y="2731" class="body">Brouillon et révision</text>
-    <text x="710" y="2765" class="small muted">Enregistrés dans le dossier</text>
-    <text x="710" y="2791" class="small muted">pour les comparer.</text>
-  </g>
-  <path d="M640 2733H686" class="line" stroke-dasharray="6 6"/>
-  <path d="M-10 -5L0 0L-10 5Z" transform="translate(686 2733) rotate(0)" fill="#52645e"/>
   <path d="M344 2804V2856" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(344 2856) rotate(90)" fill="#52645e"/>
   <g id="publish-metadata">
@@ -227,13 +232,7 @@
     <text x="72" y="2886" class="label accent">IA / publisher.md</text>
     <text x="72" y="2925" class="heading">Créer le titre et le chapeau</text>
     <text x="72" y="2959" class="body muted">À partir du corps de l’article finalisé.</text>
-  </g>
-  <g id="json-validation">
-    <rect x="686" y="2856" width="266" height="132" rx="14" class="source"/>
-    <text x="710" y="2886" class="label">CHAQUE ÉTAPE TEXTE</text>
-    <text x="710" y="2922" class="body">Réponses JSON</text>
-    <text x="710" y="2955" class="small muted">Contrôlées selon</text>
-    <text x="710" y="2978" class="small muted">les schémas de models/.</text>
+    <text x="626" y="2873" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PROMPT</text>
   </g>
   <path d="M344 2988V3040" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(344 3040) rotate(90)" fill="#52645e"/>
@@ -244,6 +243,7 @@
     <text x="72" y="3143" class="body muted">Dessin noir et blanc, sans texte, format 4/3.</text>
     <text x="72" y="3172" class="small muted">À partir du titre, du chapeau et de l’article.</text>
     <text x="72" y="3195" class="small muted">Si l’image du jour existe déjà, la réutiliser.</text>
+    <text x="626" y="3057" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PROMPT / PLUGIN</text>
   </g>
   <path d="M344 3204V3256" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(344 3256) rotate(90)" fill="#52645e"/>
@@ -253,6 +253,7 @@
     <text x="72" y="3325" class="heading">Composer avec models/newsletter.md</text>
     <text x="72" y="3359" class="body muted">Titre, chapeau, article illustré et En bref.</text>
     <text x="72" y="3386" class="small muted">En bref : titres traduits, liens vers les articles et vers leurs domaines.</text>
+    <text x="938" y="3273" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <path d="M500 3398V3450" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(500 3450) rotate(90)" fill="#52645e"/>
@@ -261,6 +262,7 @@
     <text x="72" y="3489" class="heading">Corriger la typographie française</text>
     <text x="72" y="3523" class="body muted">Règles de Finition appliquées localement si le texte est en français.</text>
     <text x="72" y="3553" class="small muted">Apostrophes, guillemets, espaces insécables et ponctuation.</text>
+    <text x="938" y="3467" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">PLUGIN</text>
   </g>
   <path d="M500 3568V3620" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(500 3620) rotate(90)" fill="#52645e"/>
@@ -268,24 +270,17 @@
     <rect x="48" y="3620" width="904" height="142" rx="14" fill="#243b34"/>
     <text x="72" y="3660" class="heading" style="fill: #fffefa">Enregistrer la note et son illustration dans Obsidian</text>
     <text x="72" y="3699" class="mono" style="fill: #fffefa">text-machine-AAAA-MM-JJ.md</text>
-    <text x="72" y="3736" class="small" style="fill: #fffefa">Créer l’édition du jour ou remplacer sa version précédente.</text>
+    <text x="72" y="3736" class="small" style="fill: #fffefa">Une note par jour, à relire et à modifier.</text>
+    <text x="938" y="3637" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #fffefa">PLUGIN</text>
   </g>
   <path d="M500 3762V3814" class="line"/>
   <path d="M-10 -5L0 0L-10 5Z" transform="translate(500 3814) rotate(90)" fill="#52645e"/>
-  <g id="track-usage">
-    <rect x="48" y="3814" width="904" height="142" rx="14" class="auto"/>
-    <text x="72" y="3844" class="label">SUIVI / PLUGIN</text>
-    <text x="72" y="3883" class="heading">Dater l’utilisation des sources dans textmachine.json</text>
-    <text x="72" y="3917" class="body muted">usedAt pour tous les articles disponibles, même ceux non retenus.</text>
-    <text x="72" y="3944" class="small muted">L’état de lecture est conservé ; les sources du jour restent réutilisables.</text>
-  </g>
-  <path d="M500 3956V4008" class="line"/>
-  <path d="M-10 -5L0 0L-10 5Z" transform="translate(500 4008) rotate(90)" fill="#52645e"/>
   <g id="human-review">
-    <rect x="48" y="4008" width="904" height="116" rx="14" class="source"/>
-    <text x="72" y="4050" class="heading">Relire, modifier, puis publier</text>
-    <text x="72" y="4087" class="body muted">Vous gardez la main sur la newsletter avant sa publication.</text>
+    <rect x="48" y="3814" width="904" height="116" rx="14" class="source"/>
+    <text x="72" y="3856" class="heading">Relire, modifier, puis publier</text>
+    <text x="72" y="3893" class="body muted">Vous gardez la main sur la newsletter avant sa publication.</text>
+    <text x="938" y="3831" text-anchor="end" style="font-size: 10px; font-weight: 700; fill: #57675f">VOUS</text>
   </g>
-  <text x="48" y="4180" class="body muted">Relancer le même jour : note régénérée, illustration conservée.</text>
-  <text x="48" y="4214" class="small muted">Éditions supprimées : sources réutilisables depuis la dernière note conservée.</text>
+  <text x="48" y="3986" class="body muted">Relancer le même jour : note régénérée, illustration conservée.</text>
+  <text x="48" y="4020" class="small muted">Éditions supprimées : sources disponibles depuis la dernière note conservée.</text>
 </svg>
