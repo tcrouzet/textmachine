@@ -1,7 +1,7 @@
 {
   "id": "text-machine",
   "name": "TextMachine",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "minAppVersion": "1.11.4",
   "description": "Connecte Gmail et sélectionne le libellé source de TextMachine.",
   "author": "Thierry Crouzet",
