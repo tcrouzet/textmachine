@@ -15,7 +15,7 @@
 {{heading}}
 
 {{#articles}}
-* [{{title}}]({{url}})
+* [{{title}}]({{url}}) - [{{source}}]({{source_url}})
 {{/articles}}
 {{/brief}}
 

@@ -18,12 +18,30 @@ test('site refusals are persisted and suppress future pages on that host', async
     assert.equal(isBlocked('https://notexample.com/article',data), false);
 });
 
-test('failed pages store only their domain and prevent requests to its subdomains', async () => {
-    const data = [];
-    await crawl(article, data, undefined, async url => ({url,status:404,html:''}));
-    assert.deepEqual(data, ['example.com']);
-    assert.equal(isBlocked('https://news.example.com/another',data), true);
-    await crawl(article, parseBlocked(JSON.stringify(data)), undefined, () => {throw new Error('Must not request');});
+test('page failures stay forbidden without blocking unrelated articles on the domain', async () => {
+    for (const status of [200,404,410,429,500,502,503,504]) {
+        const blocked=[];
+        let calls=0;
+        const load=async url=>{calls++;return {url,status,html:''};};
+        const result=await crawl(article,blocked,undefined,load);
+        assert.equal(result.status,'forbidden');
+        assert.deepEqual(blocked,[],String(status));
+        await crawl(result,blocked,undefined,load);
+        assert.equal(calls,1,'The failed article must not be retried');
+        await crawl({...article,url:'https://news.example.com/another'},blocked,undefined,load);
+        assert.equal(calls,2,'Other articles on that domain remain eligible');
+    }
+});
+
+test('explicit access refusals block domains while network failures do not',async()=>{
+    for (const status of [401,402,403,451]) {
+        const blocked=[];
+        await crawl(article,blocked,undefined,async url=>({url,status,html:''}));
+        assert.deepEqual(blocked,['example.com']);
+    }
+    const blocked=[];
+    await crawl(article,blocked,undefined,async url=>({url,status:404,html:'',failure:'ETIMEDOUT'}));
+    assert.deepEqual(blocked,[]);
 });
 
 test('normalizes registrable domains, suffix exceptions, legacy lists and duplicates', () => {
@@ -69,6 +87,7 @@ test('PDFs never enter article extraction or block their hosting domain',async()
     const blocked = [];
     const load = async()=>{calls++;throw new Error('PDF must not be requested');};
     assert.equal((await crawl({...article,url:'https://example.com/report.pdf'},blocked,undefined,load)).status,'forbidden');
+    assert.equal((await crawl({...article,url:'https://arxiv.org/pdf/2610.37916'},blocked,undefined,load)).status,'forbidden');
     assert.equal(calls,0);
     for (const page of [
         {status:200,url:'https://example.com/hidden',contentType:'application/pdf',html:''},
@@ -82,6 +101,10 @@ test('PDFs never enter article extraction or block their hosting domain',async()
 
 
 test('PDF MIME types and download filenames are recognized without excluding HTML about PDF',()=>{
+    assert.equal(isPdf('https://arxiv.org/pdf/2610.37916'),true);
+    assert.equal(isPdf('https://export.arxiv.org/pdf/hep-th/9901001'),true);
+    assert.equal(isPdf('https://arxiv.org/abs/2610.37916'),false);
+    assert.equal(isPdf('https://arxiv.org.evil.example/pdf/2610.37916'),false);
     assert.equal(isPdf('https://example.com/download','Application/PDF; charset=binary'),true);
     assert.equal(isPdf('https://example.com/download','application/octet-stream','attachment; filename="paper.pdf"'),true);
     assert.equal(isPdf('https://example.com/download','application/octet-stream',"inline; filename*=UTF-8''paper%2Epdf"),true);

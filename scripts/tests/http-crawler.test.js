@@ -2,7 +2,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const {once} = require('node:events');
-const {fetchPage,retrievePage} = require('../../plugin/browser');
+const {fetchPage,retrievePage,failureCode} = require('../../plugin/browser');
 require('../../plugin/i18n').setLocale('en');
 
 async function fixture(t,handler) {
@@ -90,4 +90,44 @@ test('blocked URLs and PDF results do not open a browser window',async()=>{
     assert.equal(requests,0);
     assert.equal((await retrievePage('http://8.8.8.8/article',undefined,()=>false,NoWindow,pdf)).status,415);
     assert.equal(requests,1);
+});
+
+test('network failures retain safe diagnostic codes instead of being reported as HTTP 404',async t=>{
+    const {transport}=await fixture(t,(request,response)=>{
+        if (request.url==='/missing') response.writeHead(404).end();
+        else if (request.url==='/loop') response.writeHead(302,{Location:'http://8.8.8.8/loop'}).end();
+        else request.socket.destroy();
+    });
+    const missing=await fetchPage('http://8.8.8.8/missing',undefined,()=>false,transport);
+    assert.equal(missing.status,404);
+    assert.equal(missing.failure,undefined);
+    assert.equal((await fetchPage('http://8.8.8.8/reset',undefined,()=>false,transport)).failure,'ECONNRESET');
+    assert.equal((await fetchPage('http://8.8.8.8/loop',undefined,()=>false,transport)).failure,'redirect-loop');
+    assert.equal(failureCode(new Error('ERR_NAME_NOT_RESOLVED loading https://example.com/?token=secret')),'ERR_NAME_NOT_RESOLVED');
+    assert.equal(failureCode(new Error('Private message with secret')),'request-error');
+});
+
+test('diagnostic observers see HTTP and browser attempts from the normal retrieval pipeline',async()=>{
+    const attempts=[];
+    let destroyed=false,navigate;
+    class Window {
+        constructor(){
+            this.webContents={
+                session:{setPermissionRequestHandler(){},setPermissionCheckHandler(){},on(){},webRequest:{onHeadersReceived(){},onBeforeRequest(){}}},
+                setWindowOpenHandler(){},on:(_event,handler)=>{navigate=handler;},getUserAgent:()=> 'Chrome/123 Electron/30 obsidian/1.8',
+                getURL:()=> 'https://example.com/access',isDestroyed:()=>destroyed,
+            };
+        }
+        isDestroyed(){return destroyed;}
+        destroy(){destroyed=true;}
+        async loadURL(){navigate(null,'https://example.com/access',403);}
+    }
+    const direct=async url=>({url,status:404,html:'',failure:'redirect-loop'});
+    const page=await retrievePage('http://8.8.8.8/article',undefined,()=>false,Window,direct,(method,page,elapsedMs)=>attempts.push({method,page,elapsedMs}));
+    assert.deepEqual(attempts.map(attempt=>attempt.method),['http','browser']);
+    assert.equal(attempts[0].page.failure,'redirect-loop');
+    assert.equal(attempts[1].page.status,403);
+    assert.ok(attempts.every(attempt=>attempt.elapsedMs>=0));
+    assert.equal(page.status,403);
+    assert.equal(destroyed,true);
 });

@@ -30,7 +30,8 @@ function isPdf(value: string, contentType = '', disposition = '') {
         const url = new URL(value);
         let path = url.pathname;
         try {path = decodeURIComponent(path);} catch { /* Keep the original path. */ }
-        return /\.pdf$/i.test(path) || [...url.searchParams].some(([key,value])=>
+        return /\.pdf$/i.test(path) || ((url.hostname==='arxiv.org' || url.hostname.endsWith('.arxiv.org')) && path.startsWith('/pdf/'))
+            || [...url.searchParams].some(([key,value])=>
             /^(?:format|output)$/i.test(key) && /^pdf$/i.test(value)
             || /^(?:file|filename|document|attachment)$/i.test(key) && /\.pdf$/i.test(value));
     } catch {return false;}

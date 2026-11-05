@@ -410,12 +410,12 @@ try:
         assert not tracking_requests
         page.evaluate("""async () => {
             const p = app.plugins.plugins['text-machine'];
-            await app.vault.create(p.blockedPath, JSON.stringify({version:1,blocked:[{url:'https://blocked.example',scope:'site',reason:'403'}]}));
+            await app.vault.create(p.blockedPath, JSON.stringify({version:1,blocked:[{url:'https://blocked.example',scope:'site',reason:'403'},{url:'https://restricted.example',scope:'site',reason:'403'}]}));
         }""")
         blocked_before = (vault / 'Research/Veille/blocked.json').read_text()
         settings()
         blocked = page.get_by_role('textbox', name='Sites bloqués', exact=True)
-        expect(blocked).to_have_value('blocked.example')
+        expect(blocked).to_have_value('blocked.example, restricted.example')
         assert not blocked.is_editable()
         assert blocked.is_enabled()
         assert_full_width(blocked)
@@ -424,6 +424,39 @@ try:
         assert 'connexion à un compte' in page.locator('.setting-item').filter(has=blocked).inner_text()
         assert 'abonnement' in page.locator('.setting-item').filter(has=blocked).inner_text()
         assert 'filtrage' in page.locator('.setting-item').filter(has=blocked).inner_text()
+        expect(page.get_by_role('button',name='Tester les sources bloquées',exact=True)).to_have_count(0)
+        debug.click()
+        expect(blocked).to_be_editable()
+        page.evaluate("() => { const p=app.plugins.plugins['text-machine']; window.diagnosticAccount=p.account; p.account=null; }")
+        settings()
+        diagnostic_button=page.get_by_role('button',name='Tester les sources bloquées',exact=True)
+        assert diagnostic_button.is_enabled()
+        diagnostic_button.click()
+        report_view=page.locator('.text-machine-json')
+        report_view.wait_for()
+        diagnostic=json.loads(report_view.inner_text())
+        assert diagnostic['finishedAt'] and not diagnostic['cancelled']
+        assert diagnostic['sources']==[
+            {'domain':'blocked.example','skippedPdfs':0,'reason':'no-article-url','articles':[]},
+            {'domain':'restricted.example','skippedPdfs':0,'reason':'no-article-url','articles':[]},
+        ]
+        reports=list((vault/'Research/Veille').glob('blocked-report-*.json'))
+        assert len(reports)==1 and json.loads(reports[0].read_text())==diagnostic
+        assert (vault/'Research/Veille/textmachine.json').read_text()==log
+        assert (vault/'Research/Veille/blocked.json').read_text()==blocked_before
+        page.keyboard.press('Escape')
+        blocked.fill('restricted.example')
+        blocked.press('Tab')
+        page.wait_for_function("async () => JSON.stringify(await app.plugins.plugins['text-machine'].readBlocked()) === '[\"restricted.example\"]'")
+        assert (vault/'Research/Veille/textmachine.json').read_text()==log
+        blocked.fill('blocked.example, restricted.example')
+        blocked.press('Tab')
+        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].readBlocked()).length === 2")
+        debug.click()
+        expect(blocked).not_to_be_editable()
+        expect(page.get_by_role('button',name='Tester les sources bloquées',exact=True)).to_have_count(0)
+        page.evaluate("() => { app.plugins.plugins['text-machine'].account=window.diagnosticAccount; delete window.diagnosticAccount; }")
+        settings()
         exclusions = page.get_by_role('textbox', name='Sources exclues', exact=True)
         newsletter = page.locator('.text-machine-section').filter(has=page.get_by_role('textbox', name='Sources de référence', exact=True))
         assert newsletter.locator('.setting-item-heading .setting-item-name').all_text_contents() == ['Newsletter', 'Sources', 'Prompts']

@@ -226,8 +226,10 @@ async function crawl(article: Article, blocked: string[], signal: AbortSignal | 
     if (isPdf(page.url,page.contentType) || page.html?.trimStart().startsWith('%PDF-')) return {...article,status:'forbidden'};
     const extracted = page.status >= 200 && page.status < 300 && page.html ? extractPage(page.html, page.url) : null;
     if (extracted?.content) return {...article, ...extracted, status:article.status === '404' ? '' : article.status};
-    block(blocked, article.url);
-    if (page.url !== article.url) block(blocked, page.url);
+    if (!page.failure && (extracted?.blocked || [401,402,403,451].includes(page.status))) {
+        block(blocked, article.url);
+        if (page.url !== article.url) block(blocked, page.url);
+    }
     return {...article, status:'forbidden'};
 }
 

@@ -30,6 +30,26 @@ const prompts = {'sélection.md':selectionPrompt,'writer.md':writerPrompt,'bref.
     'rewriter.md':rewriterPrompt,'publisher.md':publisherPrompt,'image.md':imagePrompt};
 type PromptName = keyof typeof prompts;
 interface PromptDefinition {file: PromptName; name: string; desc: string; variables: string}
+interface SourceAttempt {
+    method: 'http' | 'browser';
+    httpStatus: number | null;
+    finalUrl: string;
+    contentType: string;
+    htmlLength: number;
+    contentLength: number;
+    publish: string;
+    elapsedMs: number;
+    outcome: string;
+    failure: string;
+}
+interface SourceProbe {id: number; url: string; outcome: string; attempts: SourceAttempt[]; failure?: string}
+
+function reportUrl(value: string) {
+    try {
+        const url=new URL(value);
+        return url.origin+url.pathname;
+    } catch {return '';}
+}
 
 function destructive(button: ButtonComponent) {
     if (requireApiVersion('1.13.0')) return button.setDestructive();
@@ -314,6 +334,57 @@ export default class TextMachine extends Plugin {
         const file = this.app.vault.getAbstractFileByPath(this.blockedPath);
         if (file && !(file instanceof TFile)) throw new Error(t('invalidBlockedFile'));
         return file ? this.crawler.parseBlocked(await this.app.vault.read(file)) : [];
+    }
+
+    async testBlockedSources(progress?: Progress) {
+        if (this.crawlController) throw new Error(t('blockedTestBusy'));
+        const vault=this.app.vault, log=this.dataFile;
+        const domains=await this.readBlocked();
+        const articles=this.articles.parseData(await vault.read(log)).articles;
+        const sources=domains.map(domain=>{
+            const matches=[...new Map(articles.filter(article=>this.crawler.isBlocked(article.url,[domain])).map(article=>[article.url,article])).values()];
+            const targets=matches.filter(article=>!this.articles.isPdf(article.url));
+            return {domain,skippedPdfs:matches.length-targets.length,reason:targets.length ? '' : matches.length ? 'pdf-only' : 'no-article-url',
+                articles:targets.slice(0,1).map((article): SourceProbe=>({id:article.id,url:reportUrl(article.url),outcome:'pending',attempts:[]}))};
+        });
+        const report={version:1,pluginVersion:this.manifest.version,startedAt:new Date().toISOString(),finishedAt:'',cancelled:false,sources};
+        const path=this.settings.outputFolder+'/blocked-report-'+report.startedAt.replace(/[:.]/g,'-')+'.json';
+        const controller=this.crawlController=new AbortController();
+        try {
+            const file=await vault.create(path,JSON.stringify(report,null,2)+'\n');
+            const total=sources.reduce((count,source)=>count+source.articles.length,0);
+            let current=0;
+            for (const source of sources) {
+                for (const target of source.articles) {
+                    if (controller.signal.aborted) break;
+                    current++;
+                    const url=articles.find(article=>article.id===target.id)!.url;
+                    progress?.(t('blockedTestProgress',{current,total,url:target.url}));
+                    target.outcome='running';
+                    try {
+                        await this.browser.retrievePage(url,controller.signal,()=>false,BrowserWindow,this.browser.fetchPage,(method,page,elapsedMs)=>{
+                            const pdf=this.articles.isPdf(page.url,page.contentType) || page.status===415 || page.html.trimStart().startsWith('%PDF-');
+                            const extracted=!pdf && !page.failure && page.status>=200 && page.status<300 && page.html ? this.crawler.extractPage(page.html,page.url) : null;
+                            const outcome=pdf ? 'pdf' : page.failure ? 'network-error' : page.status<200 || page.status>=300 ? 'http-error'
+                                : extracted?.content ? 'readable' : extracted?.blocked ? 'restricted' : 'no-content';
+                            target.attempts.push({method,httpStatus:page.failure ? null : page.status,finalUrl:reportUrl(page.url),contentType:page.contentType || '',
+                                htmlLength:page.html.length,contentLength:extracted?.content?.length || 0,publish:extracted?.publish || '',elapsedMs,outcome,failure:page.failure || ''});
+                            target.outcome=outcome;
+                            progress?.(t('blockedTestProgress',{current,total,url:target.url})+' · '+method);
+                        });
+                    } catch (caught) {
+                        target.outcome=controller.signal.aborted ? 'cancelled' : 'error';
+                        if (!controller.signal.aborted) target.failure=this.browser.failureCode(caught);
+                    }
+                    await vault.modify(file,JSON.stringify(report,null,2)+'\n');
+                }
+                if (controller.signal.aborted) break;
+            }
+            report.cancelled=controller.signal.aborted;
+            report.finishedAt=new Date().toISOString();
+            await vault.modify(file,JSON.stringify(report,null,2)+'\n');
+            return file;
+        } finally {if (this.crawlController===controller) this.crawlController=null;}
     }
 
     async crawlArticles(progress?: Progress) {
@@ -1152,16 +1223,76 @@ export class GmailSettings extends PluginSettingTab {
                     })));
             }});
             newsletterSources.push({name:t('blockedSites'),desc:t('blockedSitesDescription'),render:setting=>{
+                if (p.settings.debug) setting.descEl.createEl('p',{text:t('blockedSitesEditHelp')});
                 setting.addTextArea(text=>{
+                    const path=p.blockedPath;
+                    let original: string[] | null=null, saving=false;
+                    const canEdit=()=>p.settings.debug && !p.busy && !p.crawlController && !p.aiController && !p.disposed;
+                    const error=setting.descEl.createEl('p',{attr:{id:'text-machine-blocked-error',role:'alert'}});
+                    error.hidden=true;
                     text.inputEl.setAttribute('aria-label',t('blockedSites'));
+                    text.inputEl.setAttribute('aria-describedby','text-machine-blocked-error');
                     text.inputEl.readOnly=true;
                     text.inputEl.rows=3;
                     text.setPlaceholder(t('blockedSitesEmpty')).setValue(t('loading'));
-                    void p.readBlocked().then((domains): void=>{text.setValue(domains.join('\n'));}).catch(caught=>{
+                    void p.readBlocked().then((domains): void=>{
+                        original=domains;
+                        text.setValue(domains.join(', '));
+                        text.inputEl.readOnly=!canEdit();
+                    }).catch(caught=>{
                         text.setValue('').setPlaceholder('');
-                        setting.descEl.createEl('p',{text:errorOf(caught).message,attr:{role:'alert'}});
+                        error.setText(errorOf(caught).message);error.hidden=false;
+                    });
+                    text.inputEl.addEventListener('blur',async()=>{
+                        if (!original || saving || !canEdit() || p.blockedPath!==path) return;
+                        saving=true;text.inputEl.readOnly=true;
+                        error.hidden=true;text.inputEl.removeAttribute('aria-invalid');
+                        try {
+                            let domains: string[];
+                            try {
+                                domains=p.crawler.parseBlocked(JSON.stringify(text.getValue().split(/[,\n]/).map(value=>value.trim()).filter(Boolean)));
+                                if (domains.some(domain=>!domain.includes('.'))) throw new Error();
+                            } catch {throw new Error(t('blockedSitesInvalid'));}
+                            if (JSON.stringify(domains)!==JSON.stringify(original)) {
+                                const vault=this.app.vault, file=vault.getAbstractFileByPath(path);
+                                if (file && !(file instanceof TFile)) throw new Error(t('invalidBlockedFile'));
+                                const contents=JSON.stringify(domains,null,2)+'\n';
+                                if (file) await vault.process(file,current=>{
+                                    if (JSON.stringify(p.crawler.parseBlocked(current))!==JSON.stringify(original)) throw new Error(t('blockedSitesChanged'));
+                                    return contents;
+                                });
+                                else {
+                                    if (original.length) throw new Error(t('blockedSitesChanged'));
+                                    await vault.create(path,contents);
+                                }
+                                original=domains;
+                            }
+                            text.setValue(domains.join(', '));
+                        } catch (caught) {
+                            error.setText(errorOf(caught).message);error.hidden=false;
+                            text.inputEl.setAttribute('aria-invalid','true');
+                        } finally {saving=false;text.inputEl.readOnly=!canEdit();}
                     });
                 });
+            }});
+            if (p.settings.debug) newsletterSources.push({name:t('testBlockedSources'),desc:t('testBlockedSourcesDescription'),render:setting=>{
+                setting.addButton(button=>button.setButtonText(t('testBlockedSources')).setDisabled(p.busy).onClick(()=>
+                    this.run(t('testingBlockedSources'),async()=>{
+                        const file=await p.testBlockedSources(message=>{this.progress=message;if (!p.disposed) this.redraw();});
+                        this.result=t('blockedReportSaved',{path:file.path});
+                        if (p.disposed) return;
+                        const viewer=new Modal(this.app);
+                        viewer.titleEl.setText(t('blockedReportTitle'));
+                        viewer.contentEl.createEl('p',{text:file.path});
+                        viewer.contentEl.createEl('pre',{cls:'text-machine-json',text:await this.app.vault.read(file)});
+                        viewer.open();
+                    })));
+                if (p.crawlController) {
+                    const activity=setting.descEl.createDiv({cls:'text-machine-activity',attr:{role:'status'}});
+                    setIcon(activity.createSpan({cls:'text-machine-spinner',attr:{'aria-hidden':'true'}}),'loader-circle');
+                    activity.createSpan({text:this.progress});
+                    setting.addButton(button=>button.setButtonText(t('cancel')).onClick(()=>p.crawlController?.abort()));
+                }
             }});
             journal.items.push({name:t('resetData'),desc:t('resetDataDescription'),render:setting=>{
                 setting.addButton(button=>destructive(button).setButtonText(t('resetData')).setDisabled(!connected || p.busy).onClick(()=>{
@@ -1262,7 +1393,8 @@ export class GmailSettings extends PluginSettingTab {
         items.push({name:t('debug'),desc:t('debugDescription'),render:setting=>{
             setting.addToggle(toggle=>toggle.setValue(p.settings.debug).onChange(value=>{
                 p.settings.debug=value;
-                void p.saveData(p.settings).catch(()=>{this.error=t('aiSaveFailed');this.redraw();});
+                void p.saveData(p.settings).then(()=>{if (!p.disposed) this.redraw();})
+                    .catch(()=>{this.error=t('aiSaveFailed');this.redraw();});
             }));
         }});
         return items;

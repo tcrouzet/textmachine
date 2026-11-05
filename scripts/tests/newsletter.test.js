@@ -15,6 +15,27 @@ const result = {title:'A new angle',chapeau:'Books and AI.',paragraphs:['First p
     image:null,used:[articles[0].url],discard:[articles[1].url]};
 const empty = {title:'',chapeau:'',paragraphs:[],image:null,used:[],discard:articles.map(article=>article.url)};
 
+test('arXiv brief links open the abstract without changing stored articles or source eligibility',()=>{
+    const links=[
+        ['https://arxiv.org/pdf/2610.37916','https://arxiv.org/abs/2610.37916'],
+        ['https://arxiv.org/pdf/2610.37916v2.pdf','https://arxiv.org/abs/2610.37916v2'],
+        ['https://export.arxiv.org/pdf/hep-th/9901001v1.pdf','https://export.arxiv.org/abs/hep-th/9901001v1'],
+        ['https://arxiv.org/abs/2610.37916','https://arxiv.org/abs/2610.37916'],
+        ['https://arxiv.org.evil.example/pdf/2610.37916','https://arxiv.org.evil.example/pdf/2610.37916'],
+        ['https://example.com/report.pdf','https://example.com/report.pdf'],
+    ];
+    const text=JSON.stringify({version:1,articles:links.map(([url],index)=>article('Paper '+index,{id:index+1,url,status:'forbidden',content:''}))});
+    const brief=briefArticles(text,'','2026-11-03');
+    const original=structuredClone(brief);
+    const markdown=renderNewsletter(template,result,brief);
+    for (const [index,[,url]] of links.entries()) assert.ok(markdown.includes(`[Paper ${index}](${url})`),url);
+    assert.deepEqual(brief,original);
+    assert.deepEqual(availableArticles(text,'','2026-11-03'),[]);
+    const saved=JSON.parse(applyStatuses(text,[],result,'2026-11-03',brief));
+    assert.deepEqual(saved.articles.map(row=>row.url),links.map(([url])=>url));
+    assert.ok(saved.articles.every(row=>row.usedAt==='2026-11-03' && row.status==='forbidden'));
+});
+
 test('additional feeds accept Substack home pages and explicit RSS URLs',()=>{
     assert.equal(feedUrl(''),'');
     assert.equal(feedUrl('  '),'');
@@ -143,7 +164,10 @@ test('prompt substitution accepts spaces, preserves inserted text and rejects un
 test('translated brief titles are rendered without changing original article titles',()=>{
     const translated=parseBrief(JSON.stringify({titles:[{id:1,title:'Título traducido'}]}),[articles[0]]);
     const markdown=renderNewsletter(template,result,translated);
-    assert.ok(markdown.includes('* [Título traducido](https://example.com/a)'));
+    assert.ok(markdown.includes('* [Título traducido](https://example.com/a) - [example.com](https://example.com/)'));
+    const subdomain=renderNewsletter(template,result,[{title:'Research [results]',url:'https://news.example.co.uk/article?q=1#section',source:'Google Alerts'}]);
+    assert.ok(subdomain.includes('* [Research \\[results\\]](https://news.example.co.uk/article?q=1#section) - [example.co.uk](https://example.co.uk/)'));
+    assert.ok(!subdomain.includes('Google Alerts'));
     assert.equal(articles[0].title,'a');
     for (const title of ['',null,{}]) {
         assert.throws(()=>parseBrief(JSON.stringify({titles:[{id:1,title}]}),[articles[0]]),/Translation.*incomplete or invalid/);

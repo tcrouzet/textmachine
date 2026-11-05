@@ -16,7 +16,7 @@ async function fixture(initialSecrets = {}) {
         register() {}
     }
     let secret = JSON.stringify({email:'reader@example.com',clientId:'123-test.apps.googleusercontent.com',refreshToken:'old',scope:'https://www.googleapis.com/auth/gmail.readonly'});
-    const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},Plugin,PluginSettingTab:class {},Modal:class {},Notice:class {},getLanguage:()=> 'en',requireApiVersion:()=>false};
+    const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},setIcon:()=>{},Plugin,PluginSettingTab:class {},Modal:class {},Notice:class {},getLanguage:()=> 'en',requireApiVersion:()=>false};
     const context = {module:{exports:{}},AbortController,URL,setTimeout,clearTimeout,structuredClone,window:{setTimeout,clearTimeout},
         MutationObserver:class {observe() {} disconnect() {}},
         document:{body:{},querySelectorAll:()=>[]},CSS:{escape:value=>value},
@@ -1118,6 +1118,184 @@ test('crawl skips existing content even without a publication date and fetches o
     assert.deepEqual(saved.slice(0,3),existing);
     assert.equal(saved[3].content,'Newly fetched article');
 });
+test('blocked source diagnostics test one non-PDF article per domain offline and preserve articles and the blocklist',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.manifest.version='0.0.5';
+    p.account=null;
+    const urls=['https://nature.com/readable?article=1','https://news.nature.com/restricted','https://failed.example/article',
+        'https://nature.com/report.pdf','https://unblocked.example/article','https://restricted.example/article'];
+    const articles=urls.map((url,index)=>({...entries[0],id:index+1,url,title:url,status:'forbidden',usedAt:'2026-11-03',content:''}));
+    articles.unshift(articles.splice(3,1)[0]);
+    articles.push({...articles[1],id:7});
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:8,articles}));
+    await p.app.vault.create(p.blockedPath,JSON.stringify(['nature.com','failed.example','restricted.example','orphan.example']));
+    const beforeArticles=contents.get(p.dataPath),beforeBlocked=contents.get(p.blockedPath),called=[],progress=[];
+    p.crawler={...p.crawler,extractPage:html=>html==='complete' ? {content:'Full article text',publish:'2026-11-05'} : {blocked:true}};
+    p.browser={...p.browser,retrievePage:async(url,signal,blocked,_window,_fetch,observe)=>{
+        assert.ok(signal && !signal.aborted);
+        assert.equal(blocked(url),false);
+        called.push(url);
+        if (url.includes('failed.example')) throw Object.assign(new Error('Private error with token=do-not-save'),{code:'ECONNRESET'});
+        observe('http',{status:404,url,html:'',failure:'redirect-loop'},10);
+        const page={status:200,url:url.split('?')[0]+'?code=do-not-save',html:url.includes('/readable') ? 'complete' : 'preview',contentType:'text/html'};
+        observe('browser',page,20);
+        return page;
+    }};
+    const file=await p.testBlockedSources(message=>progress.push(message));
+    const report=JSON.parse(contents.get(file.path));
+    assert.match(file.path,/^Data\/blocked-report-.*\.json$/);
+    assert.deepEqual(called,[urls[0],urls[2],urls[5]]);
+    assert.equal(report.pluginVersion,'0.0.5');
+    assert.ok(report.finishedAt);
+    assert.equal(report.cancelled,false);
+    const [nature,failed,restricted,orphan]=report.sources;
+    assert.equal(nature.skippedPdfs,1);
+    assert.deepEqual(nature.articles.map(article=>article.outcome),['readable']);
+    assert.deepEqual(restricted.articles.map(article=>article.outcome),['restricted']);
+    assert.equal(nature.articles[0].attempts[0].httpStatus,null);
+    assert.equal(nature.articles[0].attempts[0].failure,'redirect-loop');
+    assert.equal(nature.articles[0].attempts[1].httpStatus,200);
+    assert.equal(nature.articles[0].attempts[1].contentLength,'Full article text'.length);
+    assert.equal(nature.articles[0].attempts[1].publish,'2026-11-05');
+    assert.equal(nature.articles[0].attempts[1].elapsedMs,20);
+    assert.equal(failed.articles[0].failure,'ECONNRESET');
+    assert.equal(failed.articles[0].outcome,'error');
+    assert.deepEqual(orphan.articles,[]);
+    assert.equal(orphan.reason,'no-article-url');
+    assert.ok(progress.some(message=>message.includes('3/3')));
+    assert.equal(contents.get(file.path).includes('do-not-save'),false);
+    assert.equal(contents.get(file.path).includes('Full article text'),false);
+    assert.equal(contents.get(p.dataPath),beforeArticles);
+    assert.equal(contents.get(p.blockedPath),beforeBlocked);
+    assert.equal(p.crawlController,null);
+    assert.ok(!p.settingsTab.getSettingDefinitions().flatMap(item=>item.items || [item]).some(item=>item.name==='Test blocked sources'));
+    p.settings.debug=true;
+    const rows=p.settingsTab.getSettingDefinitions().flatMap(item=>item.type==='group' ? item.items : [item]);
+    const row=rows.find(item=>item.name==='Test blocked sources');
+    let disabled;
+    const button={setButtonText:()=>button,setDisabled:value=>{disabled=value;return button;},onClick:()=>button};
+    row.render({addButton:callback=>callback(button)});
+    assert.equal(disabled,false);
+    p.busy=true;
+    row.render({addButton:callback=>callback(button)});
+    assert.equal(disabled,true);
+    p.crawlController=new AbortController();
+    const buttons=[];
+    row.render({descEl:{createDiv:()=>({createSpan:()=>({})})},addButton:callback=>{
+        const button={setButtonText:value=>{button.text=value;return button;},setDisabled:()=>button,onClick:callback=>{button.click=callback;return button;}};
+        callback(button);buttons.push(button);
+    }});
+    buttons.find(button=>button.text==='Cancel').click();
+    assert.equal(p.crawlController.signal.aborted,true);
+});
+
+test('debug edits save blocked domains only on blur and preserve articles, failed writes and concurrent changes',async()=>{
+    const {p,contents,failSave}=await newsletterFixture();
+    const articlesBefore=contents.get(p.dataPath);
+    p.account=null;
+    p.settingsTab.app=p.app;
+    const render=async()=>{
+        const row=p.settingsTab.getSettingDefinitions().flatMap(item=>item.items || [item]).find(item=>item.name==='Blocked sites');
+        const attributes=new Map(),events=new Map();
+        const error={hidden:false,message:'',setText(value){this.message=value;}};
+        const field={inputEl:{setAttribute:(key,value)=>attributes.set(key,value),removeAttribute:key=>attributes.delete(key),addEventListener:(event,callback)=>events.set(event,callback)},
+            value:'',setPlaceholder(){return this;},setValue(value){this.value=value;return this;},getValue(){return this.value;}};
+        row.render({descEl:{createEl:()=>error},addTextArea:callback=>callback(field)});
+        assert.equal(field.inputEl.readOnly,true);
+        await new Promise(resolve=>setImmediate(resolve));
+        return {field,error,attributes,blur:()=>events.get('blur')()};
+    };
+    const locked=await render();
+    assert.equal(locked.field.inputEl.readOnly,true);
+    locked.field.value='nature.com';await locked.blur();
+    assert.ok(!contents.has(p.blockedPath));
+    p.settings.debug=true;
+    const editable=await render();
+    assert.equal(editable.field.inputEl.readOnly,false);
+    editable.field.value='www.nature.com, NEWS.example.co.uk\nexample.co.uk';
+    assert.ok(!contents.has(p.blockedPath));
+    await editable.blur();
+    assert.deepEqual(JSON.parse(contents.get(p.blockedPath)),['nature.com','example.co.uk']);
+    assert.equal(editable.field.value,'nature.com, example.co.uk');
+    editable.field.value='example.co.uk';await editable.blur();
+    assert.deepEqual(JSON.parse(contents.get(p.blockedPath)),['example.co.uk']);
+    for (const invalid of ['not a domain','file:///tmp/local','https://user:pass@example.com','com']) {
+        editable.field.value=invalid;await editable.blur();
+        assert.equal(editable.attributes.get('aria-invalid'),'true');
+        assert.match(editable.error.message,/valid domains/);
+        assert.deepEqual(JSON.parse(contents.get(p.blockedPath)),['example.co.uk']);
+    }
+    editable.field.value='';await editable.blur();
+    assert.deepEqual(JSON.parse(contents.get(p.blockedPath)),[]);
+    assert.equal(editable.error.hidden,true);
+    for (const [key,value] of [['busy',true],['crawlController',new AbortController()],['aiController',new AbortController()],['disposed',true]]) {
+        const original=p[key];p[key]=value;
+        const busy=await render();
+        assert.equal(busy.field.inputEl.readOnly,true);
+        busy.field.value='nature.com';await busy.blur();
+        assert.deepEqual(JSON.parse(contents.get(p.blockedPath)),[]);
+        p[key]=original;
+    }
+    contents.set(p.blockedPath,JSON.stringify(['new.example']));
+    editable.field.value='nature.com';await editable.blur();
+    assert.match(editable.error.message,/changed elsewhere/);
+    assert.deepEqual(JSON.parse(contents.get(p.blockedPath)),['new.example']);
+    const failing=await render();failSave();
+    failing.field.value='';await failing.blur();
+    assert.match(failing.error.message,/JSON write failed/);
+    assert.deepEqual(JSON.parse(contents.get(p.blockedPath)),['new.example']);
+    p.settings.debug=false;
+    assert.equal((await render()).field.inputEl.readOnly,true);
+    assert.equal(contents.get(p.dataPath),articlesBefore);
+});
+
+test('cancelling a blocked-source test keeps partial results and does not request remaining articles',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    const domains=['first.example','second.example','third.example'];
+    contents.set(p.dataPath,JSON.stringify({version:1,articles:entries.map((article,index)=>({...article,url:'https://'+domains[index]+'/article'}))}));
+    await p.app.vault.create(p.blockedPath,JSON.stringify(domains));
+    const before=contents.get(p.dataPath),calls=[];
+    p.browser={...p.browser,retrievePage:async(url,signal,_blocked,_window,_fetch,observe)=>{
+        calls.push(url);
+        if (calls.length===2) {
+            const partial=JSON.parse([...contents].find(([name])=>name.includes('/blocked-report-'))[1]);
+            assert.equal(partial.sources[0].articles[0].outcome,'http-error');
+            p.crawlController.abort();
+            assert.equal(signal.aborted,true);
+            throw new Error('Cancelled');
+        }
+        const page={status:403,url,html:''};
+        observe('http',page,5);return page;
+    }};
+    const file=await p.testBlockedSources();
+    const report=JSON.parse(contents.get(file.path));
+    assert.equal(calls.length,2);
+    assert.equal(report.cancelled,true);
+    assert.ok(report.finishedAt);
+    assert.deepEqual(report.sources.flatMap(source=>source.articles.map(article=>article.outcome)),['http-error','cancelled','pending']);
+    assert.equal(report.sources[0].articles[0].attempts[0].httpStatus,403);
+    assert.equal(contents.get(p.dataPath),before);
+    assert.equal(contents.get(p.blockedPath),JSON.stringify(domains));
+    assert.equal(p.crawlController,null);
+});
+
+test('blocked-source diagnostics report empty domains, exclude PDFs, and stop when the report cannot be saved',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    await p.app.vault.create(p.blockedPath,'["example.com"]');
+    contents.set(p.dataPath,JSON.stringify({version:1,articles:[{...entries[0],url:'https://example.com/file.pdf'}]}));
+    p.browser={...p.browser,retrievePage:async()=>assert.fail('PDFs must not be requested')};
+    const file=await p.testBlockedSources();
+    const report=JSON.parse(contents.get(file.path));
+    assert.deepEqual(report.sources,[{domain:'example.com',skippedPdfs:1,reason:'pdf-only',articles:[]}]);
+    contents.set(p.dataPath,JSON.stringify({version:1,articles:entries}));
+    p.app.vault.create=async()=>{throw new Error('Disk full');};
+    await assert.rejects(p.testBlockedSources(),/Disk full/);
+    assert.equal(p.crawlController,null);
+    const controller=p.crawlController=new AbortController();
+    await assert.rejects(p.testBlockedSources(),/already running/);
+    assert.equal(p.crawlController,controller);
+});
+
 test('crawled authors are saved and passed to the writer for source attribution',async()=>{
     const {p,contents,entries,seen}=await newsletterFixture();
     contents.set(p.dataPath,JSON.stringify({version:1,nextId:2,articles:[{...entries[0],content:''}]}));
@@ -1415,6 +1593,8 @@ test('Codex effort defaults to low and survives reload with validation',async()=
 
 test('the footer debug toggle defaults to off and persists both boolean values across reloads',async()=>{
     const {p}=await fixture();
+    let redraws=0;
+    p.settingsTab.redraw=()=>{redraws++;};
     const row=p.settingsTab.getSettingDefinitions().at(-1);
     assert.equal(row.name,'Debug');
     let initialValue,change;
@@ -1427,6 +1607,7 @@ test('the footer debug toggle defaults to off and persists both boolean values a
         await p.onload();
         assert.equal(p.settings.debug,value);
     }
+    assert.equal(redraws,2);
     p.savedSettings.debug='true';
     await p.onload();
     assert.equal(p.settings.debug,false);

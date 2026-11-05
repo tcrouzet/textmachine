@@ -184,7 +184,14 @@ function renderNewsletter(template: string, result: Newsletter, brief: Pick<Arti
         image:image ? (image.generated ? `![${escape(image.caption)}](${image.url})` : `[![${escape(image.caption)}](${link(image.url)})](${link(image.source)})`) : '',
         paragraphs_after_image:result.paragraphs.slice(2).join('\n\n'),
     };
-    const briefRows = brief.map(article=>({title:escape(article.title),url:link(article.url)}));
+    const briefRows = brief.map(article=>{
+        const url=new URL(article.url);
+        if ((url.hostname==='arxiv.org' || url.hostname.endsWith('.arxiv.org')) && url.pathname.startsWith('/pdf/')) {
+            url.pathname=url.pathname.replace(/^\/pdf\//,'/abs/').replace(/\.pdf$/i,'');
+        }
+        const domain=domainOf(url.href);
+        return {title:escape(article.title),url:link(url.href),source:escape(domain),source_url:link(url.protocol+'//'+domain+'/')};
+    });
     values.articles = briefRows;
     values.editorial = result.used.length ? [{...values}] : [];
     values.brief = brief.length ? [{heading:result.used.length ? '### '+t('newsletterBriefTitle') : '',articles:briefRows}] : [];
