@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Contrôle de la newsletter sans réécriture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issues"
+  ],
+  "properties": {
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Erreurs importantes constatées dans la newsletter. Liste vide si aucune. Ne retourner aucun texte réécrit."
+    }
+  }
+}

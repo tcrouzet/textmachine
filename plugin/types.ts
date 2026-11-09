@@ -1,8 +1,7 @@
 import type {Setting, SettingDefinitionEmpty, SettingDefinitionRender} from 'obsidian';
 
 export type AIProvider = 'anthropic' | 'openai';
-export interface Settings {
-    secretKey: string;
+export interface NewsletterSettings {
     labelId: string;
     outputFolder: string;
     excludedSources: string;
@@ -11,7 +10,18 @@ export interface Settings {
     referenceSources: string;
     includeFeeds: string;
     authorFeeds: string;
+    generateImages: boolean;
+}
+export interface NewsletterProfile extends NewsletterSettings {
+    id: string;
+    name: string;
+    prompts?: Record<string,string>;
+}
+export interface Settings extends NewsletterSettings {
+    secretKey: string;
     debug: boolean;
+    activeNewsletter: string;
+    newsletters: NewsletterProfile[];
     aiModel: string;
     codexModel: string;
     codexEffort: string;

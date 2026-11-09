@@ -187,11 +187,51 @@ test('IDs are persisted once, preserved by deduplication and never reused after 
 });
 
 
-test('RSS freshness uses exact elapsed hours, includes the boundary and rejects future or missing dates',()=>{
-    const {recentPublication}=require('../../plugin/articles');
-    const now=Date.parse('2026-11-05T12:00:00Z');
-    for(const publish of ['2026-11-03T12:00:00Z','2026-11-03T13:00:00+01:00','2026-11-05T12:00:00Z'])
-        assert.equal(recentPublication(publish,now),true,publish);
-    for(const publish of ['', 'invalid', '2026-11-03T11:59:59Z','2026-11-05T12:00:01Z'])
-        assert.equal(recentPublication(publish,now),false,publish);
+test('RSS records preserve old publication dates and accept undated articles without inventing a publication date',()=>{
+    for (const publish of ['2010-01-01T12:00:00Z','2026-11-03T13:00:00+01:00','']) {
+        const records=feedArticles([{title:'Article',url:'https://example.com/article',publish}],'https://example.com/feed','2026-11-09');
+        assert.equal(records.length,1);
+        assert.equal(records[0].publish,publish);
+        assert.equal(records[0].date,publish ? publish.slice(0,10) : '2026-11-09');
+    }
+});
+
+
+test('a direct editorial email upgrades an existing alert or feed without losing cached text or usage',()=>{
+    const {isEditorialSource}=require('../../plugin/articles');
+    const initial={date:'2026-11-06',title:'An editorial choice',url:'https://example.com/editorial',source:'RSS: example.com',content:'Already retrieved text',usedAt:'2026-11-05',status:'',authors:['An Author']};
+    const mail=message('Editor <reader@example.com>');
+    mail.bodies=[{type:'text/plain',text:initial.url}];
+    const incoming=messageArticles(mail);
+    assert.equal(isEditorialSource(incoming[0].source),true);
+    const merged=mergeArticles(JSON.stringify({version:1,articles:[initial]}),incoming);
+    assert.equal(merged.count,0);
+    const saved=parseData(merged.text).articles[0];
+    assert.equal(isEditorialSource(saved.source),true);
+    assert.equal(saved.content,initial.content);
+    assert.equal(saved.usedAt,initial.usedAt);
+    assert.equal(saved.id,1);
+    const later=mergeArticles(merged.text,[{...initial,source:'Google Alerts'}]);
+    assert.equal(isEditorialSource(parseData(later.text).articles[0].source),true);
+    for (const source of ['Utilisateur (présumé)','User (inferred)','User']) assert.equal(isEditorialSource(source),true);
+    for (const source of ['Google Alerts','Google Scholar','Other service (inferred)','Autre service (présumé)','RSS: example.com']) assert.equal(isEditorialSource(source),false);
+});
+
+test('opaque URL suffixes never become article titles while meaningful acronyms and numbers remain',()=>{
+    const id='XVRNMOQLNZEMBM3ZWIZYWR7VXE';
+    const url='https://www.lepoint.fr/video/edito-etienne-gernelle/etienne-gernelle-sur-rtl-quand-lia-veut-tuer-la-litterature-'+id+'/';
+    const mail=message('reader@example.com');
+    mail.bodies=[{type:'text/plain',text:url}];
+    const entry=messageArticles(mail)[0];
+    assert.equal(entry.title,'etienne gernelle sur rtl quand lia veut tuer la litterature');
+    assert.equal(entry.url,url);
+    const original='Étienne Gernelle sur RTL : quand l’IA veut tuer la littérature';
+    const feed=feedArticles([{title:original+' '+id,url}],'https://example.com/feed','2026-11-06')[0];
+    assert.equal(feed.title,original);
+    assert.equal(feed.url,url);
+    for(const slug of ['le-prix-goncourt-2026','un-roman-avec-IA-GPT-5','ANTICONSTITUTIONNELLEMENT']) {
+        const target='https://example.com/'+slug;
+        assert.equal(feedArticles([{title:target,url:target}],'https://example.com/feed','2026-11-06')[0].title,slug.replace(/-/g,' '));
+    }
+    assert.equal(feedArticles([{title:original+' '+id,url:'https://example.com/another-story'}],'https://example.com/feed','2026-11-06')[0].title,original+' '+id);
 });

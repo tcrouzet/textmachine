@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 require('../../plugin/i18n').setLocale('en');
-const {day,availableArticles,briefArticles,briefRequest,parseBrief,renderPrompt,writerRequest,selectionRequest,parseSelection,isAuthorSource,assertNoAuthorSources,parseEditorial,publisherRequest,parsePublisher,renderNewsletter,applyStatuses,feedUrl,feedUrls} = require('../../plugin/newsletter');
+const {day,availableArticles,briefArticles,briefRequest,parseBrief,renderPrompt,writerRequest,selectionRequest,selectArticles,parseSelection,isAuthorSource,assertNoAuthorSources,parseEditorial,parseWriter,publicationCount,publisherRequest,parsePublisher,renderNewsletter,applyStatuses,feedUrl,feedUrls} = require('../../plugin/newsletter');
 const illustrated = result=>({...result,image:{url:'illustrations/text-machine-2026-11-03.png',source:'',caption:'Original caption',verified:true,generated:true}});
 const {generate} = require('../../plugin/ai/generate');
 const template = fs.readFileSync(path.join(__dirname,'../../models/newsletter.md'),'utf8');
@@ -121,7 +121,7 @@ test('writer gets JSON requirements and editorial context without the Markdown t
     assert.throws(()=>writerRequest('',articles,[],[]),/writer.md/);
 });
 test('selection classifies every article once and rejects invented sources or extra fields',()=>{
-    const answer={selected:[1],discard:[2]};
+    const answer={brief:[], selected:[1],discard:[2]};
     const normalized=parseSelection(JSON.stringify(answer),articles);
     assert.deepEqual(normalized.selected,[articles[0]]);
     assert.deepEqual(normalized.discard,[2]);
@@ -162,7 +162,7 @@ test('prompt substitution accepts spaces, preserves inserted text and rejects un
     assert.throws(()=>renderPrompt('{{unknown-variable}}',{}),/\{\{unknown-variable\}\}/);
 });
 test('translated brief titles are rendered without changing original article titles',()=>{
-    const translated=parseBrief(JSON.stringify({titles:[{id:1,title:'Título traducido'}]}),[articles[0]]);
+    const translated=parseBrief(JSON.stringify({titles:[{id:1,title:'Título traducido',category:'Escritura'}]}),[articles[0]]);
     const markdown=renderNewsletter(template,result,translated);
     assert.ok(markdown.includes('* [Título traducido](https://example.com/a) - [example.com](https://example.com/)'));
     const subdomain=renderNewsletter(template,result,[{title:'Research [results]',url:'https://news.example.co.uk/article?q=1#section',source:'Google Alerts'}]);
@@ -170,11 +170,42 @@ test('translated brief titles are rendered without changing original article tit
     assert.ok(!subdomain.includes('Google Alerts'));
     assert.equal(articles[0].title,'a');
     for (const title of ['',{},false,0]) {
-        assert.throws(()=>parseBrief(JSON.stringify({titles:[{id:1,title}]}),[articles[0]]),/Translation.*incomplete or invalid/);
+        assert.throws(()=>parseBrief(JSON.stringify({titles:[{id:1,title,category:'Écriture'}]}),[articles[0]]),/Translation.*incomplete or invalid/);
     }
 });
 
+test('brief categories preserve every retained link and group related items in the proposed order',()=>{
+    const sources=[...articles,{...articles[0],id:3},{...articles[0],id:4}].map(article=>({...article,url:'https://example.com/brief-'+article.id}));
+    const before=JSON.stringify(sources);
+    const translated=parseBrief(JSON.stringify({titles:[
+        {id:2,title:'Un outil pour écrire',category:'Outils'},
+        {id:1,title:'Un roman',category:'Création'},
+        {id:4,title:'Une étude',category:'Recherche'},
+        {id:3,title:'Un autre roman',category:'Création'},
+    ]}),sources,sources);
+    assert.deepEqual(translated.map(article=>article.id),[2,1,4,3]);
+    const markdown=renderNewsletter(template,result,translated);
+    assert.equal((markdown.match(/#### Création/g) || []).length,1);
+    assert.ok(markdown.indexOf('#### Outils')<markdown.indexOf('#### Création'));
+    assert.ok(markdown.indexOf('[Un autre roman]')<markdown.indexOf('#### Recherche'));
+    for (const source of sources) assert.equal(markdown.split(']('+source.url+')').length-1,1);
+    assert.equal(JSON.stringify(sources),before);
+    const briefOnly=renderNewsletter(template,{title:'',chapeau:'',paragraphs:[],image:null,used:[],discard:[]},translated);
+    assert.ok(briefOnly.includes('## Outils'));
+    assert.ok(!briefOnly.includes('#### Outils'));
+});
+
+test('brief categories are mandatory for retained titles and null only for rejected titles',()=>{
+    for (const row of [
+        {id:1,title:'Titre'}, {id:1,title:'Titre',category:''}, {id:1,title:'Titre',category:'   '},
+        {id:1,title:'Titre',category:null}, {id:1,title:'Titre',category:12},
+        {id:1,title:null,category:'Recherche'},
+    ]) assert.throws(()=>parseBrief(JSON.stringify({titles:[row]}),[articles[0]]),/incomplete or invalid/);
+    assert.deepEqual(parseBrief(JSON.stringify({titles:[{id:1,title:null,category:null}]}),[articles[0]]),[]);
+});
+
 test('Markdown comes from the template, with its image after paragraph two and no separate summaries',()=>{
+    const template='# {{title}}\n\n*{{chapeau}}*\n\n{{paragraphs_before_image}}\n\n{{image}}\n\n{{paragraphs_after_image}}';
     const parsed = illustrated(result);
     const markdown = renderNewsletter(template,parsed);
     assert.ok(markdown.startsWith('# A new angle\n\n*Books and AI.*'));
@@ -303,7 +334,7 @@ test('stored AI IDs resolve through the original snapshot even if the article fi
 });
 
 
-test('the brief prompt receives only titles and IDs, in the configured language, with a strict output schema',()=>{
+test('unverified brief sources supply only titles and IDs with the configured language and a strict output schema',()=>{
     const sources=[{...articles[0],status:'forbidden'},{...articles[1],status:'forbidden'}];
     const request=briefRequest('Runtime brief in {{ language }}.',sources,'français');
     assert.deepEqual(JSON.parse(request.input),sources.map(({id,title})=>({id,title})));
@@ -311,7 +342,7 @@ test('the brief prompt receives only titles and IDs, in the configured language,
     assert.ok(!request.system.includes('{{ language }}'));
     assert.deepEqual(JSON.parse(request.system.split('\n\n').at(-1)).jsonSchema,request.schema);
     assert.deepEqual(request.schema.required,['titles']);
-    assert.deepEqual(request.schema.properties.titles.items.required,['id','title']);
+    assert.deepEqual(request.schema.properties.titles.items.required,['id','title','category']);
     assert.deepEqual(request.schema.properties.titles.items.properties.id.enum,[1,2]);
     const definition=require('../../models/bref.json');
     const expected=JSON.parse(JSON.stringify(definition));
@@ -325,12 +356,28 @@ test('the brief prompt receives only titles and IDs, in the configured language,
     assert.throws(()=>briefRequest('{{unknown}}',sources,'français'),/unknown/);
 });
 
-test('brief translations resolve stable IDs and preserve source order, URLs and original article data',()=>{
+test('brief translation receives bounded context only from readable articles without exposing article state',()=>{
+    const readable={...articles[0],title:'Making documentation pages agent friendly',content:'Agents need readable documentation. '.repeat(100),privateNotes:'Private annotation'};
+    const blocked={...articles[1],status:'forbidden',content:'Unverified content must never be used'};
+    const before=JSON.stringify([readable,blocked]);
+    const request=briefRequest('Brief in {{language}}',[readable,blocked],'français',[readable]);
+    assert.deepEqual(JSON.parse(request.input),[
+        {id:readable.id,title:readable.title,context:readable.content.slice(0,2000)},
+        {id:blocked.id,title:blocked.title},
+    ]);
+    assert.ok(!request.input.includes('Private annotation'));
+    assert.ok(!request.input.includes('Unverified content'));
+    assert.equal(JSON.stringify([readable,blocked]),before);
+    assert.deepEqual(request.schema.properties.titles.items.required,['id','title','category']);
+    assert.throws(()=>parseBrief(JSON.stringify({titles:[{id:readable.id,title:'Titre',category:'Écriture',context:'Unexpected output'}]}),[readable]),/incomplete or invalid/);
+});
+
+test('brief translations resolve stable IDs in the proposed order and preserve URLs and original article data',()=>{
     const sources=[{...articles[0],id:41,status:'forbidden'},{...articles[1],id:7,status:'forbidden'}];
     const before=JSON.stringify(sources);
-    const translated=parseBrief(JSON.stringify({titles:[{id:7,title:'Second titre'},{id:41,title:'Premier titre'}]}),sources);
-    assert.deepEqual(translated.map(article=>article.title),['Premier titre','Second titre']);
-    assert.deepEqual(translated.map(article=>article.url),sources.map(article=>article.url));
+    const translated=parseBrief(JSON.stringify({titles:[{id:7,title:'Second titre',category:'Écriture'},{id:41,title:'Premier titre',category:'Écriture'}]}),sources);
+    assert.deepEqual(translated.map(article=>article.title),['Second titre','Premier titre']);
+    assert.deepEqual(translated.map(article=>article.url),[sources[1].url,sources[0].url]);
     assert.ok(translated.every(article=>article.status==='forbidden'));
     assert.equal(JSON.stringify(sources),before);
     for (const response of [null,{},[],{titles:[]},{titles:[{id:41,title:'Only one'}]},
@@ -339,7 +386,9 @@ test('brief translations resolve stable IDs and preserve source order, URLs and 
         {titles:[{id:41,title:'First'},{id:7,title:'   '}]},
         {titles:[{id:41,title:'First'},{id:7,title:'Second',url:'https://other.com'}]},
         {titles:[{id:41,title:'First'},{id:'7',title:'Second'}]}]) {
-        assert.throws(()=>parseBrief(JSON.stringify(response),sources),/Translation.*incomplete or invalid/);
+        const categorized=response && Array.isArray(response.titles)
+            ? {...response,titles:response.titles.map(row=>({category:'Écriture',...row}))} : response;
+        assert.throws(()=>parseBrief(JSON.stringify(categorized),sources),/Translation.*incomplete or invalid/);
     }
 });
 
@@ -363,31 +412,52 @@ test('forbidden articles appear only as translated linked titles in the brief se
 });
 
 test('source photo availability does not change the selected source or provide the illustration',()=>{
-    const parsed=parseSelection(JSON.stringify({selected:[2,1],discard:[]}),articles);
+    const parsed=parseSelection(JSON.stringify({brief:[], selected:[2,1],discard:[]}),articles);
     assert.deepEqual(parsed.selected.map(article=>article.url),articles.map(article=>article.url));
     const input=JSON.parse(writerRequest(prompt,parsed.selected,[],[]).input);
     assert.ok(input.articles.every(article=>!Object.hasOwn(article,'image')));
     assert.ok(!renderNewsletter(template,result).includes('!['));
 });
 
-test('the writer schema contains only article fields and no source or illustration selection',()=>{
+test('the writer identifies supplied sources actually used without returning state or illustration data',()=>{
     const request=writerRequest(prompt,articles,[],[]);
-    assert.deepEqual(Object.keys(request.schema.properties),['paragraphs']);
-    assert.deepEqual(request.schema.required,['paragraphs']);
+    assert.deepEqual(Object.keys(request.schema.properties),['paragraphs','used']);
+    assert.deepEqual(request.schema.required,['paragraphs','used']);
     assert.equal(request.schema.additionalProperties,false);
     const definition=require('../../models/writer.json');
-    assert.deepEqual(request.schema,definition);
+    const expected=structuredClone(definition);expected.properties.used.items.enum=[1,2];
+    assert.deepEqual(request.schema,expected);
+    assert.ok(!Object.hasOwn(definition.properties.used.items,'enum'));
     request.schema.properties.paragraphs.description='Changed request only';
-    assert.deepEqual(writerRequest(prompt,articles,[],[]).schema,definition);
+    assert.deepEqual(writerRequest(prompt,articles,[],[]).schema,expected);
+    const sources=[articles[0],{...articles[1],url:'https://other.example/b'}];
+    const paragraphs=['A major finding in [one publication](https://example.com/a).','A different fact in [another publication](https://other.example/b).'];
+    assert.deepEqual(parseWriter(JSON.stringify({paragraphs,used:[1,2]}),sources),{paragraphs,used:sources});
+    assert.deepEqual(parseWriter(JSON.stringify({paragraphs:[],used:[]}),articles),{paragraphs:[],used:[]});
+    assert.throws(()=>parseWriter(JSON.stringify({paragraphs,used:[1]}),sources),error=>error.code==='RP_TOO_FEW_SOURCES');
+    assert.throws(()=>parseWriter(JSON.stringify({paragraphs,used:[1,2]}),articles),error=>error.code==='RP_TOO_FEW_SOURCES');
+    for (const invalid of [{paragraphs},{paragraphs,used:[99]},{paragraphs,used:[1,1]},{paragraphs,used:['1']},
+        {paragraphs,used:[]},{paragraphs:[],used:[1]},{paragraphs,used:[1],status:'used'}])
+        assert.throws(()=>parseWriter(JSON.stringify(invalid),articles),/Invalid AI response/);
 });
 
 test('stored article IDs stay the same in the AI input and resolve independently of their position',()=>{
     const sources = [{...articles[0],id:41},{...articles[1],id:7}];
     const input = JSON.parse(writerRequest(prompt,sources,[],[]).input);
     assert.deepEqual(input.articles.map(article=>article.id),[41,7]);
-    const response = {selected:[41],discard:[7]};
+    const response = {brief:[], selected:[41],discard:[7]};
     assert.deepEqual(parseSelection(JSON.stringify(response),sources).selected.map(article=>article.url),[sources[0].url]);
     assert.throws(()=>parseSelection(JSON.stringify({...response,selected:[1]}),sources),/Invalid AI response/);
+});
+
+test('several posts and subdomains of one publication still count as one voice',()=>{
+    const sources=[{...articles[0],url:'https://idratherbewriting.com/blog/docs-at-scale-with-andrew-etter'},
+        {...articles[1],url:'https://www.idratherbewriting.com/blog/review-maniac-labatut-rationality-end-of-play'}];
+    assert.equal(publicationCount(sources),1);
+    assert.throws(()=>parseWriter(JSON.stringify({paragraphs:['First post.','Second post.'],used:[1,2]}),sources),
+        error=>error.code==='RP_TOO_FEW_SOURCES');
+    assert.equal(publicationCount([...sources,{...articles[0],url:'https://another.example/article'}]),2);
+    assert.equal(publicationCount([{...articles[0],url:'https://news.example.co.uk/a'},{...articles[1],url:'https://blog.example.co.uk/b'}]),1);
 });
 
 test('article JSON cannot override the generated illustration with source-image metadata',()=>{
@@ -423,6 +493,51 @@ test('publisher receives only the final body and returns a separate title and in
     assert.throws(()=>publisherRequest('',paragraphs,'français'),/publisher.md/);
     assert.throws(()=>publisherRequest('Write a title',paragraphs,'français'),/\{\{article\}\}/);
 });
+
+test('selection keeps relevant secondary news separate from the RP and rejects overlaps or omissions',()=>{
+    const sources=[articles[0],articles[1],article('Off topic',{id:3})];
+    const choice={selected:[1],brief:[2],discard:[3]};
+    assert.deepEqual(parseSelection(JSON.stringify(choice),sources),{selected:[sources[0]],brief:[sources[1]],discard:[3]});
+    for (const invalid of [{selected:[1],discard:[2,3]},{...choice,brief:[]},{...choice,brief:[1,2]},
+        {...choice,brief:[99]},{...choice,brief:[2,2]},{...choice,brief:['2']}])
+        assert.throws(()=>parseSelection(JSON.stringify(invalid),sources),/Invalid AI response/);
+});
+
+test('selection batching retains secondary articles from every batch and the final comparison',async()=>{
+    const sources=Array.from({length:4},(_,index)=>article('Source '+index,{id:index+1,content:'x'.repeat(400000)}));
+    let calls=0;
+    const result=await selectArticles(sources,rows=>selectionRequest('{{articles}}',rows,'français'),async request=>{
+        calls++;
+        assert.ok(request.input.length<=1000000);
+        const rows=JSON.parse(request.input);
+        assert.ok(rows.every(row=>row.content.length===400000));
+        return JSON.stringify({selected:[rows[0].id],brief:rows.slice(1).map(row=>row.id),discard:[]});
+    });
+    assert.equal(calls,3);
+    assert.deepEqual(result.selected.map(row=>row.id),[1]);
+    assert.deepEqual(result.brief.map(row=>row.id),[2,4,3]);
+    assert.deepEqual(result.discard,[]);
+});
+
+test('confirmed relevant brief articles must all survive translation while blocked off-topic titles may be rejected',()=>{
+    const blocked=article('Blocked',{id:3,status:'forbidden',content:''});
+    const pool=[...articles,blocked],request=briefRequest('Brief {{language}}',pool,'français',articles);
+    assert.ok(request.system.includes('1, 2'));
+    const answer={titles:[{id:1,title:'Premier titre',category:'Écriture'},{id:2,title:'Autre nouvelle',category:'Écriture'},{id:3,title:null,category:null}]};
+    assert.deepEqual(parseBrief(JSON.stringify(answer),pool,articles).map(row=>row.id),[1,2]);
+    answer.titles[1].title=null;
+    answer.titles[1].category=null;
+    assert.throws(()=>parseBrief(JSON.stringify(answer),pool,articles),/incomplete or invalid/);
+});
+
+test('the introduction has a mandatory 35-word maximum, including French nonbreaking spaces',()=>{
+    const chapeau=Array.from({length:35},(_,index)=>'mot'+index).join('\u00a0');
+    assert.equal(parsePublisher(JSON.stringify({title:'Titre',chapeau})).chapeau,chapeau);
+    assert.throws(()=>parsePublisher(JSON.stringify({title:'Titre',chapeau:chapeau+' mot36'})),
+        error=>error.code==='CHAPEAU_TOO_LONG' && error.message.includes('36'));
+    assert.throws(()=>parsePublisher(JSON.stringify({title:'Titre',chapeau:chapeau+':mot36'})),
+        error=>error.code==='CHAPEAU_TOO_LONG' && error.message.includes('36'));
+});
 test('author feeds identify their publications without excluding other publications on the same platform',()=>{
     const feeds='https://writer.substack.com/feed https://example.com/blog/feed';
     for (const url of ['https://writer.substack.com/p/post','https://www.writer.substack.com/p/post?utm_source=mail','https://example.com/blog/post']) {
@@ -443,23 +558,23 @@ test('author feeds identify their publications without excluding other publicati
 test('selection classifies all stable IDs once and ignores source image availability',()=>{
     const request=selectionRequest('Select sources in {{language}}: {{articles}}',articles,'français');
     assert.ok(request.system.includes('selected'));
-    assert.deepEqual(request.schema.required,['selected','discard']);
+    assert.deepEqual(request.schema.required,['selected','brief','discard']);
     assert.ok(request.input.includes('français'));
     assert.ok(!request.input.includes('hasImage'));
     assert.ok(!request.input.includes('imageCaption'));
     const definition=require('../../models/selection.json');
     const expected=JSON.parse(JSON.stringify(definition));
-    for (const key of ['selected','discard']) expected.properties[key].items.enum=[1,2];
+    for (const key of ['selected','brief','discard']) expected.properties[key].items.enum=[1,2];
     assert.deepEqual(request.schema,expected);
     assert.deepEqual(JSON.parse(request.system.split('\n\n').at(-1)).jsonSchema,expected);
     selectionRequest('{{articles}}',[{...articles[0],id:41}],'français');
     assert.deepEqual(request.schema.properties.selected.items.enum,[1,2]);
     assert.ok(!Object.hasOwn(definition.properties.selected.items,'enum'));
-    const result=parseSelection(JSON.stringify({selected:[2],discard:[1]}),articles);
+    const result=parseSelection(JSON.stringify({brief:[], selected:[2],discard:[1]}),articles);
     assert.deepEqual(result.selected,[articles[1]]);
     assert.deepEqual(result.discard,[1]);
-    for (const response of [{selected:[1],discard:[]},{selected:[1],discard:[1]},{selected:[99],discard:[2]},
-        {selected:['1'],discard:[2]},{selected:[1],discard:[2],status:'used'},null]) {
+    for (const response of [{brief:[], selected:[1],discard:[]},{brief:[], selected:[1],discard:[1]},{brief:[], selected:[99],discard:[2]},
+        {brief:[], selected:['1'],discard:[2]},{brief:[], selected:[1],discard:[2],status:'used'},null]) {
         assert.throws(()=>parseSelection(JSON.stringify(response),articles),/Invalid AI response/);
     }
 });
@@ -471,7 +586,7 @@ test('selection expands previous newsletters as data without changing the output
     assert.deepEqual(input.previousNewsletters,previous);
     assert.deepEqual(input.articles.map(article=>article.id),[1,2]);
     assert.ok(!request.system.includes(previous[0].content));
-    assert.deepEqual(request.schema.required,['selected','discard']);
+    assert.deepEqual(request.schema.required,['selected','brief','discard']);
     assert.deepEqual(JSON.parse(selectionRequest(prompt,articles,'français').input).previousNewsletters,[]);
 });
 
@@ -535,14 +650,14 @@ test('brief selection accepts explicit rejection but never silent omissions or u
     const sources=[{...articles[0],title:'Midterms 2026: Wall Street',status:'forbidden'},
         {...articles[1],title:'Novelists discuss AI writing',status:'forbidden'}];
     const before=JSON.stringify(sources);
-    const selected=parseBrief(JSON.stringify({titles:[{id:1,title:null},{id:2,title:'Les romanciers face à l’écriture avec l’IA'}]}),sources);
+    const selected=parseBrief(JSON.stringify({titles:[{id:1,title:null,category:null},{id:2,title:'Les romanciers face à l’écriture avec l’IA',category:'Création'}]}),sources);
     assert.equal(selected.length,1);
     assert.equal(selected[0].id,2);
     assert.equal(selected[0].url,sources[1].url);
     assert.equal(JSON.stringify(sources),before);
-    assert.deepEqual(parseBrief(JSON.stringify({titles:[{id:1,title:null},{id:2,title:null}]}),sources),[]);
+    assert.deepEqual(parseBrief(JSON.stringify({titles:[{id:1,title:null,category:null},{id:2,title:null,category:null}]}),sources),[]);
     for(const titles of [[{id:1,title:null}],[{id:1,title:null},{id:1,title:null}],[{id:1,title:null},{id:99,title:null}]])
-        assert.throws(()=>parseBrief(JSON.stringify({titles}),sources),/incomplete or invalid/);
+        assert.throws(()=>parseBrief(JSON.stringify({titles:titles.map(row=>({...row,category:null}))}),sources),/incomplete or invalid/);
 });
 
 test('cached RSS entries are rejected before their bodies or titles are decoded',()=>{
@@ -569,4 +684,34 @@ test('cached RSS entries are rejected before their bodies or titles are decoded'
         }),[]);
         assert.equal(checked,1);
     } finally {global.DOMParser=Original;}
+});
+
+
+test('selection gives direct editorial email links high priority across languages, without promoting alerts or feeds',()=>{
+    const candidates=[{...articles[0],id:41,source:'Utilisateur (présumé)'},
+        {...articles[0],id:42,source:'User (inferred)'},
+        {...articles[0],id:43,source:'Google Alerts'},
+        {...articles[0],id:44,source:'Google Scholar'},
+        {...articles[0],id:45,source:'RSS: example.com'},
+        {...articles[0],id:46,source:'Other service (inferred)'}];
+    const before=JSON.stringify(candidates);
+    const request=selectionRequest('{{articles}}',candidates,'français');
+    const expected=require('../../plugin/i18n').t('editorialSourcesContract',{ids:'41, 42'});
+    assert.ok(request.system.includes(expected));
+    assert.equal(selectionRequest('{{articles}}',candidates.slice(2),'français').system.includes(expected.split('41, 42')[0]),false);
+    assert.deepEqual(request.schema.properties.selected.items.enum,[41,42,43,44,45,46]);
+    assert.equal(JSON.stringify(candidates),before);
+});
+
+test('stored opaque URL identifiers are removed from AI inputs and the final brief without modifying sources',()=>{
+    const id='XVRNMOQLNZEMBM3ZWIZYWR7VXE';
+    const clean='Étienne Gernelle sur RTL : quand l’IA veut tuer la littérature';
+    const source={...articles[0],title:clean+' '+id,url:'https://www.lepoint.fr/video/edito-etienne-gernelle/etienne-gernelle-sur-rtl-quand-lia-veut-tuer-la-litterature-'+id+'/'};
+    const before=JSON.stringify(source);
+    assert.equal(JSON.parse(briefRequest('Brief in {{language}}',[source],'français').input)[0].title,clean);
+    assert.equal(JSON.parse(selectionRequest('{{articles}}',[source],'français').input)[0].title,clean);
+    const markdown=renderNewsletter(template,result,[source]);
+    assert.ok(markdown.includes('* ['+clean+']('+source.url+')'));
+    assert.ok(!markdown.includes('littérature '+id+']'));
+    assert.equal(JSON.stringify(source),before);
 });

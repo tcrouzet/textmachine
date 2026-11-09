@@ -146,7 +146,7 @@ async function retrievePage(url: string, signal: AbortSignal | undefined, isBloc
     const browserStart=Date.now();
     const page=await loadPage(url,signal,isBlocked,BrowserWindow);
     observe?.('browser',page,Date.now()-browserStart);
-    return page;
+    return page.failure && direct.status===404 && !direct.failure ? direct : page;
 }
 
 async function loadPage(url: string, signal: AbortSignal | undefined, isBlocked: (url: string)=>boolean, BrowserWindow: BrowserWindowConstructor): Promise<Page> {

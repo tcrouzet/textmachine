@@ -1,0 +1,425 @@
+{
+  "date": "2026-11-09",
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "testedAt": "2026-11-09T10:34:16.425Z",
+  "unchanged": true,
+  "titles": [
+    {
+      "id": 602,
+      "url": "https://www.theguardian.com/books/picture/2026/nov/08/tom-gauld-on-prompts-for-a-cartoon-about-artificial-intelligence-and-writing-cartoon",
+      "original": "Tom Gauld on prompts for a cartoon about artificial intelligence and writing - The Guardian",
+      "previous": "Tom Gauld sur les prompts pour un dessin humoristique sur l’intelligence artificielle et l’écriture - The Guardian",
+      "translated": "Tom Gauld imagine des consignes pour un dessin sur l’IA et l’écriture",
+      "category": "Création littéraire"
+    },
+    {
+      "id": 606,
+      "url": "https://www.blackengineer.com/leading-voices/the-proper-use-of-artificial-intelligence-in-writing/",
+      "original": "The Proper Use of Artificial Intelligence in Writing - Black Engineer",
+      "previous": "Le bon usage de l’intelligence artificielle dans l’écriture - Black Engineer",
+      "translated": "Bien utiliser l’intelligence artificielle pour écrire",
+      "category": "Création littéraire"
+    },
+    {
+      "id": 600,
+      "url": "https://www.watson.ch/fr/blogs/franc-parler/199523055-utiliser-l-ia-pour-ecrire-son-livre-nicolas-feuz-repond",
+      "original": "Utiliser l'IA pour écrire son livre? Nicolas Feuz répond - Watson",
+      "previous": "Utiliser l'IA pour écrire son livre? Nicolas Feuz répond - Watson",
+      "translated": "Utiliser l'IA pour écrire son livre? Nicolas Feuz répond - Watson",
+      "category": "Création littéraire"
+    },
+    {
+      "id": 666,
+      "url": "https://www.horizons.dz/2026/11/ecrire-a-lere-de-lia-craintes-et-bon-usage/",
+      "original": "Écrire à l'ère de l'IA: Craintes et bon usage - Horizons",
+      "previous": "Écrire à l'ère de l'IA : Craintes et bon usage - Horizons",
+      "translated": "Écrire à l'ère de l'IA: Craintes et bon usage - Horizons",
+      "category": "Création littéraire"
+    },
+    {
+      "id": 803,
+      "url": "https://www.lemonde.fr/idees/article/2026/11/02/l-auteur-d-un-livre-ecrit-par-ia-n-a-pas-fait-l-effort-d-aller-chercher-son-uvre-la-ou-elle-se-trouve-en-lui-meme_6805276_3232.html",
+      "original": "« L’“auteur” d’un livre écrit par IA n’a pas fait l’effort d’aller chercher son œuvre là où elle se trouve : en lui-même »",
+      "previous": "« L’“auteur” d’un livre écrit par IA n’a pas fait l’effort d’aller chercher son œuvre là où elle se trouve : en lui-même »",
+      "translated": "« L’“auteur” d’un livre écrit par IA n’a pas fait l’effort d’aller chercher son œuvre là où elle se trouve : en lui-même »",
+      "category": "Création littéraire"
+    },
+    {
+      "id": 657,
+      "url": "https://www.sciencedirect.com/science/article/pii/S2451958826005014",
+      "original": "AI authorship labels reduce evaluations but have little effect on costly engagement with creative writing",
+      "previous": "Les mentions d’une rédaction par l’IA font baisser les évaluations, mais ont peu d’effet sur l’engagement impliquant un coût envers les textes de création",
+      "translated": "Les textes créatifs attribués à l’IA sont moins bien jugés, mais l’investissement des lecteurs change peu",
+      "category": "Création littéraire"
+    },
+    {
+      "id": 661,
+      "url": "https://arxiv.org/abs/2611.07792",
+      "original": "Thinking Is Not Writing: Designing AI Chatbots to Connect Reasoning and Revision",
+      "previous": "Penser n’est pas écrire : concevoir des chatbots d’IA pour relier raisonnement et révision",
+      "translated": "Penser n’est pas écrire : concevoir des assistants d’IA qui relient raisonnement et révision des textes",
+      "category": "Création littéraire"
+    },
+    {
+      "id": 662,
+      "url": "https://www.computer.org/csdl/api/v1/periodical/mags/so/2026/06/11775075/2l8HGRVbWiA/download-article/pdf",
+      "original": "AI May Lower the Barrier to Writing but not the Burden of Proof",
+      "previous": "L’IA peut faciliter l’accès à l’écriture, mais pas alléger la charge de la preuve",
+      "translated": "L’IA peut faciliter l’écriture, mais n’allège pas l’exigence de preuve",
+      "category": "Création littéraire"
+    },
+    {
+      "id": 673,
+      "url": "https://www.theoutdoorwire.com/features/2026/11/ai-wins-fly-fishing-writing-contest",
+      "original": "A.I. Wins Fly Fishing Writing Contest - The Outdoor Wire",
+      "previous": "Une IA remporte un concours d’écriture sur la pêche à la mouche - The Outdoor Wire",
+      "translated": "Un texte écrit par IA remporte un concours littéraire sur la pêche à la mouche",
+      "category": "Création littéraire"
+    },
+    {
+      "id": 806,
+      "url": "https://www.lemonde.fr/livres/article/2026/11/02/le-philosophe-jean-gabriel-ganascia-livre-un-essai-eclairant-sur-les-mythes-que-suscite-l-intelligence-artificielle_6805018_3260.html",
+      "original": "Le philosophe Jean-Gabriel Ganascia livre un essai éclairant sur les mythes que suscite l’intelligence artificielle",
+      "previous": "Le philosophe Jean-Gabriel Ganascia livre un essai éclairant sur les mythes que suscite l’intelligence artificielle",
+      "translated": "Le philosophe Jean-Gabriel Ganascia livre un essai éclairant sur les mythes que suscite l’intelligence artificielle",
+      "category": "Livres et vie littéraire"
+    },
+    {
+      "id": 857,
+      "url": "https://idratherbewriting.com/blog/review-maniac-labatut-rationality-end-of-play",
+      "original": "Review of The MANIAC, by Benjamin Labatut -- thoughts on logic and the end of play",
+      "previous": "Critique de The MANIAC, de Benjamin Labatut — réflexions sur la logique et la fin du jeu",
+      "translated": "Critique de « The MANIAC », de Benjamin Labatut : réflexions sur la logique et la fin du jeu",
+      "category": "Livres et vie littéraire"
+    },
+    {
+      "id": 852,
+      "url": "https://idratherbewriting.com/blog/book-club-stern-i-am-not-a-robot",
+      "original": "AI Book Club recording: I Am Not a Robot by Joanna Stern",
+      "previous": "Enregistrement de l’AI Book Club : I Am Not a Robot, de Joanna Stern",
+      "translated": "Club de lecture sur l’IA : enregistrement de la discussion sur « I Am Not a Robot », de Joanna Stern",
+      "category": "Livres et vie littéraire"
+    },
+    {
+      "id": 712,
+      "url": "https://www.astralcodexten.com/p/your-book-review-orality-and-literacy",
+      "original": "Your Book Review: Orality and Literacy",
+      "previous": "Votre critique de livre : Oralité et écriture",
+      "translated": "Une lecture critique d’« Oralité et écriture »",
+      "category": "Livres et vie littéraire"
+    },
+    {
+      "id": 670,
+      "url": "https://stthomassource.com/content/2026/11/07/caribbean-writers-explore-storytelling-identity-ai-at-bvi-literary-festival/",
+      "original": "Caribbean Writers Explore Storytelling, Identity, AI at BVI Literary Festival",
+      "previous": "Des écrivains caribéens explorent la narration, l’identité et l’IA au BVI Literary Festival",
+      "translated": "Récit, identité et IA : les écrivains caribéens échangent au festival littéraire des îles Vierges britanniques",
+      "category": "Livres et vie littéraire"
+    },
+    {
+      "id": 636,
+      "url": "https://www.schwarzmancentre.ox.ac.uk/whats-on/utopia-now-conference-jwfy",
+      "original": "Utopia Now! Conference — part of the Utopia Now! Conference",
+      "previous": "Conférence Utopia Now! — dans le cadre de la conférence Utopia Now!",
+      "translated": "« Utopia Now! » : un colloque sur l’utopie aujourd’hui",
+      "category": "Livres et vie littéraire"
+    },
+    {
+      "id": 723,
+      "url": "https://boards.4chan.org/lit/thread/25637363",
+      "original": "i have stopped posting on this board and instead n Literature 4chan",
+      "previous": "J’ai arrêté de publier sur ce forum et à la place n Literature 4chan",
+      "translated": "Sur le forum littéraire de 4chan, un internaute préfère désormais discuter de livres avec l’IA",
+      "category": "Livres et vie littéraire"
+    },
+    {
+      "id": 640,
+      "url": "https://www.cnn.com/2026/11/07/entertainment/ao3-hack-shutdown-cec",
+      "original": "AO3’s takedown exposes divisions within its community",
+      "previous": "La mise hors ligne d’AO3 révèle des divisions au sein de sa communauté",
+      "translated": "La mise hors ligne du site de fanfictions AO3 révèle les divisions de sa communauté",
+      "category": "Livres et vie littéraire"
+    },
+    {
+      "id": 605,
+      "url": "https://news.ycombinator.com/item?id=50411036",
+      "original": "Ask HN: LLM-Resistant Publishing Strategies - Hacker News",
+      "previous": "Question à HN : stratégies de publication résistantes aux LLM - Hacker News",
+      "translated": "Comment publier sans laisser les modèles d’IA récupérer ses contenus ? La question posée sur Hacker News",
+      "category": "Édition et droits"
+    },
+    {
+      "id": 884,
+      "url": "https://www.blogdumoderateur.com/google-open-ai-microsoft-anthropic-regle-robots-txt-commune-contre-entrainement-ia/",
+      "original": "Google, OpenAI, Microsoft et Anthropic adoptent une règle robots.txt commune contre l’entraînement IA",
+      "previous": "Google, OpenAI, Microsoft et Anthropic adoptent une règle robots.txt commune contre l’entraînement IA",
+      "translated": "Google, OpenAI, Microsoft et Anthropic adoptent une règle robots.txt commune contre l’entraînement IA",
+      "category": "Édition et droits"
+    },
+    {
+      "id": 765,
+      "url": "https://www.niemanlab.org/2026/10/meta-pledges-to-consult-publishers-before-finalizing-its-new-terms/",
+      "original": "Meta pledges to consult publishers before finalizing its new terms",
+      "previous": "Meta s’engage à consulter les éditeurs avant de finaliser ses nouvelles conditions",
+      "translated": "Meta promet de consulter les éditeurs de presse avant de finaliser ses nouvelles conditions",
+      "category": "Édition et droits"
+    },
+    {
+      "id": 632,
+      "url": "https://www.indiatoday.in/india/south/story/tamil-nadu-library-scam-rajmohan-dmk-ai-generated-books-periyar-arivulagam-3034804-2026-11-08",
+      "original": "India's first AI scam: TVK minister jabs DMK over multi-crore Periyar library fraud",
+      "previous": "La première escroquerie à l’IA en Inde : un ministre du TVK tacle le DMK au sujet d’une fraude de plusieurs crores liée à la bibliothèque Periyar",
+      "translated": "« Première arnaque à l’IA en Inde » : un ministre accuse l’ancien gouvernement d’une fraude de plusieurs dizaines de millions de roupies à la bibliothèque Periyar",
+      "category": "Édition et droits"
+    },
+    {
+      "id": 709,
+      "url": "https://www.thenewsminute.com/tamil-nadu/fake-histories-dubious-authorship-perumal-murugan-questions-periyar-arivulagam-book-procurements-97",
+      "original": "Fake histories, dubious authorship: Perumal Murugan questions Periyar Arivulagam book procurements",
+      "previous": "Faux récits historiques, attributions douteuses : Perumal Murugan remet en question les achats de livres de Periyar Arivulagam",
+      "translated": "Faux récits historiques, auteurs douteux : l’écrivain Perumal Murugan met en cause les achats de livres de la bibliothèque Periyar",
+      "category": "Édition et droits"
+    },
+    {
+      "id": 603,
+      "url": "https://casrai.org/guides/literature-review-artificial-intelligence",
+      "original": "Literature Review and AI: Workflow and Reporting - CASRAI",
+      "previous": "Revue de littérature et IA : méthode de travail et présentation des résultats - CASRAI",
+      "translated": "Utiliser l’IA pour une revue de la littérature scientifique : organiser le travail et rendre compte de son usage",
+      "category": "Recherche et enseignement"
+    },
+    {
+      "id": 655,
+      "url": "https://www.sciencedirect.com/science/article/pii/S1475158526001724",
+      "original": "Learner corpora and artificial intelligence in EAP: From corpus evidence to AI-assisted feedback on academic writing",
+      "previous": "Les corpus d’apprenants et l’intelligence artificielle en EAP : des données de corpus aux retours assistés par l’IA sur l’écriture universitaire",
+      "translated": "Textes d’apprenants et IA en anglais universitaire : de l’analyse des écrits aux retours pédagogiques assistés par IA",
+      "category": "Recherche et enseignement"
+    },
+    {
+      "id": 659,
+      "url": "https://www.tandfonline.com/doi/abs/10.1080/10494820.2026.2757648",
+      "original": "Questioning practices in AI-mediated academic writing: a case study of final-year undergraduates using ChatGPT",
+      "previous": "Les pratiques de questionnement dans l’écriture universitaire médiée par l’IA : étude de cas d’étudiants de dernière année de premier cycle utilisant ChatGPT",
+      "translated": "Rédaction universitaire avec l’IA : une étude de cas sur les questions posées à ChatGPT par des étudiants en fin de premier cycle",
+      "category": "Recherche et enseignement"
+    },
+    {
+      "id": 658,
+      "url": "https://www.mdpi.com/2079-3200/14/11/286",
+      "original": "Cognitive Predictors of AI-Related Textual Change in Upper-Intermediate L2 Russian Writing: Working Memory, Attention Control, and Critical Thinking",
+      "previous": "Prédicteurs cognitifs des modifications textuelles liées à l’IA dans l’écriture en russe L2 de niveau intermédiaire supérieur : mémoire de travail, contrôle de l’attention et pensée critique",
+      "translated": "Écrire en russe langue étrangère au niveau intermédiaire avancé : mémoire de travail, contrôle de l’attention et esprit critique comme indicateurs des modifications de texte liées à l’IA",
+      "category": "Recherche et enseignement"
+    },
+    {
+      "id": 663,
+      "url": "https://educationalchallenges.org.ua/index.php/education_challenges/article/view/633",
+      "original": "One feedback does not fit all: Feedback uptake in artificial intelligence-supported writing classrooms",
+      "previous": "Un même retour ne convient pas à tous : prise en compte des retours dans les cours d’écriture assistés par l’intelligence artificielle",
+      "translated": "Les mêmes commentaires ne conviennent pas à tous : comment les élèves exploitent les retours de l’IA pour réviser leurs textes",
+      "category": "Recherche et enseignement"
+    },
+    {
+      "id": 664,
+      "url": "https://onlinelibrary.wiley.com/doi/abs/10.1111/ijal.70415",
+      "original": "Linguistic Prejudice Toward GenAI‐Style in EAL Writing",
+      "previous": "Préjugés linguistiques envers le style de la GenAI dans l’écriture en anglais langue additionnelle (EAL)",
+      "translated": "Les préjugés envers un style jugé typique de l’IA dans les écrits d’étudiants dont l’anglais n’est pas la langue maternelle",
+      "category": "Recherche et enseignement"
+    },
+    {
+      "id": 676,
+      "url": "https://goodmenproject.com/featured-content/ai-governance-a-practical-view-from-a-writing-classroom/",
+      "original": "AI Governance — A Practical View From a Writing Classroom - The Good Men Project",
+      "previous": "Gouvernance de l’IA — un point de vue pratique depuis un cours d’écriture - The Good Men Project",
+      "translated": "Encadrer l’IA : le point de vue pratique d’un enseignant d’écriture",
+      "category": "Recherche et enseignement"
+    },
+    {
+      "id": 909,
+      "url": "https://www.nature.com/articles/d41586-026-03407-2",
+      "original": "AI-hallucinated citations should be treated as research misconduct",
+      "previous": "Les citations hallucinées par l’IA devraient être considérées comme un manquement à l’intégrité scientifique",
+      "translated": "Les références inventées par l’IA devraient être considérées comme un manquement à l’intégrité scientifique",
+      "category": "Recherche et enseignement"
+    },
+    {
+      "id": 647,
+      "url": "https://fryskednis.blogspot.com/2026/11/a-new-chapter-in-my-oera-linda-research.html",
+      "original": "Oera Linda studies: Looking ahead: Text, Time, Transmission",
+      "previous": "Études sur l’Oera Linda : regard vers l’avenir : texte, temps, transmission",
+      "translated": "Études du manuscrit Oera Linda : nouvelles perspectives sur le texte, le temps et sa transmission",
+      "category": "Recherche et enseignement"
+    },
+    {
+      "id": 843,
+      "url": "https://idratherbewriting.com/blog/nytril-question-and-answer",
+      "original": "Q&A about Nytril, a programming language for building documents, with Shawn McCreight",
+      "previous": "Questions-réponses sur Nytril, un langage de programmation pour créer des documents, avec Shawn McCreight",
+      "translated": "Nytril, un langage de programmation pour créer des documents : entretien avec son fondateur Shawn McCreight",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 853,
+      "url": "https://idratherbewriting.com/blog/new-books-tech-comm-2026",
+      "original": "Six new books in tech comm: a roundup",
+      "previous": "Six nouveaux livres en communication technique : un tour d’horizon",
+      "translated": "Six nouveaux livres sur la communication technique : tour d’horizon",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 848,
+      "url": "https://idratherbewriting.com/blog/wtfm-book-ct-smith-podcast",
+      "original": "Why docs still need an owner — podcast with CT Smith about WTFM",
+      "previous": "Pourquoi la documentation a toujours besoin d’un responsable — podcast avec CT Smith à propos de WTFM",
+      "translated": "Pourquoi la documentation a toujours besoin d’un responsable : un podcast avec CT Smith sur son livre « WTFM »",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 856,
+      "url": "https://idratherbewriting.com/blog/podcast-ethan-palm-agent-traffic",
+      "original": "Writing for an audience of agents — podcast with Ethan Palm from Mintlify",
+      "previous": "Écrire pour un public d’agents — podcast avec Ethan Palm de Mintlify",
+      "translated": "Écrire pour des agents IA : un podcast avec Ethan Palm, rédacteur technique chez Mintlify",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 845,
+      "url": "https://idratherbewriting.com/blog/make-documentation-agent-friendly",
+      "original": "Making documentation pages agent friendly",
+      "previous": "Rendre les pages de documentation adaptées aux agents",
+      "translated": "Rendre les pages de documentation accessibles aux agents IA",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 844,
+      "url": "https://idratherbewriting.com/blog/identify-semantics-in-styling-agents",
+      "original": "Looking at a site like an agent — identifying semantics in styling",
+      "previous": "Regarder un site comme un agent — repérer la sémantique dans la mise en forme",
+      "translated": "Voir un site comme un agent IA : repérer le sens porté par la mise en forme",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 743,
+      "url": "https://idratherbewriting.com/blog/agent-readability-deprecated-content-page-notes",
+      "original": "Agent readability: Carrying over top-level page notes into independent chunks",
+      "previous": "Lisibilité pour les agents : reprendre les notes générales de la page dans des fragments indépendants",
+      "translated": "Adapter les contenus aux agents IA : conserver les avertissements d’une page dans chaque fragment autonome",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 851,
+      "url": "https://idratherbewriting.com/blog/building-out-agent-skills-course",
+      "original": "Building out my agent skills course and rethinking product skills",
+      "previous": "Développer mon cours sur les compétences des agents et repenser les compétences produit",
+      "translated": "J’enrichis mon cours sur les modules d’instructions pour agents IA et repense ceux consacrés aux produits",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 850,
+      "url": "https://idratherbewriting.com/blog/building-machines-skills-for-tech-comm-workflows",
+      "original": "Building machines that work with other machines",
+      "previous": "Construire des machines qui fonctionnent avec d’autres machines",
+      "translated": "Créer des outils d’IA qui travaillent ensemble pour gérer la documentation",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 846,
+      "url": "https://idratherbewriting.com/blog/ai-strategy-to-fix-docs-based-logs",
+      "original": "My AI strategy to fix docs based on chat logs",
+      "previous": "Ma stratégie d’IA pour corriger la documentation à partir des historiques de discussion",
+      "translated": "Ma stratégie pour corriger la documentation avec l’IA à partir des historiques de conversation",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 842,
+      "url": "https://idratherbewriting.com/blog/improvement-feedback-loop-docs",
+      "original": "Achieving a feedback improvement loop with documentation by simulating user queries",
+      "previous": "Mettre en place une boucle d’amélioration de la documentation grâce aux retours en simulant des requêtes d’utilisateurs",
+      "translated": "Améliorer la documentation en continu en simulant les questions des utilisateurs",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 849,
+      "url": "https://idratherbewriting.com/blog/turning-web-content-into-pdf-to-sell",
+      "original": "How I turn my API doc course into a PDF and sell it on Buy Me a Coffee",
+      "previous": "Comment je transforme mon cours sur la documentation d’API en PDF et le vends sur Buy Me a Coffee",
+      "translated": "Comment je transforme mon cours sur la documentation des interfaces de programmation en PDF pour le vendre sur Buy Me a Coffee",
+      "category": "Documentation et rédaction technique"
+    },
+    {
+      "id": 619,
+      "url": "http://www.argotheme.com/organecyberpresse/spip.php?article5035",
+      "original": "IA et journalisme en 2026 : l’humain reste la clé de la confiance du public",
+      "previous": "IA et journalisme en 2026 : l’humain reste la clé de la confiance du public",
+      "translated": "IA et journalisme en 2026 : l’humain reste la clé de la confiance du public",
+      "category": "Médias et communication"
+    },
+    {
+      "id": 760,
+      "url": "https://www.niemanlab.org/2026/11/elon-musks-grokipedia-is-littered-with-mistakes-but-wikipedia-could-still-learn-some-things-from-it/",
+      "original": "Elon Musk’s Grokipedia is littered with mistakes. But Wikipedia could still learn some things from it.",
+      "previous": "Grokipedia d’Elon Musk est truffée d’erreurs. Mais Wikipédia pourrait tout de même en tirer quelques leçons.",
+      "translated": "Grokipedia, l’encyclopédie d’Elon Musk, regorge d’erreurs, mais Wikipédia pourrait tout de même en tirer des leçons",
+      "category": "Médias et communication"
+    },
+    {
+      "id": 770,
+      "url": "https://www.niemanlab.org/2026/10/i-went-looking-for-the-source-of-one-little-statistic-that-was-easier-said-than-done/",
+      "original": "I went looking for the source of one little statistic. That was easier said than done.",
+      "previous": "J’ai cherché la source d’une petite statistique. C’était plus facile à dire qu’à faire.",
+      "translated": "J’ai cherché la source d’un simple chiffre : plus facile à dire qu’à faire",
+      "category": "Médias et communication"
+    },
+    {
+      "id": 744,
+      "url": "https://www.wired.com/story/nyt-cooking-new-ai-powered-recipe-modifier-is-pretty-good/",
+      "original": "I Used NYT Cooking’s New AI-Powered Recipe Modifier, and It’s Actually Pretty Good",
+      "previous": "J’ai utilisé le nouvel outil de modification de recettes de NYT Cooking, propulsé par l’IA, et il est en fait plutôt bon",
+      "translated": "J’ai testé le nouvel outil d’IA de NYT Cooking pour modifier les recettes, et il est plutôt réussi",
+      "category": "Médias et communication"
+    },
+    {
+      "id": 641,
+      "url": "https://medium.com/in-christo/technology-helps-in-preaching-954d37ccdb76",
+      "original": "Technology Helps In Preaching",
+      "previous": "La technologie aide à prêcher",
+      "translated": "La technologie au service de la préparation et de la diffusion des sermons",
+      "category": "Médias et communication"
+    },
+    {
+      "id": 746,
+      "url": "https://www.blogdumoderateur.com/ia-entreprise-informer-former-salaries-terrain/",
+      "original": "IA en entreprise : comment informer et former les salariés de terrain ?",
+      "previous": "IA en entreprise : comment informer et former les salariés de terrain ?",
+      "translated": "IA en entreprise : comment informer et former les salariés de terrain ?",
+      "category": "Médias et communication"
+    },
+    {
+      "id": 731,
+      "url": "https://www.theguardian.com/technology/2026/nov/08/ai-clog-public-bodies-local-authorities-onslaught-chatbot-generated-correspondence",
+      "original": "‘AI clog’: UK public bodies battle onslaught of chatbot-generated complaints",
+      "previous": "« Engorgement par l’IA » : les organismes publics britanniques face à un déferlement de réclamations générées par des chatbots",
+      "translated": "Au Royaume-Uni, les organismes publics submergés par les réclamations rédigées par des assistants d’IA",
+      "category": "Médias et communication"
+    },
+    {
+      "id": 713,
+      "url": "https://neurosciencenews.com/pink-noise-conversation-cognition-32390/",
+      "original": "How “Pink Noise” in Conversation Makes Chats Enjoyable",
+      "previous": "Comment le « bruit rose » dans la conversation rend les échanges agréables",
+      "translated": "Comment le « bruit rose », un rythme particulier des échanges, rend les conversations agréables",
+      "category": "Médias et communication"
+    },
+    {
+      "id": 613,
+      "url": "https://chine.in/guide/hongguo-duanju-application-micro-dramas_5164.html",
+      "original": "Hongguo Duanju, l'application de micro-dramas de ByteDance",
+      "previous": "Hongguo Duanju, l'application de micro-dramas de ByteDance",
+      "translated": "Hongguo Duanju, l'application de micro-dramas de ByteDance",
+      "category": "Médias et communication"
+    }
+  ]
+}

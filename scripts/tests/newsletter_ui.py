@@ -65,7 +65,7 @@ try:
             p.settings.outputFolder = 'TextMachine';
             p.updateFolderIcon();
             const article = (slug,extra={})=>({date:'2026-11-03',title:slug,url:'https://example.com/'+slug,source:'User',status:'',publish:'2026-11-01',content:'AI and books '+slug,image:'',...extra});
-            const entries = [article('relevant',{status:'used',image:'https://example.com/cover.jpg'}),article('irrelevant'),article('old',{status:'used'}),article('blocked',{title:'New AI writing study',status:'404',content:'Unverified content must never be sent'})];
+            const entries = [article('relevant',{status:'used',image:'https://example.com/cover.jpg'}),article('irrelevant'),article('old',{status:'used'}),article('blocked',{title:'New AI writing study',status:'forbidden',content:'Unverified content must never be sent'}),article('companion',{url:'https://another.example/companion'})];
             const file = app.vault.getAbstractFileByPath(p.dataPath);
             const now = new Date();
             const day = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
@@ -87,16 +87,16 @@ try:
             window.unexpectedSourceLoads=0;
             p.loadPage=async()=>{window.unexpectedSourceLoads++;throw new Error('Source photos must not be loaded');};
             p.getAIConnection=()=>({provider:'openai',model:'fixture',apiKey:'fixture'});
-            p.getAIKey=provider=>{if(provider!=='openai')throw new Error('Wrong image key');return 'fixture';};
+            p.getAIKey=()=>{throw new Error('Images must use the configured connection, not a separate API key');};
             p.requestAI=async options=>{
-                if(options.url!=='https://api.openai.com/v1/images/generations')throw new Error('Wrong image endpoint');
+                if(options.url!=='https://api.openai.com/v1/responses')throw new Error('Wrong image endpoint');
                 const body=JSON.parse(options.body);
-                if(body.size!=='1600x1200' || body.n!==1 || body.output_format!=='png')throw new Error('Wrong image dimensions or format');
-                if(!body.prompt.includes('Runtime image generation in español') || !body.prompt.includes('A new angle.'))throw new Error('Image prompt must receive the final article and language');
-                if(body.prompt.includes('cover.jpg') || body.prompt.includes('Selected article.'))throw new Error('Source photos and press review must not become image input');
+                if(body.model!=='fixture' || body.tools[0].type!=='image_generation' || Object.hasOwn(body.tools[0],'model') || body.tools[0].output_format!=='png')throw new Error('Images must use the configured model and its native tool');
+                if(!body.input.includes('Runtime image generation in español') || !body.input.includes('A new angle.'))throw new Error('Image prompt must receive the final article and language');
+                if(body.input.includes('cover.jpg') || body.input.includes('Selected article.'))throw new Error('Source photos and press review must not become image input');
                 window.imageCalls++;window.pipelineStages.push('image');
                 if(window.imageCalls>1)throw new Error('The illustration must be generated only once per date');
-                return {status:200,json:{data:[{b64_json:window.fixtureImage}]}};
+                return {status:200,json:{status:'completed',output:[{type:'image_generation_call',status:'completed',result:window.fixtureImage}]}};
             };
             window.rewriteResponse=text=>JSON.stringify({paragraphs:text.trim().split(/\r?\n[ \t]*\r?\n+/)});
             window.publication={title:'Books and AI',chapeau:'Introduction.'};
@@ -108,11 +108,14 @@ try:
             };
             window.answerStages=input=>{
                 let context;try{context=JSON.parse(input);}catch{return null;}
+                if(context?.instructions==='Runtime verifier'){
+                    throw new Error('The retired verifier must not run');
+                }
                 if(context?.instructions==='Runtime selection'){
                     if(context.previousPosts[0]?.url!=='https://tcrouzet.substack.com/p/latest')throw new Error('Author history missing from selection');
                     window.pipelineStages.push('selection');
                     if(context.articles.some(article=>['status','image','hasImage','imageCaption'].some(key=>Object.hasOwn(article,key))))throw new Error('Selection must not depend on photo metadata');
-                    return JSON.stringify({selected:context.articles.filter(article=>article.title!=='irrelevant').map(article=>article.id),discard:context.articles.filter(article=>article.title==='irrelevant').map(article=>article.id)});
+                    return JSON.stringify({selected:context.articles.filter(article=>article.title!=='irrelevant').map(article=>article.id),brief:[],discard:context.articles.filter(article=>article.title==='irrelevant').map(article=>article.id)});
                 }
                 return null;
             };
@@ -122,7 +125,7 @@ try:
                 if (titles.length!==1 || titles[0].id!==4 || titles[0].title!=='New AI writing study'
                     || Object.keys(titles[0]).sort().join(',')!=='id,title') throw new Error('Brief translation must receive only original titles and IDs');
                 window.briefTranslationUsed=true;window.pipelineStages.push('bref');
-                return JSON.stringify({titles:[{id:4,title:system.includes('français') ? 'Nouvelle étude sur l’écriture avec l’IA' : 'Nueva investigación sobre escritura con IA'}]});
+                return JSON.stringify({titles:[{id:4,title:system.includes('français') ? 'Nouvelle étude sur l’écriture avec l’IA' : 'Nueva investigación sobre escritura con IA',category:system.includes('français') ? 'Recherche' : 'Investigación'}]});
             };
             p.generate = async (_connection,system,input,_request,_signal,progress,imageUrl)=>{
                 let context;try {context=JSON.parse(input);} catch { /* Revisions receive plain prose. */ }
@@ -143,14 +146,14 @@ try:
                 if (context.instructions!=='Runtime writer') throw new Error('Runtime prompt not loaded');
                 if (context.language!=='español' || input.includes('{{language}}')) throw new Error('Prompt variables not expanded');
                 if (system.includes('newsletter.md') || system.includes('modèle local') || input.includes('{{#groups}}')) throw new Error('Markdown template sent to AI');
-                if (context.articles.length!==1) throw new Error('Writer must receive only the selected source');
+                if (context.articles.length!==2) throw new Error('Writer must receive both selected publications');
                 if(Object.hasOwn(context,'summaries'))throw new Error('Removed summaries must not be sent to the writer');
                 if (context.articles[0].id!==1 || Object.hasOwn(context.articles[0],'hasImage') || Object.hasOwn(context.articles[0],'status') || Object.hasOwn(context.articles[0],'image')) throw new Error('AI input not optimized');
                 if (context.previousNewsletters[0].content!=='# Previous angle') throw new Error('History missing');
                 if (context.recentPosts[0].content!=='Previous blog idea') throw new Error('Feed text not inert');
                 if (context.recentPosts[0].url!=='https://tcrouzet.substack.com/p/latest') throw new Error('Feed URL missing');
                 window.generated = true;window.pipelineStages.push('writer');
-                const result = JSON.stringify({paragraphs:['First paragraph.','Second paragraph. [Source](https://example.com/relevant)','A new angle.']});
+                const result = JSON.stringify({paragraphs:['First paragraph.','Second paragraph. [Source](https://example.com/relevant) [Companion](https://another.example/companion)','A new angle.'],used:context.articles.map(article=>article.id)});
                 window.fixtureProgress = progress;
                 for (let index=0;index<40;index++) progress('Étape '+index);
                 progress('<img src="https://tracker.invalid/progress">');
@@ -165,11 +168,11 @@ try:
             menu.showAtPosition({x:120,y:120});
         }""")
         page.locator('.menu-item').filter(has_text='Text Machine').click()
-        page.get_by_role('alert').filter(has_text='1 articles lisibles disponibles ; 10 minimum requis').wait_for()
+        page.get_by_role('alert').filter(has_text='2 articles lisibles disponibles ; 10 minimum requis').wait_for()
         assert page.evaluate('window.pipelineStages.length === 0 && window.imageCalls === 0')
         page.evaluate('async () => { await app.vault.delete(app.vault.getAbstractFileByPath(window.previousNote)); }')
         page.get_by_role('button', name='Réessayer', exact=True).click()
-        page.get_by_role('alert').filter(has_text='2 articles lisibles disponibles ; 10 minimum requis').wait_for()
+        page.get_by_role('alert').filter(has_text='3 articles lisibles disponibles ; 10 minimum requis').wait_for()
         assert page.evaluate('window.pipelineStages.length === 0 && window.imageCalls === 0')
         assert len(list((vault / 'TextMachine').glob('text-machine-*.md'))) == 2
         assert (vault / page.evaluate('window.firstNote')).read_text().startswith('# Earlier edition')
@@ -235,9 +238,9 @@ try:
         first_image = image_path.read_bytes()
         data = json.loads((vault / 'TextMachine/textmachine.json').read_text())
         assert data['annotation'] == 'Keep this'
-        assert [article['id'] for article in data['articles']] == [1,2,3,4]
-        assert data['nextId'] == 5
-        assert [article['status'] for article in data['articles']] == ['','','','forbidden']
+        assert [article['id'] for article in data['articles']] == [1,2,3,4,5]
+        assert data['nextId'] == 6
+        assert [article['status'] for article in data['articles']] == ['','','','forbidden','']
         assert all('used' not in article and article['usedAt'] for article in data['articles'])
         assert data['articles'][3]['title'] == 'New AI writing study'
         assert data['articles'][0]['usedAt'] == page.evaluate("app.plugins.plugins['text-machine'].newsletter.day()")
@@ -263,10 +266,10 @@ try:
                 if (_system.startsWith('Runtime revision')) return input;
                 const context = JSON.parse(input);
                 const urls = context.articles.map(article=>article.url).sort();
-                if (JSON.stringify(urls)!==JSON.stringify(['https://example.com/new','https://example.com/relevant'])) throw new Error('Today’s selection missing');
+                if (JSON.stringify(urls)!==JSON.stringify(['https://another.example/companion','https://example.com/new','https://example.com/relevant'])) throw new Error('Today’s selection missing');
                 if (context.previousNewsletters.length!==1 || context.previousNewsletters[0].content!=='# Previous angle') throw new Error('Today was included in history');
                 window.regenerated = true;
-                return JSON.stringify({paragraphs:['New first paragraph. [Source](https://example.com/relevant)','New second paragraph. [Source](https://example.com/new)']});
+                return JSON.stringify({paragraphs:['New first paragraph. [Source](https://example.com/relevant)','New second paragraph. [Source](https://example.com/new) [Companion](https://another.example/companion)'],used:context.articles.map(article=>article.id)});
             };
             const menu = new window.TestMenu();
             menu.setUseNativeMenu(false);
@@ -298,7 +301,7 @@ try:
                     return window.rewriteResponse(input.replace('Une étude quasi expérimentale compare deux groupes existants.','Une étude compare deux groupes existants. Les participants ne sont pas répartis au hasard.'));
                 }
                 const articles = JSON.parse(input).articles;
-                return JSON.stringify({paragraphs:["«Un livre!», dit l'auteur. Une étude quasi expérimentale compare deux groupes existants.",'Prix: 25 euros. Source [article](https://example.com/relevant).']});
+                return JSON.stringify({paragraphs:["«Un livre!», dit l'auteur. Une étude quasi expérimentale compare deux groupes existants.",'Prix: 25 euros. Source [article](https://example.com/relevant). [Companion](https://another.example/companion).'],used:articles.map(article=>article.id)});
             };
             await p.writeNewsletter();
         }""")
@@ -373,7 +376,7 @@ try:
             const beforeData=await app.vault.read(file),beforeNote=await app.vault.read(note),generate=p.generate;
             p.generate=async(connection,system,input,...rest)=>{
                 let context;try{context=JSON.parse(input);}catch{}
-                if(context?.instructions==='Runtime writer')return JSON.stringify({paragraphs:['Un billet [de l’auteur](https://tcrouzet.substack.com/p/latest).','Une autre phrase.']});
+                if(context?.instructions==='Runtime writer')return JSON.stringify({paragraphs:['Un billet [de l’auteur](https://tcrouzet.substack.com/p/latest).','Une autre phrase. [Source](https://example.com/relevant) [Companion](https://another.example/companion).'],used:context.articles.map(article=>article.id)});
                 return generate(connection,system,input,...rest);
             };
             let failure='';

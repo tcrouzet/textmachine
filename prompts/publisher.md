@@ -1,12 +1,6 @@
-Écris en {{language}} le titre et le chapeau de cette revue de presse. Choisis un fait concret et marquant du texte pour donner envie d’entrer dans la lecture, sans chercher une idée qui englobe tous les sujets.
+Écris en {{language}} un titre court et un chapeau de 20 à 35 mots pour cette revue de presse. Pars du premier paragraphe : le titre annonce son sujet, le chapeau le situe, puis le premier paragraphe développe les faits. Lis les trois à la suite : ils doivent former une entrée continue. Garde le même sujet sans raconter deux fois la même scène ; réserve les détails au corps.
 
-Le titre est court et immédiatement compréhensible : quelqu’un fait quelque chose, une situation surprend, une citation exacte retient l’attention. Préfère les acteurs, les objets et les actions aux notions abstraites. Tu peux juxtaposer quelques sujets concrets sans leur inventer de lien. Une citation doit être présente dans le texte et garder son sens.
-
-Le chapeau développe cette même accroche en une ou deux phrases, autour de 20 à 35 mots. Nomme les acteurs, situe l’action et apporte un détail que le titre ne donne pas. Il peut se concentrer sur le sujet d’ouverture : inutile d’annoncer tous les sujets de la revue de presse. La clarté prime sur le compte de mots.
-
-Lis le titre et le chapeau comme si tu découvrais le sujet. On doit comprendre qui fait quoi et ce qui mérite d’être raconté, sans deviner à quoi renvoient « son aide », « ce choix » ou « cette décision ». Évite les questions vagues et les leçons générales.
-
-Utilise uniquement les faits du texte, sans amplifier leur portée. Le titre ne répète ni « IA », ni « AI », ni « intelligence artificielle » ; il ne comporte ni date ni référence à TextMachine.
+Le lecteur découvre le sujet. Un sigle ou un nom de site peu connu ne doit pas porter le titre : dis ce qui arrive et à qui, avec des mots courants. Reste fidèle aux faits, sans morale ni dramatisation. Évite « IA » dans le titre : c’est déjà le sujet de la newsletter.
 
 # Exemples de France Inter
 

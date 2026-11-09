@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Titres de la rubrique En bref",
-  "description": "Chaque ID fourni apparaît exactement une fois : titre traduit si pertinent, title à null si hors sujet ou trop incertain. Sans résumé ni URL ajoutée.",
+  "description": "Chaque ID fourni apparaît exactement une fois. Les titres retenus sont traduits, catégorisés et ordonnés par thème. Pour un rejet autorisé, title et category valent null. Sans résumé ni URL ajoutée.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,7 +16,8 @@
         "additionalProperties": false,
         "required": [
           "id",
-          "title"
+          "title",
+          "category"
         ],
         "properties": {
           "id": {
@@ -24,9 +25,20 @@
             "minimum": 1
           },
           "title": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "minLength": 1,
-            "description": "Titre pertinent traduit dans la langue demandée, avec une casse de phrase ; null si le titre ne montre pas un lien clair entre l’IA et la littérature, l’écriture ou les métiers du livre."
+            "description": "Titre de presse descriptif et compréhensible pour un lecteur non spécialiste, fidèle au sujet. Remplacer les jeux de mots et allusions obscures par une formulation directe. Jargon clarifié, acteurs identifiés par leur rôle si leur nom est peu connu. Obligatoire pour les IDs confirmés pertinents. Pour les autres seulement : null si hors sujet ou trop incertain."
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "description": "Catégorie thématique courte dans la langue demandée. Réutiliser exactement le même libellé pour les titres du même thème. Null uniquement si title est null."
           }
         }
       }

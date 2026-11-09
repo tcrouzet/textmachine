@@ -219,13 +219,15 @@ function extractPage(html: string, url: string): {blocked?: boolean; content?: s
 }
 
 async function crawl(article: Article, blocked: string[], signal: AbortSignal | undefined, load: PageLoader): Promise<Article> {
+    if (article.status === '404') return article;
     if (article.status === 'forbidden' || isPdf(article.url)) return {...article,status:'forbidden'};
     if (isBlocked(article.url, blocked)) return {...article, status:'forbidden'};
     const page = await load(article.url, signal, url => isBlocked(url, blocked));
     if (signal?.aborted) throw new Error(t('pluginDisabled'));
+    if (page.status === 404 && !page.failure) return {...article,status:'404'};
     if (isPdf(page.url,page.contentType) || page.html?.trimStart().startsWith('%PDF-')) return {...article,status:'forbidden'};
     const extracted = page.status >= 200 && page.status < 300 && page.html ? extractPage(page.html, page.url) : null;
-    if (extracted?.content) return {...article, ...extracted, status:article.status === '404' ? '' : article.status};
+    if (extracted?.content) return {...article, ...extracted};
     if (!page.failure && (extracted?.blocked || [401,402,403,451].includes(page.status))) {
         block(blocked, article.url);
         if (page.url !== article.url) block(blocked, page.url);

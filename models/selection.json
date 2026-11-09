@@ -1,17 +1,26 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Sélection des articles",
-  "description": "Chaque ID fourni apparaît exactement une fois dans selected ou discard, jamais dans les deux listes.",
+  "description": "Chaque ID fourni apparaît exactement une fois dans selected, brief ou discard.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "selected",
+    "brief",
     "discard"
   ],
   "properties": {
     "selected": {
       "type": "array",
-      "description": "IDs des articles retenus pour les résumés et la rédaction.",
+      "description": "IDs des sources dont les faits ou le désaccord peuvent se comprendre en quelques phrases sans préalables spécialisés. Au moins deux publications distinctes ; 3 à 5 sources si leur qualité le permet. Liste vide si aucune RP à plusieurs voix n’est possible.",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "brief": {
+      "type": "array",
+      "description": "IDs des nouvelles pertinentes secondaires ou trop limitées pour la RP, ainsi que des analyses ou débats exigeant trop de contexte pour une RP courte.",
       "items": {
         "type": "integer",
         "minimum": 1

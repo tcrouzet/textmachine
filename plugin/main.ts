@@ -10,7 +10,8 @@ import * as browser from './browser';
 import * as ai from './ai/config';
 import * as codex from './ai/codex';
 import {renderAI} from './ai/settings';
-import {Settings, Account, Label, Progress, Action, AIProvider, Article, FeedEntry, Model, HttpOptions, SettingRow, SettingsGroup, errorOf, record} from './types';
+import {Settings, NewsletterProfile, Account, Label, Progress, Action, AIProvider, Article, FeedEntry, Model, SettingRow, SettingsGroup, errorOf, record} from './types';
+import {newsletterDefaults,newsletterValues,newsletterProfiles,readProfiles,foldersOverlap} from './profiles';
 import * as newsletter from './newsletter';
 import * as generation from './ai/generate';
 import * as imageGeneration from './ai/image';
@@ -100,18 +101,22 @@ export default class TextMachine extends Plugin {
         this.codex = codex;
         this.renderAI = renderAI;
         const {newsletterFeed:legacyFeed,...storedSettings} = record(await this.loadData());
-        const defaults: Settings = {...this.ai.defaults, secretKey:'',labelId:'',outputFolder:'',excludedSources:'',newsletterLanguage:'français',referenceSources:'',includeFeeds:'',
-            authorFeeds:typeof legacyFeed==='string' ? legacyFeed : '',minimumSources:10,debug:false,anthropicSecretId:undefined,openaiSecretId:undefined};
+        const defaults: Settings = {...this.ai.defaults,...newsletterDefaults,secretKey:'',
+            authorFeeds:typeof legacyFeed==='string' ? legacyFeed : '',debug:false,activeNewsletter:'',newsletters:[],anthropicSecretId:undefined,openaiSecretId:undefined};
         this.settings = {...storedSettings,...defaults};
         for (const key of Object.keys(defaults) as (keyof Settings)[]) {
             const value=storedSettings[key];
-            if (key!=='debug' && key!=='minimumSources' && typeof value==='string') this.settings[key]=value;
+            if (key!=='debug' && key!=='generateImages' && key!=='minimumSources' && key!=='newsletters' && typeof value==='string') this.settings[key]=value;
         }
         if (typeof storedSettings.minimumSources==='number' && Number.isSafeInteger(storedSettings.minimumSources) && storedSettings.minimumSources>0)
             this.settings.minimumSources=storedSettings.minimumSources;
         this.settings.debug=storedSettings.debug===true;
+        this.settings.generateImages=storedSettings.generateImages!==false;
         this.settings.codexEffort=/^[a-z][a-z0-9_-]{0,31}$/.test(this.settings.codexEffort.trim()) ? this.settings.codexEffort.trim() : this.ai.defaults.codexEffort;
-        if (legacyFeed!==undefined) await this.saveData(this.settings);
+        this.settings.newsletters=readProfiles(storedSettings.newsletters,this.settings);
+        if (this.settings.activeNewsletter && !this.settings.newsletters.some(profile=>profile.id===this.settings.activeNewsletter)) throw new Error(t('invalidNewsletters'));
+        this.settings.activeNewsletter ||= this.settings.newsletters[0].id;
+        if (legacyFeed!==undefined || storedSettings.newsletters===undefined) await this.saveData(this.settings);
         this.labels = [];
         this.busy = false;
         this.loaded = false;
@@ -168,10 +173,48 @@ export default class TextMachine extends Plugin {
         });
         this.registerEvent(this.app.workspace.on('window-open', (_workspace, win) => this.observeFolderIcons(win.document)));
         this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
-            if (!(file instanceof TFolder) || (this.dataReady && file.path !== this.settings.outputFolder)) return;
+            if (!(file instanceof TFolder) || (!this.newsletters.some(profile=>profile.outputFolder===file.path) && this.dataReady)) return;
             menu.addItem(item => item.setTitle('Text Machine').setIcon('text-machine').setDisabled(this.busy)
-                .onClick(() => this.openTextMachine(file.path)));
+                .onClick(() => {void this.openTextMachine(file.path).catch(caught=>new Notice(errorOf(caught).message));}));
         }));
+    }
+
+    override async saveData(settings: Settings) {
+        const newsletters=newsletterProfiles(settings);
+        await super.saveData({...settings,newsletters});
+        settings.newsletters=newsletters;
+    }
+
+    get newsletters() {return newsletterProfiles(this.settings);}
+
+    async selectNewsletter(id: string) {
+        if (this.busy || this.aiController || this.runDialog) throw new Error(t('promptBusy'));
+        const newsletters=this.newsletters,profile=newsletters.find(item=>item.id===id);
+        if (!profile) throw new Error(t('invalidNewsletters'));
+        this.busy=true;
+        try {
+            const next={...this.settings,...newsletterValues(profile),activeNewsletter:id,newsletters};
+            await this.saveData(next);
+            this.settings=next;
+            this.updateFolderIcon();
+        } finally {this.busy=false;}
+    }
+
+    async createNewsletter(name: string) {
+        if (this.busy || this.aiController || this.runDialog) throw new Error(t('promptBusy'));
+        name=name.trim();
+        if (!name || this.newsletters.some(profile=>profile.name.toLocaleLowerCase()===name.toLocaleLowerCase())) throw new Error(t('newsletterNameInvalid'));
+        this.busy=true;
+        try {
+            const copies: Record<string,string>={};
+            for (const file of [...Object.keys(prompts),'newsletter.md'] as PromptDefinition['file'][]) copies[file]=await this.readPrompt(file);
+            const profile: NewsletterProfile={...newsletterDefaults,newsletterLanguage:this.settings.newsletterLanguage,id:randomUUID(),name,prompts:copies};
+            const next={...this.settings,...newsletterValues(profile),activeNewsletter:profile.id,newsletters:[...this.newsletters,profile]};
+            await this.saveData(next);
+            this.settings=next;
+            this.updateFolderIcon();
+            return profile;
+        } finally {this.busy=false;}
     }
 
     observeFolderIcons(doc: Document) {
@@ -188,9 +231,10 @@ export default class TextMachine extends Plugin {
     }
 
     updateFolderIcon() {
+        const folders=new Set(this.newsletters.map(profile=>profile.outputFolder).filter(Boolean));
         for (const doc of this.folderIconDocuments) {
             for (const el of doc.querySelectorAll('.nav-folder-title')) {
-                el.classList.toggle('text-machine-folder',!!this.settings.outputFolder && el.getAttribute('data-path')===this.settings.outputFolder);
+                el.classList.toggle('text-machine-folder',folders.has(el.getAttribute('data-path') || ''));
             }
         }
     }
@@ -215,8 +259,11 @@ export default class TextMachine extends Plugin {
             && this.account.scope?.split(' ').includes(this.gmail.SCOPE));
     }
 
-    openTextMachine(folderPath: string) {
+    async openTextMachine(folderPath: string) {
         if (this.busy || this.runDialog) return;
+        const profile=this.newsletters.find(item=>item.outputFolder===folderPath);
+        if (profile && profile.id!==this.settings.activeNewsletter) await this.selectNewsletter(profile.id);
+        if (this.busy || this.runDialog || this.disposed) return;
         this.runDialog = new TextMachineRun(this.app, this, folderPath);
         this.runDialog.open();
     }
@@ -257,11 +304,13 @@ export default class TextMachine extends Plugin {
             account.email = profile.emailAddress;
             const sameAccount = this.account?.email?.toLowerCase() === account.email.toLowerCase();
             const labelId = sameAccount && labels.some((label: Label) => label.id === this.settings.labelId) ? this.settings.labelId : '';
-            await this.saveData({ ...this.settings, labelId });
+            const next={...this.settings,labelId,newsletters:this.newsletters.map(item=>({...item,
+                labelId:sameAccount && labels.some(label=>label.id===item.labelId) ? item.labelId : ''}))};
+            await this.saveData(next);
             this.account = account;
             this.client = client;
             this.email = account.email;
-            this.settings.labelId = labelId;
+            this.settings=next;
             this.labels = labels;
             this.loaded = true;
             this.authorizationRequired = false;
@@ -287,6 +336,7 @@ export default class TextMachine extends Plugin {
         this.account = null;
         this.saveAccount();
         this.settings.labelId = '';
+        this.settings.newsletters=this.newsletters.map(profile=>({...profile,labelId:''}));
         this.labels = [];
         this.loaded = false;
         this.makeClient();
@@ -314,6 +364,7 @@ export default class TextMachine extends Plugin {
         if (typeof folderPath !== 'string' || !folderPath || (folderPath && folderPath.split('/').some(part => !part || part === '.' || part === '..' || /[\\:]/.test(part)))) {
             throw new Error(t('chooseVaultFolder'));
         }
+        if (this.newsletters.some(profile=>profile.id!==this.settings.activeNewsletter && foldersOverlap(profile.outputFolder,folderPath))) throw new Error(t('newsletterFolderUsed'));
         const parentPath = folderPath.split('/').slice(0, -1).join('/');
         if (parentPath && !(vault.getAbstractFileByPath(parentPath) instanceof TFolder)) {
             throw new Error(t('parentMoved'));
@@ -336,6 +387,7 @@ export default class TextMachine extends Plugin {
         if (!(parent instanceof TFolder)) throw new Error(t('parentMoved'));
         const destination=(parentPath ? parentPath+'/' : '')+folder.name;
         if (destination===source) return;
+        if (this.newsletters.some(profile=>profile.id!==this.settings.activeNewsletter && foldersOverlap(profile.outputFolder,destination))) throw new Error(t('newsletterFolderUsed'));
         if (parentPath===source || parentPath.startsWith(source+'/')) throw new Error(t('folderMoveInside'));
         if (vault.getAbstractFileByPath(destination)) throw new Error(t('folderNameExists'));
         this.busy=true;
@@ -417,14 +469,12 @@ export default class TextMachine extends Plugin {
         if (blockedFile && !(blockedFile instanceof TFile)) throw new Error(t('invalidBlockedFile'));
         if (blockedFile) await vault.process(blockedFile, text => JSON.stringify(this.crawler.parseBlocked(text), null, 2) + '\n');
         const articles = this.articles.parseData(await vault.read(log)).articles;
-        const now = Date.now();
         this.crawlController = new AbortController();
         try {
             for (const article of articles) {
                 if (this.disposed) throw new Error(t('pluginDisabled'));
-                if (article.status === 'forbidden' || article.status === 'discard' || (!article.content && article.usedAt)) continue;
-                if (!article.content && article.source.startsWith('RSS: ') && !this.articles.recentPublication(article.publish,now)) continue;
-                if (this.articles.isPdf(article.url) || article.status === '404' || this.crawler.isBlocked(article.url,blocked)) {
+                if (article.status === 'forbidden' || article.status === '404' || article.status === 'discard' || (!article.content && article.usedAt)) continue;
+                if (this.articles.isPdf(article.url) || this.crawler.isBlocked(article.url,blocked)) {
                     await vault.process(log,text => {
                         const current = this.articles.parseData(text);
                         const saved = current.articles.find((item: Article)=>item.url === article.url);
@@ -454,8 +504,7 @@ export default class TextMachine extends Plugin {
                         for (const key of ['publish', 'content', 'image'] as const) saved[key] ||= result[key];
                         if (!saved.authors?.length && result.authors?.length) saved.authors=[...result.authors];
                         if (saved.image===result.image && !saved.imageCaption) saved.imageCaption = result.imageCaption;
-                        if (result.status === 'forbidden') saved.status = 'forbidden';
-                        else if (saved.status === '404') saved.status = '';
+                        if (result.status === 'forbidden' || result.status === '404') saved.status = result.status;
                     }
                     return JSON.stringify(current, null, 2) + '\n';
                 });
@@ -471,7 +520,6 @@ export default class TextMachine extends Plugin {
         const blocked = await this.readBlocked();
         const controller = this.crawlController = new AbortController();
         let added = 0, succeeded = 0, failed = 0, ignored = 0, duplicates = 0;
-        const now = Date.now();
         const urls = new Map<string,Omit<Article,'id'>>(), titles = new Map<string,Omit<Article,'id'>>();
         const remember = (article: Omit<Article,'id'>) => {
             const keys = this.articles.articleKeys(article);
@@ -489,8 +537,7 @@ export default class TextMachine extends Plugin {
                 remember(article);
                 if (article.content || article.status || article.usedAt) seen.add(hash(article.url));
             }
-            const accept=(entry: Pick<FeedEntry,'url' | 'publish'>) => {
-                if (!this.articles.recentPublication(entry.publish,now)) {ignored++;return false;}
+            const accept=(entry: Pick<FeedEntry,'url'>) => {
                 const url=this.articles.articleUrl(entry.url);
                 if (!url) {ignored++;return false;}
                 if (seen.has(hash(url))) {duplicates++;return false;}
@@ -567,9 +614,9 @@ export default class TextMachine extends Plugin {
     }
 
     async importUnread(progress?: Progress) {
-        if (!this.client || !this.account?.email || !this.settings.labelId) throw new Error(t('connectAndChooseLabel'));
+        const client=this.isConnected && this.settings.labelId ? this.client : null;
+        if (!client && !this.settings.includeFeeds.trim()) throw new Error(this.isConnected ? t('connectAndChooseLabel') : t('connectToRun'));
         if (!this.dataReady) throw new Error(t('createFolderFirst'));
-        if (!this.account.scope?.split(' ').includes(this.gmail.SCOPE)) throw new Error(t('readPermissionMissing'));
         const log = this.dataFile;
         await this.app.vault.process(log,text=>this.articles.withIds(text));
         const labelId = this.settings.labelId;
@@ -578,9 +625,9 @@ export default class TextMachine extends Plugin {
         let added = 0, links = 0, skipped = 0, feedLinks = 0;
         let feedSummary = '';
         try {
-            for await (const id of this.client.unreadMessages(labelId)) {
+            if (client) for await (const id of client.unreadMessages(labelId)) {
                 if (this.disposed) throw new Error(t('pluginDisabled'));
-                const message = await this.client.message(id);
+                const message = await client.message(id);
                 if (!message.labelIds.includes('UNREAD') || !message.labelIds.includes(labelId)) continue;
                 const entry = this.articles.messageArticles(message)
                     .filter(article => !this.articles.isExcluded(article, this.settings.excludedSources) && !this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds))
@@ -593,7 +640,7 @@ export default class TextMachine extends Plugin {
                 });
                 if (result.added) { added++; links += result.count; } else skipped++;
                 if (this.disposed) throw new Error(t('pluginDisabled'));
-                if (!debug) await this.client.markRead(id);
+                if (!debug) await client.markRead(id);
                 progress?.(t('importProgress', { added, links }));
             }
             feedLinks = await this.importFeeds(message=>{feedSummary=message;progress?.(message);});
@@ -605,8 +652,8 @@ export default class TextMachine extends Plugin {
             Object.assign(failure, {code:error.code});
             throw failure;
         }
-        const result = t('importComplete', { added, links, skipped, path: log.path });
-        return this.settings.includeFeeds.trim() ? result+'\n'+t('includeFeedsComplete',{count:feedLinks})+(feedSummary ? '\n'+feedSummary : '') : result;
+        return [client ? t('importComplete', { added, links, skipped, path: log.path }) : '',
+            this.settings.includeFeeds.trim() ? t('includeFeedsComplete',{count:feedLinks}) : '',feedSummary].filter(Boolean).join('\n');
     }
 
     async readAuthorFeeds(signal: AbortSignal) {
@@ -621,13 +668,16 @@ export default class TextMachine extends Plugin {
     }
 
     async readPrompt(file: PromptDefinition['file']) {
+        const custom=this.settings.newsletters.find(profile=>profile.id===this.settings.activeNewsletter)?.prompts;
+        if (custom && Object.hasOwn(custom,file)) return custom[file];
         const path=this.manifest.dir+(file==='newsletter.md' ? '/models/' : '/prompts/')+file;
         const adapter=this.app.vault.adapter;
         return await adapter.exists(path) ? adapter.read(path) : file==='newsletter.md' ? newsletterTemplate : prompts[file];
     }
 
-    async savePrompt(file: PromptDefinition['file'], text: string, original: string) {
+    async savePrompt(file: PromptDefinition['file'], text: string, original: string, newsletterId=this.settings.activeNewsletter) {
         if (this.busy || this.aiController) throw new Error(t('promptBusy'));
+        if (newsletterId!==this.settings.activeNewsletter) throw new Error(t('promptChanged'));
         if (!text.trim()) throw new Error(file==='newsletter.md' ? t('newsletterTemplateInvalid') : t('newsletterPromptEmpty',{file}));
         const language=this.settings.newsletterLanguage;
         switch (file) {
@@ -642,11 +692,22 @@ export default class TextMachine extends Plugin {
                     used:['https://example.com/article'],discard:[]},[{title:'Brief title',url:'https://example.com/brief'}]);
                 break;
         }
-        if (await this.readPrompt(file)!==original) throw new Error(t('promptChanged'));
-        const folder=this.manifest.dir+(file==='newsletter.md' ? '/models' : '/prompts');
-        const adapter=this.app.vault.adapter;
-        if (!await adapter.exists(folder)) await adapter.mkdir(folder);
-        await adapter.write(folder+'/'+file,text);
+        if (await this.readPrompt(file)!==original || newsletterId!==this.settings.activeNewsletter) throw new Error(t('promptChanged'));
+        if (this.busy || this.aiController) throw new Error(t('promptBusy'));
+        const profile=this.settings.newsletters.find(item=>item.id===newsletterId)!;
+        this.busy=true;
+        try {
+            if (profile.prompts) {
+                const next={...this.settings,newsletters:this.newsletters.map(item=>item.id===newsletterId ? {...item,prompts:{...item.prompts,[file]:text}} : item)};
+                await this.saveData(next);
+                this.settings.newsletters=next.newsletters;
+            } else {
+                const folder=this.manifest.dir+(file==='newsletter.md' ? '/models' : '/prompts');
+                const adapter=this.app.vault.adapter;
+                if (!await adapter.exists(folder)) await adapter.mkdir(folder);
+                await adapter.write(folder+'/'+file,text);
+            }
+        } finally {this.busy=false;}
     }
 
     async writeNewsletter(progress?: Progress) {
@@ -656,6 +717,7 @@ export default class TextMachine extends Plugin {
         const day = this.newsletter.day();
         const debug = this.settings.debug;
         const editionName=(debug ? 'test-' : '')+'text-machine-'+day;
+        const generateImages=this.settings.generateImages;
         const language = this.settings.newsletterLanguage.trim() || 'français';
         let connection: ReturnType<typeof ai.getConnection> | undefined;
         const folder = vault.getAbstractFileByPath(this.settings.outputFolder);
@@ -717,6 +779,14 @@ export default class TextMachine extends Plugin {
             check();
             return response;
         };
+        const publication=async <T>(request: Parameters<typeof respond>[0], parse: (text: string)=>T): Promise<T>=>{
+            try {return parse(await respond(request,progress));}
+            catch (caught) {
+                if (errorOf(caught).code!=='CHAPEAU_TOO_LONG') throw caught;
+                progress?.(t('newsletterShorteningChapeau'));
+                return parse(await respond({...request,system:request.system+'\n\n'+t('publicationShorten')},progress));
+            }
+        };
         try {
             const result: newsletter.Newsletter = {title:'',chapeau:'',paragraphs:[],image:null,used:[],discard:[]};
             let generated: Awaited<ReturnType<typeof createIllustration>> | null = null;
@@ -734,20 +804,40 @@ export default class TextMachine extends Plugin {
                 progress?.(t('newsletterReadingContext'));
                 check();
                 progress?.(t('newsletterSelecting'));
-                const selectionRequest=this.newsletter.selectionRequest(selectionTemplate,pending,language,this.settings.referenceSources,previous,authorPosts);
-                const selection=this.newsletter.parseSelection(await respond(selectionRequest),pending);
+                const select=(correction = '')=>this.newsletter.selectArticles(pending,articles=>{
+                    const request=this.newsletter.selectionRequest(selectionTemplate,articles,language,this.settings.referenceSources,previous,authorPosts);
+                    if (correction) request.system+='\n\n'+correction;
+                    return request;
+                },respond,progress);
+                let selection=await select();
+                if (selection.selected.length && this.newsletter.publicationCount(selection.selected)<2) {
+                    if (this.newsletter.publicationCount(pending)<2) throw new Error(t('newsletterMultiplePublications'));
+                    progress?.(t('newsletterReselectingSources'));
+                    selection=await select(t('selectionMultiplePublications'));
+                    if (selection.selected.length && this.newsletter.publicationCount(selection.selected)<2) throw new Error(t('newsletterMultiplePublications'));
+                }
                 result.discard=selection.discard.map((id: number)=>pending.find(article=>article.id===id)!.url);
+                brief.push(...selection.brief);
                 if (selection.selected.length) {
                     progress?.(t('newsletterWriting'));
                     const request=this.newsletter.writerRequest(prompt,selection.selected,previous,authorPosts || [],language,this.settings.referenceSources);
-                    const editorial=this.newsletter.parseEditorial(await respond(request,progress));
+                    let editorial;
+                    try {editorial=this.newsletter.parseWriter(await respond(request,progress),selection.selected);}
+                    catch (caught) {
+                        if (errorOf(caught).code!=='RP_TOO_FEW_SOURCES') throw caught;
+                        progress?.(t('newsletterExpandingReview'));
+                        editorial=this.newsletter.parseWriter(await respond({...request,system:request.system+'\n\n'+t('writerMultiplePublications')},progress),selection.selected);
+                    }
                     result.paragraphs=editorial.paragraphs;
-                    result.used=selection.selected.map(article=>article.url);
-                    await saveSnapshot('brouillon',result.paragraphs.join('\n\n'));
-                    await saveSnapshot('revision','> '+t('newsletterRevisionPending'));
+                    result.used=editorial.used.map(article=>article.url);
+                    brief.push(...selection.selected.filter(article=>!result.used.includes(article.url)));
+                    if (result.used.length) {
+                        await saveSnapshot('brouillon',result.paragraphs.join('\n\n'));
+                        await saveSnapshot('revision','> '+t('newsletterRevisionPending'));
+                    }
                     this.newsletter.assertNoAuthorSources(result.paragraphs,this.settings.authorFeeds,authorPosts);
                 }
-                if (!result.used.length && (!brief.length || pending.some(article=>!!article.usedAt))) {
+                if (!result.used.length && !brief.length) {
                     if (!debug) await vault.process(log,current=>this.newsletter.applyStatuses(current,pending.filter(article=>!article.usedAt),result,day));
                     new Notice(t('newsletterNoArticles'));
                     return null;
@@ -757,9 +847,10 @@ export default class TextMachine extends Plugin {
             if (brief.length) {
                 progress?.(t('newsletterTranslatingBrief'));
                 const prompt = await this.readPrompt('bref.md');
-                const request = this.newsletter.briefRequest(prompt,brief,language);
+                const confirmed=brief.filter(article=>article.status!=='forbidden');
+                const request = this.newsletter.briefRequest(prompt,brief,language,confirmed);
                 const response = await respond(request);
-                translatedBrief = this.newsletter.parseBrief(response,brief);
+                translatedBrief = this.newsletter.parseBrief(response,brief,confirmed);
             }
             if (!result.used.length && !translatedBrief.length) {
                 if (!debug) await vault.process(log,current=>this.newsletter.applyStatuses(current,pending,result,day));
@@ -796,27 +887,31 @@ export default class TextMachine extends Plugin {
             if (result.used.length) {
                 progress?.(t('newsletterPublishing'));
                 const request=this.newsletter.publisherRequest(await readPrompt('publisher.md'),result.paragraphs,language);
-                const publication=this.newsletter.parsePublisher(await respond(request,progress));
-                this.newsletter.assertNoAuthorSources([publication.title,publication.chapeau],this.settings.authorFeeds,authorPosts);
-                Object.assign(result,publication);
+                const published=await publication(request,this.newsletter.parsePublisher);
+                this.newsletter.assertNoAuthorSources([published.title,published.chapeau],this.settings.authorFeeds,authorPosts);
+                Object.assign(result,published);
             }
             const illustrationName=editionName+'.png';
-            const imagePath=this.settings.outputFolder+'/illustrations/'+illustrationName;
-            const cachedImage=vault.getAbstractFileByPath(imagePath);
-            if (cachedImage && !(cachedImage instanceof TFile)) throw new Error(t('newsletterIllustrationFailed'));
-            if (cachedImage) progress?.(t('newsletterReusingIllustration'));
-            else {
-                progress?.(t('newsletterCreatingIllustration'));
-                const prompt=this.newsletter.renderPrompt(await readPrompt('image.md'),{language});
-                const context=JSON.stringify({title:result.title,chapeau:result.chapeau,paragraphs:result.paragraphs,
-                    brief:result.used.length ? [] : translatedBrief.map(article=>article.title)});
-                const bytes=await this.generateIllustration(this.getAIKey('openai'),prompt+'\n\n'+context,
-                    (options: HttpOptions,signal?: AbortSignal)=>this.requestAI(options,undefined,signal,32*1024*1024),controller.signal);
-                check();
-                generated=await this.createIllustration(bytes);
-                check();
+            if (generateImages) {
+                const imagePath=this.settings.outputFolder+'/illustrations/'+illustrationName;
+                const cachedImage=vault.getAbstractFileByPath(imagePath);
+                if (cachedImage && !(cachedImage instanceof TFile)) throw new Error(t('newsletterIllustrationFailed'));
+                if (cachedImage) progress?.(t('newsletterReusingIllustration'));
+                else {
+                    progress?.(t('newsletterCreatingIllustration'));
+                    const prompt=this.newsletter.renderPrompt(await readPrompt('image.md'),{language});
+                    const context=JSON.stringify({title:result.title,chapeau:result.chapeau,paragraphs:result.paragraphs,
+                        brief:result.used.length ? [] : translatedBrief.map(article=>article.title)});
+                    const imageConnection=connection || this.getAIConnection();
+                    const bytes=imageConnection.provider==='codex'
+                        ? await this.codex.generateImage(await this.codex.findCodex(),prompt,context,imageConnection.model,controller.signal,progress,imageConnection.effort)
+                        : await this.generateIllustration(imageConnection,prompt+'\n\n'+context,this.requestAI,controller.signal,progress);
+                    check();
+                    generated=await this.createIllustration(bytes);
+                    check();
+                }
+                result.image={url:'illustrations/'+illustrationName,source:'',caption:result.title || t('newsletterBriefTitle'),verified:true,generated:true};
             }
-            result.image={url:'illustrations/'+illustrationName,source:'',caption:result.title || t('newsletterBriefTitle'),verified:true,generated:true};
             const markdown = correctNewsletterPunctuation(this.newsletter.renderNewsletter(template,result,translatedBrief),language);
             const path = this.settings.outputFolder + '/' + editionName + '.md';
             const existing = vault.getAbstractFileByPath(path);
@@ -877,7 +972,7 @@ class TextMachineRun extends Modal {
         this.folderPath = folderPath;
     }
 
-    onOpen() { this.titleEl.setText('Text Machine'); void this.advance(); }
+    onOpen() { this.titleEl.setText(this.plugin.newsletters.find(profile=>profile.id===this.plugin.settings.activeNewsletter)!.name); void this.advance(); }
 
     onClose() {
         this.closed = true;
@@ -917,8 +1012,8 @@ class TextMachineRun extends Modal {
         const p = this.plugin;
         if (this.closed || p.disposed) return;
         this.render();
-        if (!p.isConnected || !p.dataReady) return;
-        if (!p.settings.labelId) {
+        if (!p.dataReady || (!p.isConnected && !p.settings.includeFeeds.trim())) return;
+        if (p.isConnected && !p.settings.labelId && !p.settings.includeFeeds.trim()) {
             if (!p.loaded) await this.perform(() => p.refreshLabels(), false);
             return;
         }
@@ -994,7 +1089,7 @@ class TextMachineRun extends Modal {
             const activity = el.createDiv('text-machine-activity');
             const spinner = activity.createSpan({cls:'text-machine-spinner',attr:{'aria-hidden':'true'}});
             setIcon(spinner,'loader-circle');
-            this.statusEl = activity.createSpan({text:p.isConnected ? t('readingUnread') : t('finishInBrowser'),attr:{role:'status'}});
+            this.statusEl = activity.createSpan({text:p.isConnected && p.settings.labelId ? t('readingUnread') : p.settings.includeFeeds.trim() ? t('readingFeeds') : t('finishInBrowser'),attr:{role:'status'}});
             this.logEl = el.createDiv({cls:'text-machine-run-log',attr:{role:'log','aria-label':t('activityLog'),'aria-live':'off',tabindex:'0'}});
             return;
         }
@@ -1003,7 +1098,7 @@ class TextMachineRun extends Modal {
             if (this.notePath) el.createEl('p',{text:t('newsletterCreated',{path:this.notePath}),attr:{role:'status'}});
             return;
         }
-        if (!p.isConnected) {
+        if (!p.isConnected && !p.settings.includeFeeds.trim() && p.dataReady) {
             el.createEl('p', {text:t('connectToRun')});
             new Setting(el).setName(t('emailAddress')).addText(text => {
                 text.inputEl.type = 'email';
@@ -1027,7 +1122,7 @@ class TextMachineRun extends Modal {
             }));
             return;
         }
-        if (!p.settings.labelId) {
+        if (p.isConnected && !p.settings.labelId && !p.settings.includeFeeds.trim()) {
             new Setting(el).setName(t('gmailLabel')).addDropdown(dropdown => {
                 dropdown.selectEl.setAttribute('aria-label', t('gmailLabel'));
                 dropdown.addOption('',t('chooseLabel'));
@@ -1137,9 +1232,35 @@ class FolderPicker extends Modal {
     }
 }
 
+class NewsletterCreator extends Modal {
+    constructor(app: App, private plugin: TextMachine, private created: ()=>void) {super(app);}
+
+    onOpen() {
+        this.titleEl.setText(t('newNewsletter'));
+        let name='';
+        new Setting(this.contentEl).setName(t('newsletterName')).addText(text=>{
+            text.inputEl.setAttribute('aria-label',t('newsletterName'));
+            text.onChange(value=>{name=value;});
+            text.inputEl.focus();
+        });
+        const error=this.contentEl.createDiv({attr:{role:'alert'}});
+        new Setting(this.contentEl).addButton(button=>button.setButtonText(t('createNewsletter')).setCta().onClick(async()=>{
+            button.setDisabled(true);
+            try {
+                await this.plugin.createNewsletter(name);
+                this.close();
+                this.created();
+            } catch (caught) {error.setText(errorOf(caught).message);}
+            finally {button.setDisabled(false);}
+        }));
+    }
+}
+
 class PromptEditor extends Modal {
+    private newsletterId: string;
     constructor(app: App, private plugin: TextMachine, private prompt: PromptDefinition, private original: string) {
         super(app);
+        this.newsletterId=plugin.settings.activeNewsletter;
     }
 
     onOpen() {
@@ -1161,7 +1282,7 @@ class PromptEditor extends Modal {
             cancel.setDisabled(true);
             save.setDisabled(true);
             try {
-                await this.plugin.savePrompt(this.prompt.file,input.value,this.original);
+                await this.plugin.savePrompt(this.prompt.file,input.value,this.original,this.newsletterId);
                 this.close();
             } catch (caught) {error.setText(errorOf(caught).message);}
             finally {
@@ -1259,7 +1380,7 @@ export class GmailSettings extends PluginSettingTab {
         const items: (SettingRow | SettingsGroup)[] = [{name:'TextMachine',desc:t('intro'),searchable:false,render:setting=>{
             this.containerEl.addClass('text-machine-settings');
             setting.setHeading();
-        }},account];
+        }},account,p.renderAI(p,this)];
         if (connected) account.items.push({name:p.account!.email,desc:t('accountConnected'),render:setting=>{
             setting.addButton(button=>button.setButtonText(t('disconnect')).setDisabled(p.busy)
                 .onClick(()=>this.run(t('disconnecting'),()=>p.disconnect())));
@@ -1285,16 +1406,31 @@ export class GmailSettings extends PluginSettingTab {
             }});
         }
         account.items.push({name:t('readOnly'),searchable:false});
+        if (p.configurationError) account.items.push({name:p.configurationError,searchable:false});
         if (p.busy) items.push({name:this.progress,searchable:false,render:setting=>{
             setting.settingEl.addClass('text-machine-feedback');
             setting.settingEl.setAttribute('role','status');
             if (p.auth) setting.setDesc(t('finishInBrowser')).addButton(button=>button.setButtonText(t('cancel')).onClick(()=>p.auth?.abort()));
         }});
-        if (this.error || p.configurationError) items.push({name:this.error || p.configurationError,searchable:false,render:setting=>{
+        if (this.error) items.push({name:this.error,searchable:false,render:setting=>{
             setting.settingEl.addClass('text-machine-feedback','text-machine-error');
             setting.settingEl.setAttribute('role','alert');
         }});
-        items.push(source);
+        const editions=group(t('newslettersHeading'));
+        editions.items.push({name:t('activeNewsletter'),desc:t('newsletterChoiceDescription'),render:setting=>{
+            setting.addDropdown(dropdown=>{
+                dropdown.selectEl.setAttribute('aria-label',t('activeNewsletter'));
+                for (const profile of p.newsletters) dropdown.addOption(profile.id,profile.name);
+                dropdown.setValue(p.settings.activeNewsletter).setDisabled(p.busy || !!p.aiController || !!p.runDialog).onChange(async id=>{
+                    try {await p.selectNewsletter(id);this.error='';this.result='';}
+                    catch (caught) {this.error=errorOf(caught).message;}
+                    this.redraw();
+                });
+            }).addButton(button=>button.setButtonText(t('newNewsletter')).setDisabled(p.busy || !!p.aiController || !!p.runDialog).onClick(()=>{
+                new NewsletterCreator(this.app,p,()=>{this.error='';this.result='';this.redraw();}).open();
+            }));
+        }});
+        items.push(editions,source);
         if (!connected) source.items.push({name:t('connectForLabels'),searchable:false});
         source.items.push({name:t('gmailLabel'),desc:t('labelDescription'),render:setting=>{
             setting.addDropdown(dropdown=>{
@@ -1332,8 +1468,8 @@ export class GmailSettings extends PluginSettingTab {
         items.push(journal);
         journal.items.push({name:p.dataReady ? p.settings.outputFolder : t('chooseEmptyFolder'),render:setting=>{
             setting.addButton(button=>{
-                if (connected && !p.dataReady) button.setCta();
-                button.setButtonText(p.dataReady ? t('moveFolder') : t('createFolder')).setDisabled(p.busy || (!p.dataReady && !connected)).onClick(()=>{
+                if (!p.dataReady) button.setCta();
+                button.setButtonText(p.dataReady ? t('moveFolder') : t('createFolder')).setDisabled(p.busy).onClick(()=>{
                     if (p.dataReady) {
                         const parent=p.settings.outputFolder.split('/').slice(0,-1).join('/');
                         new FolderPicker(this.app,parent,async destination=>{
@@ -1359,7 +1495,7 @@ export class GmailSettings extends PluginSettingTab {
                 setting.addTextArea(text=>{
                     text.inputEl.setAttribute('aria-label',t('excludedSources'));
                     text.inputEl.rows=3;
-                    text.setPlaceholder('example.com\nGoogle Alerts').setValue(p.settings.excludedSources).setDisabled(!connected || p.busy)
+                    text.setPlaceholder('example.com\nGoogle Alerts').setValue(p.settings.excludedSources).setDisabled(p.busy)
                         .onChange(async value=>{
                             p.settings.excludedSources=value;
                             try {await p.saveData(p.settings);} catch (caught) {new Notice(errorOf(caught).message);}
@@ -1367,7 +1503,7 @@ export class GmailSettings extends PluginSettingTab {
                 });
             }});
             if (p.settings.debug) journal.items.push({name:t('dataFile'),render:setting=>{
-                setting.addButton(button=>button.setButtonText(t('openLog')).setDisabled(!connected || p.busy || !p.dataReady)
+                setting.addButton(button=>button.setButtonText(t('openLog')).setDisabled(p.busy || !p.dataReady)
                     .onClick(()=>this.run(t('openingLog'),async()=>{
                         const file=p.dataFile;
                         await this.app.vault.process(file,text=>{
@@ -1454,7 +1590,7 @@ export class GmailSettings extends PluginSettingTab {
                 }
             }});
             if (p.settings.debug) journal.items.push({name:t('resetData'),desc:t('resetDataDescription'),render:setting=>{
-                setting.addButton(button=>destructive(button).setButtonText(t('resetData')).setDisabled(!connected || p.busy).onClick(()=>{
+                setting.addButton(button=>destructive(button).setButtonText(t('resetData')).setDisabled(p.busy).onClick(()=>{
                     if (!p.dataReady) {new Notice(t('createFolderFirst'));return;}
                     const file=p.dataFile;
                     const confirmation=new Modal(this.app);
@@ -1543,6 +1679,13 @@ export class GmailSettings extends PluginSettingTab {
         ];
         newsletterSettings.items.push({name:t('newsletterPromptsHeading'),desc:t('newsletterPromptsDescription'),render:setting=>{setting.setHeading();}},
             ...promptDefinitions.map(prompt=>({name:prompt.name,desc:prompt.desc,render:(setting: Setting)=>{
+                if (prompt.file==='image.md') setting.addToggle(toggle=>{
+                    toggle.toggleEl.setAttribute('aria-label',t('generateImages'));
+                    toggle.setValue(p.settings.generateImages).setDisabled(p.busy).onChange(value=>{
+                        p.settings.generateImages=value;
+                        void p.saveData(p.settings).catch(()=>{this.error=t('aiSaveFailed');this.redraw();});
+                    });
+                });
                 setting.addButton(button=>button.setButtonText(t('editPrompt')).setDisabled(p.busy).onClick(async()=>{
                     try {
                         const original=await p.readPrompt(prompt.file);
@@ -1550,7 +1693,6 @@ export class GmailSettings extends PluginSettingTab {
                     } catch (caught) {new Notice(errorOf(caught).message);}
                 }));
             }})));
-        items.push(p.renderAI(p,this));
         items.push({name:t('debug'),desc:t('debugDescription'),render:setting=>{
             setting.addToggle(toggle=>toggle.setValue(p.settings.debug).onChange(value=>{
                 p.settings.debug=value;

@@ -22,6 +22,11 @@ function sourceOf(message: Message) {
     return t('userSource');
 }
 
+function isEditorialSource(source: string) {
+    // Persisted source labels can come from either interface language or older versions.
+    return ['Utilisateur (présumé)','User (inferred)','User'].includes(source);
+}
+
 function isPdf(value: string, contentType = '', disposition = '') {
     if (/^application\/(?:x-)?pdf(?:\s*;|\s*$)/i.test(contentType.trim())) return true;
     try {disposition = decodeURIComponent(disposition);} catch { /* Keep the original filename. */ }
@@ -110,12 +115,19 @@ function extractLinks(message: Message) {
 }
 
 function articleTitle(link: {url: string; title: string}) {
-    if (!/^https?:\/\//i.test(link.title)) return link.title;
+    const fromUrl=/^https?:\/\//i.test(link.title);
     const url = new URL(link.url);
     let slug = url.pathname.split('/').filter(Boolean).pop() || url.hostname;
     try { slug = decodeURIComponent(slug); } catch { /* Preserve the encoded slug when decoding fails. */ }
-    const title = slug.replace(/\.(?:html?|php)$/i, '').replace(/_AN-\d+$/i, '').replace(/[-_]+/g, ' ');
-    return /[a-zA-Z]{3}/.test(title) ? title : url.hostname;
+    slug=slug.replace(/\.(?:html?|php)$/i, '').replace(/_AN-\d+$/i, '');
+    const suffix=slug.match(/[-_]([a-zA-Z0-9]+)$/)?.[1] || '';
+    // Remove only opaque suffixes actually present in this article's URL.
+    const opaque=/^(?=.*[a-zA-Z])(?=.*\d)(?:[A-Z0-9]{20,}|[a-f0-9]{32,64})$/.test(suffix);
+    if (opaque) slug=slug.slice(0,-suffix.length-1);
+    const fallback=slug.replace(/[-_]+/g, ' ');
+    const title=fromUrl ? fallback : opaque
+        ? link.title.replace(new RegExp('(?:^|[\\s_-]+)'+suffix+'\\s*$'),'').trim() || fallback : link.title;
+    return !fromUrl || /[a-zA-Z]{3}/.test(title) ? title : url.hostname;
 }
 
 function messageArticles(message: Message): Omit<Article,'id'>[] {
@@ -223,11 +235,6 @@ function withIds(text: string) {
         ? text : JSON.stringify(data,null,2)+'\n';
 }
 
-function recentPublication(publish: string, now: number) {
-    const time = Date.parse(publish);
-    return Number.isFinite(time) && time <= now && time >= now - 48 * 60 * 60 * 1000;
-}
-
 function articleKeys(article: Pick<Article,'url' | 'title'>) {
     const url = new URL(articleUrl(article.url) || article.url);
     url.searchParams.sort();
@@ -249,6 +256,7 @@ function mergeArticles(text: string, incoming: Omit<Article,'id'>[]) {
         const existing = urls.get(urlKey) ?? titles.get(titleKey);
         if (existing !== undefined) {
             const kept = articles[existing];
+            if (isEditorialSource(article.source)) kept.source=article.source;
             for (const [key, value] of Object.entries(record(article))) {
                 if (key!=='imageCaption' && !Object.hasOwn(kept, key)) Object.assign(kept,{[key]:value});
             }
@@ -269,4 +277,4 @@ function mergeArticles(text: string, incoming: Omit<Article,'id'>[]) {
     return { text: JSON.stringify(assignIds({ ...data, articles }), null, 2) + '\n', count, added: count > 0 };
 }
 
-export { recentPublication, articleKeys, isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, feedArticles, parseData, withIds, mergeArticles };
+export { articleTitle, isEditorialSource, articleKeys, isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, feedArticles, parseData, withIds, mergeArticles };

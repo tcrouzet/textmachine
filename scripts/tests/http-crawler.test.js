@@ -131,3 +131,33 @@ test('diagnostic observers see HTTP and browser attempts from the normal retriev
     assert.equal(page.status,403);
     assert.equal(destroyed,true);
 });
+
+test('a browser failure preserves a confirmed HTTP 404 while successful browser retrieval can recover it',async()=>{
+    for (const [directFailure,browserFails] of [[false,true],[false,false],[true,true]]) {
+        const url='http://8.8.8.8/article';
+        let destroyed=false,navigate;
+        class Window {
+            constructor(){
+                this.webContents={
+                    session:{setPermissionRequestHandler(){},setPermissionCheckHandler(){},on(){},webRequest:{onHeadersReceived(){},onBeforeRequest(){}}},
+                    setWindowOpenHandler(){},on:(_event,handler)=>{navigate=handler;},getUserAgent:()=> 'Chrome/123',
+                    getURL:()=>url,isDestroyed:()=>destroyed,executeJavaScript:async()=>'<article>Recovered article</article>',
+                };
+            }
+            isDestroyed(){return destroyed;}
+            destroy(){destroyed=true;}
+            async loadURL(){
+                if (browserFails) throw new Error('ERR_ABORTED');
+                navigate(null,url,200);
+            }
+        }
+        const direct={url,status:404,html:'',...(directFailure ? {failure:'ETIMEDOUT'} : {})};
+        const page=await retrievePage(url,undefined,()=>false,Window,async()=>direct);
+        assert.equal(destroyed,true);
+        if (!browserFails) {
+            assert.equal(page.status,200);
+            assert.equal(page.html,'<article>Recovered article</article>');
+        } else if (!directFailure) assert.deepEqual(page,direct);
+        else assert.equal(page.failure,'ERR_ABORTED');
+    }
+});

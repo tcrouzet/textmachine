@@ -5,8 +5,6 @@
 
 {{paragraphs_before_image}}
 
-{{image}}
-
 {{paragraphs_after_image}}
 
 {{/editorial}}

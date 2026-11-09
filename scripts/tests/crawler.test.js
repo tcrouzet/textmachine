@@ -18,13 +18,26 @@ test('site refusals are persisted and suppress future pages on that host', async
     assert.equal(isBlocked('https://notexample.com/article',data), false);
 });
 
-test('page failures stay forbidden without blocking unrelated articles on the domain', async () => {
+test('HTTP 404 pages remain missing rather than paywalled and are not fetched again',async()=>{
+    const blocked=[];
+    let calls=0;
+    const load=async url=>{calls++;return {url,status:404,html:''};};
+    const missing=await crawl(article,blocked,undefined,load);
+    assert.equal(missing.status,'404');
+    assert.deepEqual(blocked,[]);
+    assert.equal((await crawl(missing,blocked,undefined,load)).status,'404');
+    assert.equal(calls,1);
+    const failed=await crawl(article,blocked,undefined,async url=>({url,status:404,html:'',failure:'ETIMEDOUT'}));
+    assert.equal(failed.status,'forbidden','A transport failure is not evidence of an HTTP 404');
+});
+
+test('page failures preserve missing pages separately from access failures without blocking unrelated articles', async () => {
     for (const status of [200,404,410,429,500,502,503,504]) {
         const blocked=[];
         let calls=0;
         const load=async url=>{calls++;return {url,status,html:''};};
         const result=await crawl(article,blocked,undefined,load);
-        assert.equal(result.status,'forbidden');
+        assert.equal(result.status,status===404 ? '404' : 'forbidden');
         assert.deepEqual(blocked,[],String(status));
         await crawl(result,blocked,undefined,load);
         assert.equal(calls,1,'The failed article must not be retried');

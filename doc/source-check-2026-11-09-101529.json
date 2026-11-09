@@ -1,0 +1,1152 @@
+{
+  "date": "2026-11-09",
+  "note": "text-machine-2026-11-09.md",
+  "startedAt": "2026-11-09T10:15:29.853279+00:00",
+  "total": 55,
+  "results": [
+    {
+      "url": "https://www.niemanlab.org/2026/11/anthropic-openai-google-and-microsoft-will-make-it-easier-for-publishers-to-opt-out-of-being-scraped/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.niemanlab.org/2026/11/anthropic-openai-google-and-microsoft-will-make-it-easier-for-publishers-to-opt-out-of-being-scraped/",
+          "contentLength": 1198,
+          "elapsedMs": 69
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.niemanlab.org/2026/11/anthropic-openai-google-and-microsoft-will-make-it-easier-for-publishers-to-opt-out-of-being-scraped/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 1198,
+      "elapsedMs": 93
+    },
+    {
+      "url": "https://mindmatters.ai/2026/11/for-c-s-lewis-fans-ai-is-not-n-i-c-e/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://mindmatters.ai/2026/11/for-c-s-lewis-fans-ai-is-not-n-i-c-e/",
+          "contentLength": 19998,
+          "elapsedMs": 133
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://mindmatters.ai/2026/11/for-c-s-lewis-fans-ai-is-not-n-i-c-e/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 19998,
+      "elapsedMs": 158
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/docs-at-scale-with-andrew-etter",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/docs-at-scale-with-andrew-etter",
+          "contentLength": 56924,
+          "elapsedMs": 463
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/docs-at-scale-with-andrew-etter",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 56924,
+      "elapsedMs": 499
+    },
+    {
+      "url": "https://www.sciencedirect.com/science/article/pii/S1475158526001724",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 403,
+          "failure": "",
+          "finalUrl": "https://www.sciencedirect.com/science/article/pii/S1475158526001724",
+          "contentLength": 0,
+          "elapsedMs": 137
+        },
+        {
+          "method": "browser",
+          "httpStatus": 403,
+          "failure": "",
+          "finalUrl": "https://www.sciencedirect.com/science/article/pii/S1475158526001724",
+          "contentLength": 0,
+          "elapsedMs": 601
+        }
+      ],
+      "httpStatus": 403,
+      "finalUrl": "https://www.sciencedirect.com/science/article/pii/S1475158526001724",
+      "outcome": "restricted",
+      "failure": "",
+      "contentLength": 0,
+      "elapsedMs": 738
+    },
+    {
+      "url": "https://www.sciencedirect.com/science/article/pii/S2451958826005014",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 403,
+          "failure": "",
+          "finalUrl": "https://www.sciencedirect.com/science/article/pii/S2451958826005014",
+          "contentLength": 0,
+          "elapsedMs": 131
+        },
+        {
+          "method": "browser",
+          "httpStatus": 403,
+          "failure": "",
+          "finalUrl": "https://www.sciencedirect.com/science/article/pii/S2451958826005014",
+          "contentLength": 0,
+          "elapsedMs": 326
+        }
+      ],
+      "httpStatus": 403,
+      "finalUrl": "https://www.sciencedirect.com/science/article/pii/S2451958826005014",
+      "outcome": "restricted",
+      "failure": "",
+      "contentLength": 0,
+      "elapsedMs": 457
+    },
+    {
+      "url": "https://www.theguardian.com/books/picture/2026/nov/08/tom-gauld-on-prompts-for-a-cartoon-about-artificial-intelligence-and-writing-cartoon",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.theguardian.com/books/picture/2026/nov/08/tom-gauld-on-prompts-for-a-cartoon-about-artificial-intelligence-and-writing-cartoon",
+          "contentLength": 0,
+          "elapsedMs": 123
+        },
+        {
+          "method": "browser",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.theguardian.com/books/picture/2026/nov/08/tom-gauld-on-prompts-for-a-cartoon-about-artificial-intelligence-and-writing-cartoon",
+          "contentLength": 0,
+          "elapsedMs": 1587
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.theguardian.com/books/picture/2026/nov/08/tom-gauld-on-prompts-for-a-cartoon-about-artificial-intelligence-and-writing-cartoon",
+      "outcome": "unreadable",
+      "failure": "",
+      "contentLength": 0,
+      "elapsedMs": 1784
+    },
+    {
+      "url": "https://www.mdpi.com/2079-3200/14/11/286",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 403,
+          "failure": "",
+          "finalUrl": "https://www.mdpi.com/2079-3200/14/11/286",
+          "contentLength": 0,
+          "elapsedMs": 170
+        },
+        {
+          "method": "browser",
+          "httpStatus": null,
+          "failure": "ERR_ABORTED",
+          "finalUrl": "https://www.mdpi.com/2079-3200/14/11/286",
+          "contentLength": 0,
+          "elapsedMs": 491
+        }
+      ],
+      "httpStatus": null,
+      "finalUrl": "https://www.mdpi.com/2079-3200/14/11/286",
+      "outcome": "network-error",
+      "failure": "ERR_ABORTED",
+      "contentLength": 0,
+      "elapsedMs": 661
+    },
+    {
+      "url": "https://arxiv.org/abs/2611.07792",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://arxiv.org/abs/2611.07792",
+          "contentLength": 1549,
+          "elapsedMs": 43
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://arxiv.org/abs/2611.07792",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 1549,
+      "elapsedMs": 56
+    },
+    {
+      "url": "https://www.blackengineer.com/leading-voices/the-proper-use-of-artificial-intelligence-in-writing/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 404,
+          "failure": "",
+          "finalUrl": "https://www.blackengineer.com/leading-voices/the-proper-use-of-artificial-intelligence-in-writing/",
+          "contentLength": 0,
+          "elapsedMs": 932
+        },
+        {
+          "method": "browser",
+          "httpStatus": 404,
+          "failure": "",
+          "finalUrl": "https://www.blackengineer.com/leading-voices/the-proper-use-of-artificial-intelligence-in-writing/",
+          "contentLength": 0,
+          "elapsedMs": 1616
+        }
+      ],
+      "httpStatus": 404,
+      "finalUrl": "https://www.blackengineer.com/leading-voices/the-proper-use-of-artificial-intelligence-in-writing/",
+      "outcome": "missing",
+      "failure": "",
+      "contentLength": 0,
+      "elapsedMs": 2548
+    },
+    {
+      "url": "https://www.computer.org/csdl/api/v1/periodical/mags/so/2026/06/11775075/2l8HGRVbWiA/download-article/pdf",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": null,
+          "failure": "",
+          "finalUrl": "https://csdl-downloads.ieeecomputer.org/mags/so/2026/06/11775075.pdf",
+          "contentLength": 0,
+          "elapsedMs": 499
+        }
+      ],
+      "httpStatus": null,
+      "finalUrl": "https://csdl-downloads.ieeecomputer.org/mags/so/2026/06/11775075.pdf",
+      "outcome": "pdf",
+      "failure": "",
+      "contentLength": 0,
+      "elapsedMs": 499
+    },
+    {
+      "url": "https://www.tandfonline.com/doi/abs/10.1080/10494820.2026.2757648",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 403,
+          "failure": "",
+          "finalUrl": "https://www.tandfonline.com/doi/abs/10.1080/10494820.2026.2757648",
+          "contentLength": 0,
+          "elapsedMs": 137
+        },
+        {
+          "method": "browser",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.tandfonline.com/doi/abs/10.1080/10494820.2026.2757648",
+          "contentLength": 0,
+          "elapsedMs": 3566
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.tandfonline.com/doi/abs/10.1080/10494820.2026.2757648",
+      "outcome": "restricted",
+      "failure": "",
+      "contentLength": 0,
+      "elapsedMs": 3740
+    },
+    {
+      "url": "https://www.lemonde.fr/idees/article/2026/11/02/l-auteur-d-un-livre-ecrit-par-ia-n-a-pas-fait-l-effort-d-aller-chercher-son-uvre-la-ou-elle-se-trouve-en-lui-meme_6805276_3232.html",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 402,
+          "failure": "",
+          "finalUrl": "https://www.lemonde.fr/idees/article/2026/11/02/l-auteur-d-un-livre-ecrit-par-ia-n-a-pas-fait-l-effort-d-aller-chercher-son-uvre-la-ou-elle-se-trouve-en-lui-meme_6805276_3232.html",
+          "contentLength": 0,
+          "elapsedMs": 163
+        },
+        {
+          "method": "browser",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.lemonde.fr/idees/article/2026/11/02/l-auteur-d-un-livre-ecrit-par-ia-n-a-pas-fait-l-effort-d-aller-chercher-son-uvre-la-ou-elle-se-trouve-en-lui-meme_6805276_3232.html",
+          "contentLength": 0,
+          "elapsedMs": 3132
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.lemonde.fr/idees/article/2026/11/02/l-auteur-d-un-livre-ecrit-par-ia-n-a-pas-fait-l-effort-d-aller-chercher-son-uvre-la-ou-elle-se-trouve-en-lui-meme_6805276_3232.html",
+      "outcome": "restricted",
+      "failure": "",
+      "contentLength": 0,
+      "elapsedMs": 3339
+    },
+    {
+      "url": "https://www.lemonde.fr/livres/article/2026/11/02/le-philosophe-jean-gabriel-ganascia-livre-un-essai-eclairant-sur-les-mythes-que-suscite-l-intelligence-artificielle_6805018_3260.html",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 402,
+          "failure": "",
+          "finalUrl": "https://www.lemonde.fr/livres/article/2026/11/02/le-philosophe-jean-gabriel-ganascia-livre-un-essai-eclairant-sur-les-mythes-que-suscite-l-intelligence-artificielle_6805018_3260.html",
+          "contentLength": 0,
+          "elapsedMs": 197
+        },
+        {
+          "method": "browser",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.lemonde.fr/livres/article/2026/11/02/le-philosophe-jean-gabriel-ganascia-livre-un-essai-eclairant-sur-les-mythes-que-suscite-l-intelligence-artificielle_6805018_3260.html",
+          "contentLength": 0,
+          "elapsedMs": 2911
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.lemonde.fr/livres/article/2026/11/02/le-philosophe-jean-gabriel-ganascia-livre-un-essai-eclairant-sur-les-mythes-que-suscite-l-intelligence-artificielle_6805018_3260.html",
+      "outcome": "restricted",
+      "failure": "",
+      "contentLength": 0,
+      "elapsedMs": 3150
+    },
+    {
+      "url": "https://casrai.org/guides/literature-review-artificial-intelligence",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://casrai.org/guides/literature-review-artificial-intelligence",
+          "contentLength": 7282,
+          "elapsedMs": 191
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://casrai.org/guides/literature-review-artificial-intelligence",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 7282,
+      "elapsedMs": 221
+    },
+    {
+      "url": "https://www.indiatoday.in/india/south/story/tamil-nadu-library-scam-rajmohan-dmk-ai-generated-books-periyar-arivulagam-3034804-2026-11-08",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.indiatoday.in/india/south/story/tamil-nadu-library-scam-rajmohan-dmk-ai-generated-books-periyar-arivulagam-3034804-2026-11-08",
+          "contentLength": 6890,
+          "elapsedMs": 128
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.indiatoday.in/india/south/story/tamil-nadu-library-scam-rajmohan-dmk-ai-generated-books-periyar-arivulagam-3034804-2026-11-08",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 6890,
+      "elapsedMs": 182
+    },
+    {
+      "url": "https://news.ycombinator.com/item?id=50411036",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://news.ycombinator.com/item",
+          "contentLength": 2469,
+          "elapsedMs": 535
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://news.ycombinator.com/item",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 2469,
+      "elapsedMs": 542
+    },
+    {
+      "url": "https://www.watson.ch/fr/blogs/franc-parler/199523055-utiliser-l-ia-pour-ecrire-son-livre-nicolas-feuz-repond",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.watson.ch/fr/blogs/franc-parler/199523055-utiliser-l-ia-pour-ecrire-son-livre-nicolas-feuz-repond",
+          "contentLength": 15081,
+          "elapsedMs": 1440
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.watson.ch/fr/blogs/franc-parler/199523055-utiliser-l-ia-pour-ecrire-son-livre-nicolas-feuz-repond",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 15081,
+      "elapsedMs": 1489
+    },
+    {
+      "url": "https://medium.com/in-christo/technology-helps-in-preaching-954d37ccdb76",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://medium.com/in-christo/technology-helps-in-preaching-954d37ccdb76",
+          "contentLength": 14778,
+          "elapsedMs": 921
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://medium.com/in-christo/technology-helps-in-preaching-954d37ccdb76",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 14778,
+      "elapsedMs": 945
+    },
+    {
+      "url": "https://fryskednis.blogspot.com/2026/11/a-new-chapter-in-my-oera-linda-research.html",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://fryskednis.blogspot.com/2026/11/a-new-chapter-in-my-oera-linda-research.html",
+          "contentLength": 7561,
+          "elapsedMs": 428
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://fryskednis.blogspot.com/2026/11/a-new-chapter-in-my-oera-linda-research.html",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 7561,
+      "elapsedMs": 455
+    },
+    {
+      "url": "https://stthomassource.com/content/2026/11/07/caribbean-writers-explore-storytelling-identity-ai-at-bvi-literary-festival/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://stthomassource.com/content/2026/11/07/caribbean-writers-explore-storytelling-identity-ai-at-bvi-literary-festival/",
+          "contentLength": 7195,
+          "elapsedMs": 211
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://stthomassource.com/content/2026/11/07/caribbean-writers-explore-storytelling-identity-ai-at-bvi-literary-festival/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 7195,
+      "elapsedMs": 257
+    },
+    {
+      "url": "https://www.theoutdoorwire.com/features/2026/11/ai-wins-fly-fishing-writing-contest",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.theoutdoorwire.com/features/2026/11/ai-wins-fly-fishing-writing-contest/",
+          "contentLength": 4675,
+          "elapsedMs": 87
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.theoutdoorwire.com/features/2026/11/ai-wins-fly-fishing-writing-contest/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 4675,
+      "elapsedMs": 91
+    },
+    {
+      "url": "https://goodmenproject.com/featured-content/ai-governance-a-practical-view-from-a-writing-classroom/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://goodmenproject.com/featured-content/ai-governance-a-practical-view-from-a-writing-classroom/",
+          "contentLength": 7923,
+          "elapsedMs": 112
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://goodmenproject.com/featured-content/ai-governance-a-practical-view-from-a-writing-classroom/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 7923,
+      "elapsedMs": 146
+    },
+    {
+      "url": "https://www.thenewsminute.com/tamil-nadu/fake-histories-dubious-authorship-perumal-murugan-questions-periyar-arivulagam-book-procurements-97",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.thenewsminute.com/tamil-nadu/fake-histories-dubious-authorship-perumal-murugan-questions-periyar-arivulagam-book-procurements-97",
+          "contentLength": 8835,
+          "elapsedMs": 92
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.thenewsminute.com/tamil-nadu/fake-histories-dubious-authorship-perumal-murugan-questions-periyar-arivulagam-book-procurements-97",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 8835,
+      "elapsedMs": 131
+    },
+    {
+      "url": "https://www.astralcodexten.com/p/your-book-review-orality-and-literacy",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.astralcodexten.com/p/your-book-review-orality-and-literacy",
+          "contentLength": 40725,
+          "elapsedMs": 129
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.astralcodexten.com/p/your-book-review-orality-and-literacy",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 40725,
+      "elapsedMs": 179
+    },
+    {
+      "url": "https://neurosciencenews.com/pink-noise-conversation-cognition-32390/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://neurosciencenews.com/pink-noise-conversation-cognition-32390/",
+          "contentLength": 9535,
+          "elapsedMs": 96
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://neurosciencenews.com/pink-noise-conversation-cognition-32390/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 9535,
+      "elapsedMs": 115
+    },
+    {
+      "url": "https://boards.4chan.org/lit/thread/25637363",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://boards.4chan.org/lit/thread/25637363",
+          "contentLength": 18612,
+          "elapsedMs": 312
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://boards.4chan.org/lit/thread/25637363",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 18612,
+      "elapsedMs": 354
+    },
+    {
+      "url": "https://www.horizons.dz/2026/11/ecrire-a-lere-de-lia-craintes-et-bon-usage/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.horizons.dz/2026/11/ecrire-a-lere-de-lia-craintes-et-bon-usage/",
+          "contentLength": 3853,
+          "elapsedMs": 1300
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.horizons.dz/2026/11/ecrire-a-lere-de-lia-craintes-et-bon-usage/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 3853,
+      "elapsedMs": 1311
+    },
+    {
+      "url": "https://www.wired.com/story/nyt-cooking-new-ai-powered-recipe-modifier-is-pretty-good/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.wired.com/story/nyt-cooking-new-ai-powered-recipe-modifier-is-pretty-good/",
+          "contentLength": 11160,
+          "elapsedMs": 214
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.wired.com/story/nyt-cooking-new-ai-powered-recipe-modifier-is-pretty-good/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 11160,
+      "elapsedMs": 308
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/agent-readability-deprecated-content-page-notes",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/agent-readability-deprecated-content-page-notes",
+          "contentLength": 9282,
+          "elapsedMs": 310
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/agent-readability-deprecated-content-page-notes",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 9282,
+      "elapsedMs": 326
+    },
+    {
+      "url": "https://www.niemanlab.org/2026/10/meta-pledges-to-consult-publishers-before-finalizing-its-new-terms/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.niemanlab.org/2026/10/meta-pledges-to-consult-publishers-before-finalizing-its-new-terms/",
+          "contentLength": 4600,
+          "elapsedMs": 182
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.niemanlab.org/2026/10/meta-pledges-to-consult-publishers-before-finalizing-its-new-terms/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 4600,
+      "elapsedMs": 195
+    },
+    {
+      "url": "https://www.niemanlab.org/2026/10/i-went-looking-for-the-source-of-one-little-statistic-that-was-easier-said-than-done/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.niemanlab.org/2026/10/i-went-looking-for-the-source-of-one-little-statistic-that-was-easier-said-than-done/",
+          "contentLength": 8622,
+          "elapsedMs": 61
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.niemanlab.org/2026/10/i-went-looking-for-the-source-of-one-little-statistic-that-was-easier-said-than-done/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 8622,
+      "elapsedMs": 74
+    },
+    {
+      "url": "https://www.blogdumoderateur.com/ia-entreprise-informer-former-salaries-terrain/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.blogdumoderateur.com/ia-entreprise-informer-former-salaries-terrain/",
+          "contentLength": 11176,
+          "elapsedMs": 301
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.blogdumoderateur.com/ia-entreprise-informer-former-salaries-terrain/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 11176,
+      "elapsedMs": 328
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/identify-semantics-in-styling-agents",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/identify-semantics-in-styling-agents",
+          "contentLength": 10809,
+          "elapsedMs": 169
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/identify-semantics-in-styling-agents",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 10809,
+      "elapsedMs": 179
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/make-documentation-agent-friendly",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/make-documentation-agent-friendly",
+          "contentLength": 33842,
+          "elapsedMs": 293
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/make-documentation-agent-friendly",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 33842,
+      "elapsedMs": 389
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/nytril-question-and-answer",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/nytril-question-and-answer",
+          "contentLength": 53752,
+          "elapsedMs": 624
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/nytril-question-and-answer",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 53752,
+      "elapsedMs": 700
+    },
+    {
+      "url": "https://www.schwarzmancentre.ox.ac.uk/whats-on/utopia-now-conference-jwfy",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": null,
+          "failure": "redirect-loop",
+          "finalUrl": "https://www.schwarzmancentre.ox.ac.uk/csq/",
+          "contentLength": 0,
+          "elapsedMs": 850
+        },
+        {
+          "method": "browser",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.schwarzmancentre.ox.ac.uk/whats-on/utopia-now-conference-jwfy",
+          "contentLength": 5537,
+          "elapsedMs": 3137
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.schwarzmancentre.ox.ac.uk/whats-on/utopia-now-conference-jwfy",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 5537,
+      "elapsedMs": 3997
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/turning-web-content-into-pdf-to-sell",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/turning-web-content-into-pdf-to-sell",
+          "contentLength": 32418,
+          "elapsedMs": 193
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/turning-web-content-into-pdf-to-sell",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 32418,
+      "elapsedMs": 229
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/building-machines-skills-for-tech-comm-workflows",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/building-machines-skills-for-tech-comm-workflows",
+          "contentLength": 7569,
+          "elapsedMs": 220
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/building-machines-skills-for-tech-comm-workflows",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 7569,
+      "elapsedMs": 230
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/building-out-agent-skills-course",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/building-out-agent-skills-course",
+          "contentLength": 6289,
+          "elapsedMs": 184
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/building-out-agent-skills-course",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 6289,
+      "elapsedMs": 192
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/ai-strategy-to-fix-docs-based-logs",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/ai-strategy-to-fix-docs-based-logs",
+          "contentLength": 14119,
+          "elapsedMs": 473
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/ai-strategy-to-fix-docs-based-logs",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 14119,
+      "elapsedMs": 484
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/new-books-tech-comm-2026",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/new-books-tech-comm-2026",
+          "contentLength": 13092,
+          "elapsedMs": 455
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/new-books-tech-comm-2026",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 13092,
+      "elapsedMs": 469
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/book-club-stern-i-am-not-a-robot",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/book-club-stern-i-am-not-a-robot",
+          "contentLength": 56408,
+          "elapsedMs": 526
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/book-club-stern-i-am-not-a-robot",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 56408,
+      "elapsedMs": 555
+    },
+    {
+      "url": "https://www.blogdumoderateur.com/google-open-ai-microsoft-anthropic-regle-robots-txt-commune-contre-entrainement-ia/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.blogdumoderateur.com/google-open-ai-microsoft-anthropic-regle-robots-txt-commune-contre-entrainement-ia/",
+          "contentLength": 3674,
+          "elapsedMs": 82
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.blogdumoderateur.com/google-open-ai-microsoft-anthropic-regle-robots-txt-commune-contre-entrainement-ia/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 3674,
+      "elapsedMs": 109
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/podcast-ethan-palm-agent-traffic",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/podcast-ethan-palm-agent-traffic",
+          "contentLength": 56514,
+          "elapsedMs": 564
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/podcast-ethan-palm-agent-traffic",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 56514,
+      "elapsedMs": 592
+    },
+    {
+      "url": "http://www.argotheme.com/organecyberpresse/spip.php?article5035",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "http://www.argotheme.com/organecyberpresse/spip.php",
+          "contentLength": 9232,
+          "elapsedMs": 225
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "http://www.argotheme.com/organecyberpresse/spip.php",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 9232,
+      "elapsedMs": 237
+    },
+    {
+      "url": "https://www.cnn.com/2026/11/07/entertainment/ao3-hack-shutdown-cec",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://edition.cnn.com/2026/11/07/entertainment/ao3-hack-shutdown-cec",
+          "contentLength": 8610,
+          "elapsedMs": 236
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://edition.cnn.com/2026/11/07/entertainment/ao3-hack-shutdown-cec",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 8610,
+      "elapsedMs": 405
+    },
+    {
+      "url": "https://www.nature.com/articles/d41586-026-03407-2",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.nature.com/articles/d41586-026-03407-2",
+          "contentLength": 2473,
+          "elapsedMs": 1038
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.nature.com/articles/d41586-026-03407-2",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 2473,
+      "elapsedMs": 1097
+    },
+    {
+      "url": "https://educationalchallenges.org.ua/index.php/education_challenges/article/view/633",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://educationalchallenges.org.ua/index.php/education_challenges/en/article/view/633",
+          "contentLength": 11896,
+          "elapsedMs": 947
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://educationalchallenges.org.ua/index.php/education_challenges/en/article/view/633",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 11896,
+      "elapsedMs": 966
+    },
+    {
+      "url": "https://www.niemanlab.org/2026/11/elon-musks-grokipedia-is-littered-with-mistakes-but-wikipedia-could-still-learn-some-things-from-it/",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.niemanlab.org/2026/11/elon-musks-grokipedia-is-littered-with-mistakes-but-wikipedia-could-still-learn-some-things-from-it/",
+          "contentLength": 10380,
+          "elapsedMs": 143
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.niemanlab.org/2026/11/elon-musks-grokipedia-is-littered-with-mistakes-but-wikipedia-could-still-learn-some-things-from-it/",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 10380,
+      "elapsedMs": 156
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/improvement-feedback-loop-docs",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/improvement-feedback-loop-docs",
+          "contentLength": 40434,
+          "elapsedMs": 183
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/improvement-feedback-loop-docs",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 40434,
+      "elapsedMs": 209
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/wtfm-book-ct-smith-podcast",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/wtfm-book-ct-smith-podcast",
+          "contentLength": 61664,
+          "elapsedMs": 232
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/wtfm-book-ct-smith-podcast",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 61664,
+      "elapsedMs": 262
+    },
+    {
+      "url": "https://chine.in/guide/hongguo-duanju-application-micro-dramas_5164.html",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 403,
+          "failure": "",
+          "finalUrl": "https://chine.in/guide/hongguo-duanju-application-micro-dramas_5164.html",
+          "contentLength": 0,
+          "elapsedMs": 197
+        },
+        {
+          "method": "browser",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://chine.in/guide/hongguo-duanju-application-micro-dramas_5164.html",
+          "contentLength": 5478,
+          "elapsedMs": 2165
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://chine.in/guide/hongguo-duanju-application-micro-dramas_5164.html",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 5478,
+      "elapsedMs": 2397
+    },
+    {
+      "url": "https://www.theguardian.com/technology/2026/nov/08/ai-clog-public-bodies-local-authorities-onslaught-chatbot-generated-correspondence",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://www.theguardian.com/technology/2026/nov/08/ai-clog-public-bodies-local-authorities-onslaught-chatbot-generated-correspondence",
+          "contentLength": 10321,
+          "elapsedMs": 98
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://www.theguardian.com/technology/2026/nov/08/ai-clog-public-bodies-local-authorities-onslaught-chatbot-generated-correspondence",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 10321,
+      "elapsedMs": 136
+    },
+    {
+      "url": "https://idratherbewriting.com/blog/review-maniac-labatut-rationality-end-of-play",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://idratherbewriting.com/blog/review-maniac-labatut-rationality-end-of-play",
+          "contentLength": 13659,
+          "elapsedMs": 225
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://idratherbewriting.com/blog/review-maniac-labatut-rationality-end-of-play",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 13659,
+      "elapsedMs": 236
+    },
+    {
+      "url": "https://onlinelibrary.wiley.com/doi/abs/10.1111/ijal.70415",
+      "attempts": [
+        {
+          "method": "http",
+          "httpStatus": 403,
+          "failure": "",
+          "finalUrl": "https://onlinelibrary.wiley.com/doi/abs/10.1111/ijal.70415",
+          "contentLength": 0,
+          "elapsedMs": 165
+        },
+        {
+          "method": "browser",
+          "httpStatus": 200,
+          "failure": "",
+          "finalUrl": "https://onlinelibrary.wiley.com/doi/abs/10.1111/ijal.70415",
+          "contentLength": 1279,
+          "elapsedMs": 3624
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "https://onlinelibrary.wiley.com/doi/abs/10.1111/ijal.70415",
+      "outcome": "readable",
+      "failure": "",
+      "contentLength": 1279,
+      "elapsedMs": 3827
+    }
+  ],
+  "finishedAt": "2026-11-09T10:15:47.567330+00:00",
+  "unchanged": true,
+  "counts": {
+    "readable": 46,
+    "restricted": 5,
+    "unreadable": 1,
+    "network-error": 1,
+    "missing": 1,
+    "pdf": 1
+  },
+  "complete": true
+}

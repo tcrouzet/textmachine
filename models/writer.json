@@ -4,7 +4,8 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "paragraphs"
+    "paragraphs",
+    "used"
   ],
   "properties": {
     "paragraphs": {
@@ -13,8 +14,13 @@
         "type": "string",
         "minLength": 1
       },
-      "description": "Paragraphes d’une revue de presse qui fait entendre chaque source sélectionnée et passe de l’une à l’autre par des faits et des citations attribuées. Sans titre, chapeau, image ni liste de résumés.",
-      "minItems": 2
+      "description": "RP à plusieurs voix, exploitant au moins deux publications distinctes et idéalement 3 à 5 sources. Sans titre, chapeau, image ni liste de résumés. Au moins deux paragraphes si used n’est pas vide ; liste vide sinon.",
+      "minItems": 0
+    },
+    "used": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 1},
+      "description": "IDs des articles réellement exploités dans le corps, issus d’au moins deux publications distinctes. Plusieurs billets du même site ne suffisent pas. Liste vide si aucune RP à plusieurs voix n’est possible. Les sources pertinentes non utilisées seront conservées en bref."
     }
   }
 }

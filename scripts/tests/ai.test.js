@@ -3,11 +3,50 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const {tmpdir} = require('node:os');
 const path = require('node:path');
+const {execFile}=require('node:child_process');
+const {promisify}=require('node:util');
 require('../../plugin/i18n').setLocale('en');
 const {defaults, models, CODEX_MODEL, getConnection} = require('../../plugin/ai/config');
-const {listModels,generate} = require('../../plugin/ai/codex');
+const {listModels,generate,generateImage} = require('../../plugin/ai/codex');
 
 const settings = values => ({...defaults,...values});
+test('Codex discovery bypasses npm launchers and executes the native binary without node on PATH',async t=>{
+    const execute=promisify(execFile),root=await fs.mkdtemp(path.join(tmpdir(),'textmachine-native-'));
+    t.after(()=>fs.rm(root,{recursive:true,force:true}));
+    const targets={'darwin:arm64':'aarch64-apple-darwin','darwin:x64':'x86_64-apple-darwin',
+        'linux:arm64':'aarch64-unknown-linux-musl','linux:x64':'x86_64-unknown-linux-musl',
+        'win32:arm64':'aarch64-pc-windows-msvc','win32:x64':'x86_64-pc-windows-msvc'};
+    const triple=targets[process.platform+':'+process.arch];
+    assert.ok(triple,'Supported native test platform');
+    for (const layout of ['bundled','nested','hoisted','standalone']) {
+        const home=path.join(root,layout),bin=path.join(home,'bin');
+        const packageRoot=process.platform==='win32' ? path.join(bin,'node_modules','@openai','codex') : path.join(home,'lib','node_modules','@openai','codex');
+        const script=path.join(packageRoot,'bin','codex.js');
+        await fs.mkdir(path.dirname(script),{recursive:true});
+        await fs.mkdir(bin,{recursive:true});
+        await fs.writeFile(script,'#!/usr/bin/env node\nthrow new Error("A Node.js launcher must not run");\n',{mode:0o755});
+        const wrapper=path.join(bin,process.platform==='win32' ? 'codex.cmd' : 'codex');
+        if (process.platform==='win32') await fs.writeFile(wrapper,'@node wrapper.js');
+        else await fs.symlink(script,wrapper);
+        const platformPackage='codex-'+process.platform+'-'+process.arch;
+        const nativeRoot=layout==='nested' ? path.join(packageRoot,'node_modules','@openai',platformPackage)
+            : layout==='hoisted' ? path.join(path.dirname(packageRoot),platformPackage) : packageRoot;
+        const native=layout==='standalone' ? path.join(home,'native',process.platform==='win32' ? 'codex.exe' : 'codex')
+            : path.join(nativeRoot,'vendor',triple,'codex',process.platform==='win32' ? 'codex.exe' : 'codex');
+        await fs.mkdir(path.dirname(native),{recursive:true});
+        if (process.platform==='win32') await fs.copyFile(process.execPath,native);
+        else await fs.symlink(process.execPath,native);
+        const env={...process.env,HOME:home,USERPROFILE:home,PATH:bin+(layout==='standalone' ? path.delimiter+path.dirname(native) : '')};
+        if (process.platform!=='win32') await assert.rejects(execute(wrapper,['--version'],{env}),error=>error.stderr.includes('node'));
+        const register=path.join(__dirname,'register.cjs');
+        const module=path.join(__dirname,'../../plugin/ai/codex.ts');
+        const code='require('+JSON.stringify(module)+').findCodex().then(value=>process.stdout.write(JSON.stringify(value)))';
+        const found=JSON.parse((await execute(process.execPath,['--require',register,'-e',code],{env})).stdout);
+        assert.equal(found,await fs.realpath(native),layout);
+        assert.equal((await execute(found,['--version'],{env})).stdout.trim(),process.version);
+    }
+});
+
 test('same model catalog and provider priorities as Finition', () => {
     assert.equal(defaults.aiModel,models[0].value);
     const key = provider => provider + '-fixture';
@@ -39,8 +78,11 @@ async function fakeCodex(t, mode) {
     const dir = await fs.mkdtemp(path.join(tmpdir(),'textmachine-codex-'));
     t.after(()=>fs.rm(dir,{recursive:true,force:true}));
     const executable = path.join(dir,'codex');
+    const png = await fs.readFile(path.join(__dirname,'fixtures/illustration.png'));
     await fs.writeFile(executable, `#!${process.execPath}\nconst readline = require('node:readline');
         const mode = ${JSON.stringify(mode)};
+        let turnCount = 0;
+        const imageData = ${JSON.stringify(png.toString('base64'))};
         const invalidSchema = value => value && typeof value === 'object' && (
             value.type === 'object' && (value.additionalProperties !== false
                 || !Array.isArray(value.required) || Object.keys(value.properties || {}).some(key=>!value.required.includes(key)))
@@ -53,10 +95,35 @@ async function fakeCodex(t, mode) {
             else if (message.method === 'account/read') result = {requiresOpenaiAuth:true,account:mode === 'login' ? null : {type:'chatgpt'}};
             else if (message.method === 'config/read') result = {config:{mcp_servers:{fixture:{enabled:true}}}};
             else if (message.method === 'thread/start') {
+                const flag=(name,value)=>process.argv.some((arg,index)=>arg===name && process.argv[index+1]===value);
+                if (mode.startsWith('image-generation') ? !flag('--enable','image_generation') || flag('--disable','image_generation') : !flag('--disable','image_generation')) process.exit(11);
+                if (mode === 'rpc-config') {
+                    process.stdout.write(JSON.stringify({id:message.id,error:{code:-32602,message:'Invalid project_doc_max_bytes: private-fixture-value'}})+'\\n');
+                    return;
+                }
                 if (mode === 'effort' && message.params.config.model_reasoning_effort !== 'high') process.exit(8);
                 if (message.params.sandbox !== 'read-only' || message.params.config.mcp_servers.fixture.enabled !== false) process.exit(3);
                 result = {model:message.params.model || 'resolved-default',thread:{id:'thread-1',ephemeral:true},sandbox:{type:mode === 'unsafe' ? 'workspaceWrite' : 'readOnly'},approvalPolicy:'never'};
             } else if (message.method === 'turn/start') {
+                turnCount++;
+                if (mode.startsWith('image-generation') && mode!=='image-generation-empty') {
+                    process.stdout.write(JSON.stringify({id:message.id,result:{}})+'\\n');
+                    const item={id:'illustration',type:mode==='image-generation-tool' ? 'commandExecution' : 'imageGeneration',
+                        status:mode==='image-generation-failed' ? 'failed' : 'completed',
+                        ...(mode==='image-generation-saved' ? {savedPath:'/tmp/generated-fixture.png'} : {result:imageData})};
+                    process.stdout.write(JSON.stringify({method:'item/completed',params:{threadId:'thread-1',item}})+'\\n');
+                    process.stdout.write(JSON.stringify({method:'item/completed',params:{threadId:'thread-1',item:{id:'final',type:'agentMessage',text:'The illustration is ready.'}}})+'\\n');
+                    process.stdout.write(JSON.stringify({method:'turn/completed',params:{threadId:'thread-1',turn:{status:'completed'}}})+'\\n');
+                    return;
+                }
+                if (mode.startsWith('rpc-output')) {
+                    require('node:fs').writeFileSync(__filename+'.attempts',String(turnCount));
+                    if (message.params.outputSchema || mode === 'rpc-output-repeat') {
+                        if (mode === 'rpc-output-late') process.stdout.write(JSON.stringify({method:'item/started',params:{threadId:'thread-1',item:{id:'thinking',type:'reasoning'}}})+'\\n');
+                        process.stdout.write(JSON.stringify({id:message.id,error:{code:-32602,message:'Unsupported parameter outputSchema: private-fixture-value'}})+'\\n');
+                        return;
+                    }
+                }
                 if (mode === 'effort' && message.params.effort !== 'high') process.exit(9);
                 if (message.params.sandboxPolicy.networkAccess !== false) process.exit(4);
                 if (mode === 'image' && !message.params.input.some(item=>item.type==='image' && item.url==='https://example.com/image.jpg')) process.exit(6);
@@ -66,9 +133,18 @@ async function fakeCodex(t, mode) {
                     : mode === 'quota' ? {message:'private-fixture-value',codexErrorInfo:'usageLimitExceeded'}
                         : mode === 'context' ? {message:'private-fixture-value',codexErrorInfo:'contextWindowExceeded'}
                             : mode === 'unauthorized' ? {message:'private-fixture-value',codexErrorInfo:'unauthorized'}
-                            : mode === 'unknown' ? {message:'private-fixture-value',codexErrorInfo:null} : null;
+                            : mode === 'unknown' ? {message:'private-fixture-value',codexErrorInfo:null}
+                                : mode.startsWith('info:') ? {message:'private-fixture-value',codexErrorInfo:JSON.parse(mode.slice(5))} : null;
                 if (mode === 'rpc-schema') {
                     process.stdout.write(JSON.stringify({id:message.id,error:{code:-32602,message:'Invalid schema: private-fixture-value'}})+'\\n');
+                    return;
+                }
+                if (mode === 'rpc-invalid') {
+                    process.stdout.write(JSON.stringify({id:message.id,error:{code:-32602,message:'private-fixture-value'}})+'\\n');
+                    return;
+                }
+                if (mode === 'rpc-input-too-long') {
+                    process.stdout.write(JSON.stringify({id:message.id,error:{code:-32602,message:'Input exceeds the maximum length of 1048576 characters. private-fixture-value'}})+'\\n');
                     return;
                 }
                 if (failure) {
@@ -99,6 +175,9 @@ async function fakeCodex(t, mode) {
                     },10);
                 } else setTimeout(complete,10);
                 result = {};
+            } else if (message.method === 'fs/readFile' && mode==='image-generation-saved') {
+                if (message.params.path!=='/tmp/generated-fixture.png') process.exit(12);
+                result={dataBase64:imageData};
             } else if (message.method === 'model/list') {
                 if (mode === 'cancel') return;
                 result = mode.startsWith('efforts') ? {data:[{model:'first',displayName:'First',supportedReasoningEfforts:
@@ -180,6 +259,7 @@ test('Codex accepts separate strict schemas for selection, article writing, revi
     const requests=[newsletter.selectionRequest('{{articles}}',articles,'français'),
         newsletter.writerRequest('{{articles}}',articles,[],[],'français'),
         newsletter.publisherRequest('{{article}}',['First paragraph.','Second paragraph.'],'français'),
+        newsletter.verificationRequest('{{newsletter}}\n{{articles}}',{title:'Title',chapeau:'Introduction',paragraphs:['First paragraph.','Second paragraph.']},articles,'français'),
         require('../../plugin/ai/rewrite').rewriteRequest('Revise the article','First paragraph.\n\nSecond paragraph.')];
     for (const request of requests) {
         assert.equal(await generate(await fakeCodex(t,'generation'),request.system,request.input,'fixture',undefined,undefined,request.schema),'Generated newsletter');
@@ -190,14 +270,63 @@ test('Codex receives the actual image URL as an image input for visual verificat
     assert.equal(await generate(await fakeCodex(t,'image'),'Inspect image','Context','fixture',undefined,undefined,undefined,'https://example.com/image.jpg'),'Generated newsletter');
 });
 
+test('Codex generates images with its native tool and the configured model without enabling other tools',async t=>{
+    const png=await fs.readFile(path.join(__dirname,'fixtures/illustration.png'));
+    for (const mode of ['image-generation','image-generation-saved']) {
+        const models=[];
+        const image=await generateImage(await fakeCodex(t,mode),'Draw the illustration','Article','chosen-model',undefined,(_text,_stream,_reset,model)=>{if(model)models.push(model);},'high');
+        assert.deepEqual(Buffer.from(image),png);
+        assert.deepEqual(models,['Codex · chosen-model']);
+    }
+    for (const mode of ['image-generation-failed','image-generation-tool','image-generation-empty'])
+        await assert.rejects(generateImage(await fakeCodex(t,mode),'Draw','Article','chosen-model'),/Unable to create|without tools/);
+});
+
 test('Codex reports schema, quota and context failures without exposing raw server messages',async t=>{
-    for (const [mode,expected] of [['rpc-schema',/JSON schema/],['quota',/usage limit/],['context',/context window/],['unauthorized',/codex login/],['unknown',/failed/]]) {
+    for (const [mode,expected] of [['rpc-schema',/JSON schema/],['rpc-input-too-long',/1048576 characters/],['quota',/usage limit/],['context',/context window/],['unauthorized',/codex login/],['unknown',/failed/]]) {
         await assert.rejects(generate(await fakeCodex(t,mode),'Writer','Articles','fixture'),error=>{
             assert.match(error.message,expected);
             assert.ok(!error.message.includes('private-fixture-value'));
             assert.ok(!error.message.includes('incomplete'));
             return true;
         });
+    }
+});
+
+test('Codex preserves safe diagnostic codes from updated app servers',async t=>{
+    for (const info of ['modelNotFound','badRequest','rateLimitExceeded','serverOverloaded','sessionBudgetExceeded',
+        {responseStreamDisconnected:{httpStatusCode:503}}]) {
+        const code = typeof info === 'string' ? info : Object.keys(info)[0];
+        await assert.rejects(generate(await fakeCodex(t,'info:'+JSON.stringify(info)),'Writer','Articles','fixture'),error=>{
+            assert.ok(error.message.includes('('+code+')'),error.message);
+            assert.ok(!error.message.includes('private-fixture-value'));
+            return true;
+        });
+    }
+    await assert.rejects(generate(await fakeCodex(t,'rpc-invalid'),'Writer','Articles','fixture'),error=>{
+        assert.match(error.message,/^turn\/start: .*\(-32602\)/);
+        assert.ok(!error.message.includes('private-fixture-value'));
+        return true;
+    });
+    await assert.rejects(generate(await fakeCodex(t,'rpc-config'),'Writer','Articles','fixture'),error=>{
+        assert.match(error.message,/^thread\/start: .*\(-32602\).*project_doc_max_bytes/);
+        assert.ok(!error.message.includes('private-fixture-value'));
+        return true;
+    });
+    for (const info of ['private-fixture-value',{'private-fixture-value':{httpStatusCode:503}}]) {
+        await assert.rejects(generate(await fakeCodex(t,'info:'+JSON.stringify(info)),'Writer','Articles','fixture'),error=>{
+            assert.ok(!error.message.includes('private-fixture-value'));
+            return true;
+        });
+    }
+});
+
+test('Codex preserves the native output schema and never retries invalid parameters',async t=>{
+    const schema = require('../../models/selection.json');
+    for (const mode of ['rpc-output','rpc-output-repeat','rpc-output-late']) {
+        const failing = await fakeCodex(t,mode);
+        await assert.rejects(generate(failing,'Return JSON','Articles','fixture',undefined,undefined,schema),/\(-32602\)/);
+        assert.equal(await fs.readFile(failing+'.attempts','utf8'),'1');
     }
 });
 

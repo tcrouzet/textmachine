@@ -1,0 +1,72 @@
+{
+  "date": "2026-11-09",
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "startedAt": "2026-11-09T12:13:53.773Z",
+  "complete": true,
+  "sources": [
+    {
+      "id": 609,
+      "title": "For C.S. Lewis fans: AI is not N.I.C.E. | Mind Matters",
+      "url": "https://mindmatters.ai/2026/11/for-c-s-lewis-fans-ai-is-not-n-i-c-e/"
+    },
+    {
+      "id": 640,
+      "title": "AO3’s takedown exposes divisions within its community",
+      "url": "https://www.cnn.com/2026/11/07/entertainment/ao3-hack-shutdown-cec"
+    },
+    {
+      "id": 742,
+      "title": "Documentation at Scale with Andrew Etter: Ten years after Modern Technical Writing",
+      "url": "https://idratherbewriting.com/blog/docs-at-scale-with-andrew-etter"
+    }
+  ],
+  "original": "# Des récits de fans convertis en livres audio payants\n\n*Sur Archive of Our Own, des fans publient gratuitement des récits inspirés d’univers de fiction. Leur libre accès ne signifie pas que les auteurs acceptent leur réutilisation commerciale, rappelle CNN.*\n\nLe 1er novembre, AO3.life est apparu après le piratage qui a mis Archive of Our Own hors ligne le 29 octobre, raconte [CNN](https://www.cnn.com/2026/11/07/entertainment/ao3-hack-shutdown-cec). Ce clone proposait des milliers de récits récupérés sur la plateforme, dont beaucoup avaient été convertis en livres audio par IA et mis en vente. Le site a fermé sous la pression des demandes de retrait des auteurs.\n\nC. S. Lewis, prophète de l’IA démoniaque ? Dans [*Mind Matters*](https://mindmatters.ai/2026/11/for-c-s-lewis-fans-ai-is-not-n-i-c-e/), Jerry Bowyer conteste les lectures de commentateurs chrétiens qui voient dans [*Cette hideuse puissance*](https://fr.wikipedia.org/wiki/Cette_hideuse_puissance) (1945) une prophétie sur les dangers de l’IA. L’institut maléfique du roman, souligne-t-il, « malgré tous ses laboratoires, ne produit presque rien ». Cet institut organise surtout la propagande et le contrôle politique. Pour Bowyer, l’avertissement vise moins les chercheurs qui fabriquent des outils que ceux qui voudraient concentrer le pouvoir au nom de notre sécurité.\n\nLe métier de rédacteur technique ne consiste pas forcément à écrire chaque mot. Dans un entretien avec Tom Johnson publié sur [*I’d Rather Be Writing*](https://idratherbewriting.com/blog/docs-at-scale-with-andrew-etter), Andrew Etter, qui travaille chez Roblox, explique qu’avant l’IA, il relisait déjà presque toute la documentation sans en rédiger la majorité. Il défend l’idée d’une équipe responsable de la qualité et de la mise à jour de la documentation des logiciels. Il doit notamment raccourcir les descriptions d’interfaces de programmation produites par l’IA, souvent de moitié. Pour rédiger un tutoriel, il faut, dit-il, être « très attentif à ce qu’on omet ».\n",
+  "stages": {
+    "selection": {
+      "selected": [
+        640,
+        742
+      ],
+      "brief": [
+        609
+      ],
+      "discard": []
+    },
+    "writer": [
+      "Des fanfictions gratuites devenues des livres audio payants : T. M. Brown raconte sur [CNN](https://www.cnn.com/2026/11/07/entertainment/ao3-hack-shutdown-cec) les suites de la fermeture temporaire d’Archive of Our Own, dit AO3. Le site d’écriture amateur est hors ligne depuis une intrusion informatique le 29 octobre. Des plateformes clones ont alors repris ses récits ; l’une d’elles, AO3.life, en proposait beaucoup sous forme de livres audio générés par IA, à acheter. Des auteurs protestent : rendre leurs textes accessibles dans une communauté ne signifie pas, à leurs yeux, consentir à toutes les réutilisations. Plusieurs grands clones ont fermé après avoir reçu une avalanche de demandes de retrait. Le créateur d’AO3.life a publié des excuses.",
+      "À quoi sert encore un rédacteur quand l’IA produit les pages ? Sur [I’d Rather Be Writing](https://idratherbewriting.com/blog/docs-at-scale-with-andrew-etter), Tom Johnson interroge Andrew Etter, spécialiste de la documentation technique chez Roblox. Pour celui-ci, la raison de conserver une équipe dédiée tient surtout à la responsabilité : quelqu’un doit répondre de la qualité des textes et de leur entretien. Un développeur peut documenter une fonctionnalité, puis changer de projet ; qui vérifiera ensuite que ses explications restent valables ? Etter utilise largement l’IA, notamment pour repérer les coquilles et contrôler les exemples de code. Il ne défend donc pas l’écriture humaine de chaque phrase, mais un métier qui dépasse la livraison du texte : suivre les problèmes, organiser les contenus et garantir leur utilité dans la durée."
+    ],
+    "rewriter": [
+      "Des fanfictions gratuites proposées en livres audio payants : T. M. Brown raconte sur [CNN](https://www.cnn.com/2026/11/07/entertainment/ao3-hack-shutdown-cec) les suites de la fermeture temporaire d’Archive of Our Own, dit AO3. Ce site d’écriture amateur est hors ligne depuis une intrusion informatique le 29 octobre. Des sites clones ont alors repris ses récits ; l’un d’eux, AO3.life, en proposait un grand nombre à la vente sous forme de livres audio générés par IA. Des auteurs protestent : à leurs yeux, partager leurs textes au sein d’une communauté ne signifie pas consentir à toutes les réutilisations. Plusieurs grands sites clones ont fermé après avoir reçu une avalanche de demandes de retrait. Le créateur d’AO3.life a publié des excuses.",
+      "À quoi sert encore un rédacteur quand l’IA produit les pages ? Sur *[I’d Rather Be Writing](https://idratherbewriting.com/blog/docs-at-scale-with-andrew-etter)*, Tom Johnson interroge Andrew Etter, spécialiste de la documentation technique chez Roblox. Pour Etter, conserver une équipe dédiée permet surtout de confier à quelqu’un la responsabilité de la qualité des textes et de leur mise à jour. Un développeur peut documenter une fonctionnalité, puis changer de projet ; qui vérifiera ensuite que ses explications restent valables ? Etter utilise lui-même largement l’IA, notamment pour repérer les coquilles et contrôler les exemples de code. Il ne défend donc pas la nécessité de faire écrire chaque phrase par un humain, mais un métier qui ne s’arrête pas à la livraison du texte : assurer le suivi des problèmes de documentation, organiser les contenus et garantir leur utilité dans la durée."
+    ],
+    "publisher": {
+      "title": "Des auteurs amateurs contestent la revente de leurs textes",
+      "chapeau": "La fermeture temporaire d’une plateforme de fanfictions a été suivie de réutilisations commerciales de ses récits, initialement partagés gratuitement au sein d’une communauté de passionnés."
+    },
+    "verifier": {
+      "title": "Des auteurs de fanfictions contestent la commercialisation de leurs récits",
+      "chapeau": "La mise hors ligne d’Archive of Our Own, plateforme de récits amateurs inspirés d’œuvres existantes, révèle un conflit entre libre accès aux textes et contrôle de leurs réutilisations.",
+      "paragraphs": [
+        "Sur [CNN](https://www.cnn.com/2026/11/07/entertainment/ao3-hack-shutdown-cec), T. M. Brown rapporte qu’Archive of Our Own, ou AO3, est hors ligne depuis le 29 octobre à la suite d’une intrusion informatique. Dans les jours suivants, des sites clones ont repris ses récits. Apparu le 1er novembre, AO3.life en hébergeait des milliers, dont beaucoup avaient été transformés en livres audio payants générés par IA. Des auteurs dénoncent ces réutilisations sans leur accord : si leurs textes étaient accessibles gratuitement, ils souhaitaient en garder le contrôle et les partager dans un cadre communautaire. La spécialiste des communautés de fans Monia Ali rappelle notamment que certains auteurs veulent pouvoir supprimer leurs œuvres sans qu’elles restent accessibles ailleurs. Plusieurs grands sites clones ont fermé après avoir reçu de nombreuses demandes de retrait. Le créateur d’AO3.life a publié des excuses.",
+        "Dans la documentation technique, l’IA soulève une autre question : à quoi sert une équipe de rédacteurs si elle n’écrit plus chaque phrase ? Sur *[I’d Rather Be Writing](https://idratherbewriting.com/blog/docs-at-scale-with-andrew-etter)*, Tom Johnson interroge Andrew Etter, spécialiste de la documentation technique chez Roblox. Pour Etter, une équipe dédiée reste nécessaire parce qu’elle répond de la qualité des contenus et de leur suivi. Johnson souligne qu’un développeur peut documenter une fonctionnalité, puis changer de projet et laisser la page sans responsable pour la maintenir. Etter utilise pourtant largement l’IA, notamment pour repérer les coquilles et comparer les réponses d’un logiciel à ce qu’annonce sa documentation. Il ne défend donc pas l’écriture humaine de chaque phrase : il défend la nécessité de confier à une équipe la surveillance des problèmes, l’organisation des contenus et leur utilité dans la durée. Il souligne aussi une limite de l’IA : dans les tutoriels, elle inclut souvent trop de détails, là où le rédacteur doit sélectionner les informations nécessaires pour guider le lecteur."
+      ]
+    }
+  },
+  "used": [
+    640,
+    742
+  ],
+  "brief": [
+    {
+      "id": 609,
+      "title": "Des lecteurs de C. S. Lewis voient dans « Cette hideuse puissance » une mise en garde contre l’IA",
+      "url": "https://mindmatters.ai/2026/11/for-c-s-lewis-fans-ai-is-not-n-i-c-e/",
+      "category": "Littérature et IA"
+    }
+  ],
+  "unchanged": true,
+  "finishedAt": "2026-11-09T12:16:39.263Z",
+  "briefRetestedAt": "2026-11-09T12:24:12.337Z"
+}

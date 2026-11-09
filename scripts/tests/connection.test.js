@@ -4,9 +4,12 @@ const vm = require('node:vm');
 const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
 const rewriteResponse = text=>JSON.stringify({paragraphs:text.trim().split(/\r?\n[ \t]*\r?\n+/)});
+const writerResponse=(paragraphs,articles)=>JSON.stringify({paragraphs:paragraphs.map((text,index)=>index===paragraphs.length-1
+    ? text+' '+articles.map(article=>'[Source '+article.id+']('+article.url+')').join(' ') : text),used:articles.map(article=>article.id)});
 
 async function fixture(initialSecrets = {}) {
     const secrets = new Map(Object.entries(initialSecrets));
+    const events=new Map();
     let layoutReady;
     class Plugin {
         async loadData() { return this.savedSettings || {secretKey:'test',labelId:'Label_1'}; }
@@ -24,7 +27,7 @@ async function fixture(initialSecrets = {}) {
     vm.runInNewContext(require('esbuild').buildSync({entryPoints:[path.join(root,'plugin/main.ts')],bundle:true,platform:'node',format:'cjs',write:false,external:['obsidian','electron','@electron/remote'],loader:{'.dat':'text','.svg':'text','.md':'text'}}).outputFiles[0].text,context);
     const p = new context.module.exports.default();
     p.manifest = {dir:'.'};
-    p.app = {workspace:{on:()=>({}),onLayoutReady:callback=>{layoutReady=callback;}},vault:{adapter:{getBasePath:()=>root,read:async()=>JSON.stringify({installed:{client_id:'123-test.apps.googleusercontent.com',client_secret:'fixture'}})}},secretStorage:{getSecret:key=>key === 'test' ? secret : secrets.get(key),setSecret:(key,value)=>{if (key === 'test') secret=value; else secrets.set(key,value);}}};
+    p.app = {workspace:{on:(name,callback)=>{events.set(name,callback);return {};},onLayoutReady:callback=>{layoutReady=callback;}},vault:{adapter:{getBasePath:()=>root,read:async()=>JSON.stringify({installed:{client_id:'123-test.apps.googleusercontent.com',client_secret:'fixture'}})}},secretStorage:{getSecret:key=>key === 'test' ? secret : secrets.get(key),setSecret:(key,value)=>{if (key === 'test') secret=value; else secrets.set(key,value);}}};
     await p.onload();
     const original = p.gmail;
     const profile = {emailAddress:'reader@example.com'};
@@ -33,7 +36,7 @@ async function fixture(initialSecrets = {}) {
         constructor(credentials,request,save) {super(credentials,responses,save);}
     }};
     p.client.request = responses;
-    return {p,context,profile,stored:()=>JSON.parse(secret),obsidian,layoutReady:()=>layoutReady()};
+    return {p,context,profile,stored:()=>JSON.parse(secret),obsidian,events,layoutReady:()=>layoutReady()};
 }
 
 test('prompt editing reads bundled defaults without writing and saves each stage independently',async()=>{
@@ -243,10 +246,10 @@ test('native secret references reuse existing keys and never copy values into se
 });
 
 async function newsletterFixture() {
-    const {p,obsidian} = await fixture();
+    const {p,obsidian,events} = await fixture();
     p.settings.minimumSources=1;
     const article = (name,extra={}) => ({date:'2026-11-03',title:name,url:'https://example.com/'+name,source:'User',authors:[],status:'',usedAt:'',publish:'2026-11-01',content:'Article about AI and books.',image:'',...extra});
-    const entries = [article('used',{id:1}),article('discard',{id:2}),article('old',{id:3,usedAt:'unknown'})];
+    const entries = [article('used',{id:1}),article('another',{id:2,url:'https://other.example/another'}),article('old',{id:3,url:'https://older.example/old',usedAt:'unknown'})];
     const contents = new Map([['Data/textmachine.json',JSON.stringify({version:1,nextId:4,notes:'Keep notes',articles:entries})]]);
     const files = new Map();
     const folder = Object.assign(new obsidian.TFolder(),{path:'Data',children:[]});
@@ -273,7 +276,9 @@ async function newsletterFixture() {
             if (failCreate) throw new Error('Disk full');
             if (files.has(path)) throw new Error('File exists');
             const file = Object.assign(new obsidian.TFile(),{path,name:path.split('/').pop(),stat:{mtime:Date.now()}});
-            files.set(path,file);contents.set(path,text);folder.children.push(file);return file;
+            files.set(path,file);contents.set(path,text);
+            files.get(path.split('/').slice(0,-1).join('/'))?.children.push(file);
+            return file;
         },
         process:async (file,action)=>{
             const before = contents.get(file.path), after = action(before);
@@ -282,6 +287,7 @@ async function newsletterFixture() {
         },
         adapter:{exists:async()=>true,read:async path=>path.endsWith('/models/newsletter.md') ? require('node:fs').readFileSync(require('node:path').join(root,'models/newsletter.md'),'utf8')
             : path.endsWith('/prompts/publisher.md') ? 'Runtime publisher in {{language}}.\n{{article}}'
+            : path.endsWith('/prompts/verifier.md') ? '{"instructions":"Runtime verifier","newsletter":{{newsletter}},"articles":{{articles}},"language":"{{language}}"}'
             : path.endsWith('/prompts/image.md') ? 'Image caption in {{language}}'
                 : path.endsWith('/prompts/rewriter.md') ? 'Runtime rewriter {{language}}'
                     : path.endsWith('/prompts/bref.md') ? 'Runtime brief {{language}}'
@@ -291,21 +297,23 @@ async function newsletterFixture() {
     p.app.workspace.getLeaf = ()=>({openFile:async()=>{}});
     p.createIllustration = async()=>({name:'illustration-0000000000000000.png',data:new ArrayBuffer(8)});
     p.generateIllustration = async()=>new ArrayBuffer(8);
+    p.codex={...p.codex,generateImage:async()=>new ArrayBuffer(8)};
     p.request = async()=>({status:200,text:'<rss/>'});
     p.getAIConnection = ()=>({provider:'openai',model:'fixture',apiKey:'fixture'});
     const seen = [],publisher={title:'A new newsletter',chapeau:'Books meet AI.'};
     p.generate = async (_connection,system,input)=>{
         if (input.startsWith('Runtime publisher')) return JSON.stringify(publisher);
         if (system.startsWith('Runtime rewriter')) return rewriteResponse(input);
-        if (system.startsWith('Runtime brief')) return JSON.stringify({titles:JSON.parse(input)});
+        if (system.startsWith('Runtime brief')) return JSON.stringify({titles:JSON.parse(input).map(({id,title})=>({id,title,category:'Écriture'}))});
         const context = JSON.parse(input);
-        if (context.instructions==='Runtime selection') return JSON.stringify({selected:context.articles.filter(article=>article.title!=='discard').map(article=>article.id),discard:context.articles.filter(article=>article.title==='discard').map(article=>article.id)});
+        if (context.instructions==='Runtime verifier') return JSON.stringify({issues:[]});
+        if (context.instructions==='Runtime selection') return JSON.stringify({brief:[], selected:context.articles.filter(article=>article.title!=='discard').map(article=>article.id),discard:context.articles.filter(article=>article.title==='discard').map(article=>article.id)});
         assert.ok(input.includes('My runtime prompt'));
         assert.ok(!system.includes('My runtime prompt'));
         seen.push(context);
-        return JSON.stringify({paragraphs:['First paragraph.','Second paragraph.']});
+        return writerResponse(['First paragraph.','Second paragraph.'],context.articles);
     };
-    return {p,contents,files,entries,seen,publisher,failCreate:()=>{failCreate=true;},failSave:()=>{failSave=true;}};
+    return {p,obsidian,events,contents,files,entries,seen,publisher,failCreate:()=>{failCreate=true;},failSave:()=>{failSave=true;}};
 }
 
 test('minimum readable sources defaults to ten and restores only positive safe integers',async()=>{
@@ -318,10 +326,173 @@ test('minimum readable sources defaults to ten and restores only positive safe i
     }
 });
 
+test('newsletter profiles preserve existing settings and independent prompts across selection and reload',async()=>{
+    const {newsletterValues}=require('../../plugin/profiles');
+    const {p}=await newsletterFixture();
+    const first=p.settings.activeNewsletter;
+    Object.assign(p.settings,{labelId:'Label_first',includeFeeds:'https://first.example/feed',authorFeeds:'https://author.example/feed',
+        excludedSources:'ignored.example',referenceSources:'first.example',newsletterLanguage:'English',minimumSources:3,generateImages:false,
+        aiModel:'__codex__',codexModel:'chosen-model',codexEffort:'high'});
+    const originalSettings=newsletterValues(p.settings),original=await p.readPrompt('writer.md');
+    const legacy={...p.settings};delete legacy.newsletters;delete legacy.activeNewsletter;
+    p.savedSettings=legacy;
+    await p.onload();
+    assert.equal(p.savedSettings.newsletters.length,1);
+    assert.deepEqual(newsletterValues(p.settings),originalSettings);
+    const created=await p.createNewsletter('Second edition');
+    assert.equal(p.newsletters.length,2);
+    assert.equal(p.settings.activeNewsletter,created.id);
+    assert.equal(p.settings.outputFolder,'');
+    assert.equal(p.settings.includeFeeds,'');assert.equal(p.settings.labelId,'');
+    assert.equal(await p.readPrompt('writer.md'),original);
+    assert.equal(Object.keys(created.prompts).length,7);
+    const custom=original.replace('My runtime prompt','My runtime prompt","tone":"Second edition');
+    await p.savePrompt('writer.md',custom,original);
+    const template=await p.readPrompt('newsletter.md');
+    await p.savePrompt('newsletter.md',template+'\nSecond edition footer\n',template);
+    Object.assign(p.settings,{outputFolder:'Second',labelId:'Label_second',includeFeeds:'https://second.example/feed',
+        newsletterLanguage:'español',minimumSources:7,referenceSources:'second.example',generateImages:true});
+    const secondSettings=newsletterValues(p.settings);
+    await p.selectNewsletter(first);
+    assert.deepEqual(newsletterValues(p.settings),originalSettings);
+    assert.equal(await p.readPrompt('writer.md'),original);
+    assert.equal(await p.readPrompt('newsletter.md'),template);
+    await assert.rejects(p.savePrompt('writer.md',custom,original,created.id),/changed/);
+    await p.selectNewsletter(created.id);
+    assert.deepEqual(newsletterValues(p.settings),secondSettings);
+    assert.equal(await p.readPrompt('writer.md'),custom);
+    assert.ok((await p.readPrompt('newsletter.md')).includes('Second edition footer'));
+    await p.onload();
+    assert.equal(p.settings.activeNewsletter,created.id);
+    assert.deepEqual(newsletterValues(p.settings),secondSettings);
+    assert.equal(await p.readPrompt('writer.md'),custom);
+    assert.equal(p.settings.aiModel,'__codex__');
+    assert.equal(p.settings.codexModel,'chosen-model');assert.equal(p.settings.codexEffort,'high');
+    await p.selectNewsletter(first);
+    assert.deepEqual(newsletterValues(p.settings),originalSettings);
+    const groups=p.settingsTab.getSettingDefinitions().filter(item=>item.type==='group');
+    assert.deepEqual(Array.from(groups.slice(0,3),item=>item.heading),['Gmail account (optional)','Artificial intelligence','Newsletters']);
+});
+
+test('each newsletter collects and generates in its own folder and context-menu opening selects that newsletter',async()=>{
+    const {p,contents,files,events,seen,obsidian}=await newsletterFixture();
+    const first=p.settings.activeNewsletter;
+    Object.assign(p.settings,{labelId:'Label_1',authorFeeds:'',includeFeeds:'https://first.example/feed',generateImages:false});
+    p.account.scope=p.gmail.SCOPE;
+    const mailLabels=[];
+    p.client.unreadMessages=label=>{mailLabels.push(label);return [];};
+    contents.set(p.dataPath,JSON.stringify({version:1,articles:[]}));
+    const second=await p.createNewsletter('Other newsletter');
+    p.app.vault.adapter.list=async()=>({files:[],folders:[]});
+    await p.ensureData('Other');
+    Object.assign(p.settings,{outputFolder:'Other',includeFeeds:'https://second.example/feed',minimumSources:1,generateImages:false});
+    const original=await p.readPrompt('writer.md');
+    await p.savePrompt('writer.md',original.replace('My runtime prompt','My runtime prompt","tone":"Second newsletter'),original);
+    const requests=[],crawled=[],publish=new Date(Date.now()-1000).toISOString();
+    p.request=async options=>{requests.push(options.url);return {status:200,text:options.url};};
+    p.newsletter.readFeed=url=>[{title:'Books and AI from '+new URL(url).hostname,url:url.replace('/feed','/article'),publish},
+        {title:'Another view on '+new URL(url).hostname,url:'https://companion.example/'+new URL(url).hostname,publish}];
+    p.crawler={...p.crawler,crawl:async article=>{crawled.push(article.url);return {...article,content:'Full article about books and AI.'};}};
+    const marked=new Map();
+    p.folderIconDocuments.add({querySelectorAll:()=>['Data','Other','Unrelated'].map(path=>({getAttribute:()=>path,classList:{toggle:(_cls,value)=>marked.set(path,value)}}))});
+    p.updateFolderIcon();
+    assert.deepEqual([...marked],[['Data',true],['Other',true],['Unrelated',false]]);
+    for (const folder of ['Data','Other','Unrelated']) {
+        let offered=false;
+        events.get('file-menu')({addItem:callback=>{offered=true;const item={setTitle(){return this;},setIcon(){return this;},setDisabled(){return this;},onClick(){return this;}};callback(item);}},
+            files.get(folder) || Object.assign(new obsidian.TFolder(),{path:folder}));
+        assert.equal(offered,folder!=='Unrelated');
+    }
+    await p.openTextMachine('Data');
+    assert.equal(p.settings.activeNewsletter,first);
+    p.runDialog.render=()=>{};
+    await p.runDialog.advance();
+    assert.equal(p.runDialog.error,'');
+    const firstNote=p.runDialog.notePath,firstText=contents.get(firstNote),firstData=contents.get('Data/textmachine.json');
+    assert.equal(firstNote,'Data/text-machine-'+p.newsletter.day()+'.md');
+    p.runDialog.onClose();
+    assert.equal(JSON.parse(contents.get('Other/textmachine.json')).articles.length,0);
+    await p.openTextMachine('Other');
+    assert.equal(p.settings.activeNewsletter,second.id);
+    assert.equal(p.isConnected,true);
+    assert.equal(p.settings.labelId,'');
+    p.runDialog.render=()=>{};
+    await p.runDialog.advance();
+    assert.equal(p.runDialog.error,'');
+    assert.equal(p.runDialog.notePath,'Other/text-machine-'+p.newsletter.day()+'.md');
+    assert.equal(seen[1].tone,'Second newsletter');
+    assert.deepEqual(seen.map(context=>context.articles.map(article=>article.url)),[
+        ['https://first.example/article','https://companion.example/first.example'],['https://second.example/article','https://companion.example/second.example']]);
+    assert.deepEqual(requests,['https://first.example/feed','https://second.example/feed']);
+    assert.deepEqual(crawled,['https://first.example/article','https://companion.example/first.example','https://second.example/article','https://companion.example/second.example']);
+    assert.deepEqual(mailLabels,['Label_1']);
+    assert.equal(contents.get(firstNote),firstText);
+    assert.equal(contents.get('Data/textmachine.json'),firstData);
+    assert.equal(JSON.parse(contents.get('Other/textmachine.json')).articles[0].usedAt,p.newsletter.day());
+    p.runDialog.onClose();
+});
+
+test('profile validation, busy work and failed saves preserve the active newsletter and its files',async()=>{
+    const {p,contents}=await newsletterFixture();
+    const first=p.settings.activeNewsletter,second=await p.createNewsletter('Second');
+    p.settings.outputFolder='Second';
+    await p.selectNewsletter(first);
+    for (const name of ['', '  ', 'second', ' Second ']) await assert.rejects(p.createNewsletter(name),/non-empty name/);
+    for (const folder of ['Second','Second/Child']) await assert.rejects(p.ensureData(folder),/separate folder/);
+    const before=p.settings,beforeFiles=[...contents],save=p.saveData;
+    p.saveData=async()=>{throw new Error('Disk full');};
+    await assert.rejects(p.createNewsletter('Third'),/Disk full/);
+    await assert.rejects(p.selectNewsletter(second.id),/Disk full/);
+    assert.equal(p.settings,before);assert.equal(p.busy,false);
+    assert.deepEqual([...contents],beforeFiles);
+    p.saveData=save;
+    await p.selectNewsletter(second.id);
+    const original=await p.readPrompt('image.md');
+    p.saveData=async()=>{throw new Error('Disk full');};
+    await assert.rejects(p.savePrompt('image.md',original+'\nCustom illustration.',original),/Disk full/);
+    assert.equal(await p.readPrompt('image.md'),original);
+    p.saveData=save;
+    await p.selectNewsletter(first);
+    p.busy=true;
+    await assert.rejects(p.createNewsletter('Third'),error=>error.message===p.i18n.t('promptBusy'));
+    await assert.rejects(p.selectNewsletter(second.id),error=>error.message===p.i18n.t('promptBusy'));
+    p.busy=false;
+    let finish;
+    p.saveData=async data=>{await new Promise(resolve=>{finish=resolve;});await save.call(p,data);};
+    const switching=p.selectNewsletter(second.id);
+    await assert.rejects(p.createNewsletter('Third'),error=>error.message===p.i18n.t('promptBusy'));
+    assert.equal(p.settings.activeNewsletter,first);
+    finish();await switching;
+    assert.equal(p.settings.activeNewsletter,second.id);assert.equal(p.busy,false);
+});
+
+test('invalid saved profiles cannot replace settings and shared Gmail account changes clear every old label',async()=>{
+    const {readProfiles,newsletterDefaults}=require('../../plugin/profiles');
+    const valid={...newsletterDefaults,id:'first',name:'First',outputFolder:'First'};
+    for (const invalid of [null,[],[valid,valid],[{...valid,minimumSources:0}],[{...valid,includeFeeds:5}],
+        [{...valid,prompts:[]}],[valid,{...valid,id:'second',outputFolder:'First/Child'}]])
+        assert.throws(()=>readProfiles(invalid,newsletterDefaults),/configuration is invalid/);
+    const {p,profile}=await fixture();
+    p.app.vault.adapter.exists=async()=>false;
+    const first=p.settings.activeNewsletter,second=await p.createNewsletter('Second');
+    p.settings.labelId='Label_1';
+    await p.selectNewsletter(first);
+    assert.equal(p.newsletters.find(item=>item.id===second.id).labelId,'Label_1');
+    profile.emailAddress='another@example.com';
+    await p.connect();
+    assert.ok(p.newsletters.every(item=>item.labelId===''));
+    await p.selectNewsletter(second.id);
+    assert.equal(p.settings.labelId,'');
+    const invalid={...p.savedSettings,newsletters:[]};
+    p.savedSettings=invalid;
+    await assert.rejects(p.onload(),/configuration is invalid/);
+    assert.equal(p.savedSettings,invalid);
+});
+
 test('nine readable sources wait intact; a tenth allows generation and same-day regeneration',async()=>{
     const {p,contents,entries,seen}=await newsletterFixture();
     p.settings.minimumSources=10;
-    const data={version:1,nextId:10,notes:'Keep notes',articles:Array.from({length:9},(_,i)=>({...entries[0],id:i+1,title:'Source '+i,url:'https://example.com/source-'+i}))};
+    const data={version:1,nextId:10,notes:'Keep notes',articles:Array.from({length:9},(_,i)=>({...entries[0],id:i+1,title:'Source '+i,url:'https://publisher-'+(i%2)+'.example/source-'+i}))};
     contents.set(p.dataPath,JSON.stringify(data));
     const generate=p.generate;
     p.generate=async()=>assert.fail('No AI call below the minimum');
@@ -344,7 +515,7 @@ test('the minimum counts readable eligible articles before selection and exclude
     p.settings.minimumSources=10;
     p.settings.excludedSources='excluded.example';
     await p.app.vault.create('Data/text-machine-2000-01-01.md','# Earlier edition');
-    const readable=Array.from({length:9},(_,i)=>({...entries[0],id:i+1,title:'Source '+i,url:'https://example.com/source-'+i}));
+    const readable=Array.from({length:9},(_,i)=>({...entries[0],id:i+1,title:'Source '+i,url:'https://publisher-'+(i%2)+'.example/source-'+i}));
     const other=[{content:' \n '},{status:'forbidden'},{url:'https://example.com/article.pdf'},
         {url:'https://excluded.example/article'},{usedAt:'2000-01-01'},
         {url:'https://example.substack.com/p/own-post'},{url:'https://tcrouzet.substack.com/post'}]
@@ -360,19 +531,19 @@ test('the minimum counts readable eligible articles before selection and exclude
         if (args[2].includes('Runtime selection')) {
             const context=JSON.parse(args[2]);
             assert.equal(context.articles.length,9);
-            return JSON.stringify({selected:[1],discard:context.articles.slice(1).map(article=>article.id)});
+            return JSON.stringify({brief:[], selected:[1,2],discard:context.articles.slice(2).map(article=>article.id)});
         }
         return generate(...args);
     };
     assert.ok(await p.writeNewsletter());
-    assert.equal(seen[0].articles.length,1);
+    assert.equal(seen[0].articles.length,2);
 });
 
 test('deleting consecutive newsletters automatically recovers their sources for the minimum',async()=>{
     const {p,contents,files,entries,seen}=await newsletterFixture();
     p.newsletter={...p.newsletter,day:()=> '2026-11-05'};
     p.settings.minimumSources=10;
-    const articles=Array.from({length:10},(_,i)=>({...entries[0],id:i+1,title:'Source '+i,url:'https://example.com/source-'+i,
+    const articles=Array.from({length:10},(_,i)=>({...entries[0],id:i+1,title:'Source '+i,url:'https://publisher-'+(i%2)+'.example/source-'+i,
         usedAt:i<5 ? '2026-11-04' : '2026-11-03'}));
     articles.push({...entries[2],id:11,usedAt:'2026-11-01'});
     const before={version:1,nextId:12,articles};
@@ -425,8 +596,16 @@ function withStages(p, writer) {
     return async(...args)=>{
         let context;
         try {context=JSON.parse(args[2]);} catch { /* Revisions contain plain prose. */ }
-        if (args[2].startsWith('Runtime publisher') || context?.instructions==='Runtime selection') return generate(...args);
-        return writer(...args);
+        if (args[2].startsWith('Runtime publisher') || ['Runtime selection','Runtime verifier'].includes(context?.instructions)) return generate(...args);
+        const response=await writer(...args);
+        if (context?.instructions==='My runtime prompt') {
+            try {
+                const result=JSON.parse(response);
+                const complete=JSON.parse(writerResponse(result.paragraphs || [],context.articles));
+                return JSON.stringify({...complete,...result,paragraphs:complete.paragraphs});
+            } catch {return response;}
+        }
+        return response;
     };
 }
 
@@ -445,7 +624,7 @@ test('today’s note is regenerated from used articles and new articles without 
     const second = await p.writeNewsletter();
     assert.equal(second.path,first.path);
     assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,1);
-    assert.deepEqual(seen[1].articles.map(article=>article.title),['used','new']);
+    assert.deepEqual(seen[1].articles.map(article=>article.title),['used','another','new']);
     assert.equal(seen[1].previousNewsletters.length,0);
     assert.equal(JSON.parse(contents.get(p.dataPath)).articles[3].usedAt,p.newsletter.day());
 });
@@ -470,15 +649,98 @@ test('a saved edition consumes every available article and the next day starts w
     p.generate=async()=>{throw new Error('Consumed sources cannot start a new edition');};
     assert.equal(await p.writeNewsletter(),null);
     const next=JSON.parse(contents.get(p.dataPath));
-    next.nextId=5;next.articles.push({...entries[0],id:4,title:'New arrival',url:'https://example.com/new-arrival'});
+    next.nextId=6;next.articles.push({...entries[0],id:4,title:'New arrival',url:'https://example.com/new-arrival'},
+        {...entries[1],id:5,title:'Another new arrival',url:'https://other.example/new-arrival'});
     contents.set(p.dataPath,JSON.stringify(next));
     p.generate=generate;
     const nextNote=await p.writeNewsletter();
     assert.equal(nextNote.path,'Data/text-machine-2026-11-05.md');
-    assert.deepEqual(seen.at(-1).articles.map(article=>article.id),[4]);
+    assert.deepEqual(seen.at(-1).articles.map(article=>article.id),[4,5]);
     const saved=JSON.parse(contents.get(p.dataPath));
     assert.ok(!Object.hasOwn(saved.articles[3],'used'));assert.equal(saved.articles[3].usedAt,'2026-11-05');
     assert.deepEqual(saved.articles.slice(0,3),first.articles);
+});
+
+test('large source collections are selected in bounded batches before one global selection',async()=>{
+    const {p,contents,entries,seen}=await newsletterFixture();
+    const articles=Array.from({length:263},(_,index)=>({...entries[0],id:index+1,title:'Source '+index,
+        url:'https://publisher-'+(index%2)+'.example/source-'+index,content:'Full article '+index+' '+ 'x'.repeat(13000)}));
+    const before={version:1,nextId:264,articles};
+    contents.set(p.dataPath,JSON.stringify(before));
+    p.getAIConnection=()=>({provider:'codex',model:'fixture',apiKey:'',effort:'high'});
+    const generate=p.generate,visited=new Set(),calls=[];
+    p.codex={...p.codex,findCodex:async()=> 'fixture',generate:async(_executable,system,input)=>{
+        if (Array.from(input).length>1048576) throw new Error('turn/start: Input exceeds the maximum length of 1048576 characters. (-32602)');
+        assert.equal(contents.get(p.dataPath),JSON.stringify(before));
+        let context;
+        try {context=JSON.parse(input);} catch { /* The revision contains the article body. */ }
+        if (context?.instructions==='Runtime selection') {
+            const rows=context.articles;
+            calls.push(rows.map(row=>row.id));
+            for (const row of rows) {
+                assert.equal(row.content,articles[row.id-1].content);
+                visited.add(row.id);
+            }
+            return JSON.stringify({brief:[], selected:rows.slice(0,2).map(row=>row.id),discard:rows.slice(2).map(row=>row.id)});
+        }
+        return generate({},system,input);
+    }};
+    const note=await p.writeNewsletter();
+    assert.ok(note);
+    assert.equal(visited.size,articles.length);
+    assert.ok(calls.length>2);
+    assert.deepEqual(calls.at(-1),calls.slice(0,-1).flatMap(ids=>ids.slice(0,2)));
+    assert.equal(seen.length,1);
+    assert.deepEqual(seen[0].articles.map(row=>row.id),[1,2]);
+    const saved=JSON.parse(contents.get(p.dataPath));
+    assert.deepEqual(saved.articles.map(row=>({...row,usedAt:''})),articles.map(row=>({...row,usedAt:''})));
+    assert.ok(saved.articles.every(row=>row.usedAt===p.newsletter.day()));
+});
+
+test('oversized individual sources and a selection that never reduces preserve notes and articles',async()=>{
+    for (const count of [1,5]) {
+        const {p,contents,entries}=await newsletterFixture();
+        const articles=Array.from({length:count},(_,index)=>({...entries[0],id:index+1,title:'Source '+index,
+            url:'https://example.com/source-'+index,content:'x'.repeat(count===1 ? 1100000 : 300000)}));
+        const before={version:1,nextId:count+1,articles};
+        contents.set(p.dataPath,JSON.stringify(before));
+        let calls=0;
+        p.generate=async(_connection,_system,input)=>{
+            calls++;
+            assert.ok(input.length<=1000000);
+            const context=JSON.parse(input);
+            return JSON.stringify({brief:[], selected:context.articles.map(row=>row.id),discard:[]});
+        };
+        await assert.rejects(p.writeNewsletter(),/maximum AI input size/);
+        assert.equal(calls,count===1 ? 0 : 2);
+        assert.deepEqual(JSON.parse(contents.get(p.dataPath)),before);
+        assert.equal(contents.size,1);
+    }
+});
+
+test('a failed or invalid selection batch stops before saving or consuming any sources',async()=>{
+    for (const failure of ['provider','invalid']) {
+        const {p,contents,entries}=await newsletterFixture();
+        const articles=Array.from({length:8},(_,index)=>({...entries[0],id:index+1,title:'Source '+index,
+            url:'https://example.com/source-'+index,content:'x'.repeat(300000)}));
+        const before={version:1,nextId:9,articles};
+        contents.set(p.dataPath,JSON.stringify(before));
+        let calls=0;
+        p.generate=async(_connection,_system,input)=>{
+            calls++;
+            assert.ok(input.length<=1000000);
+            if (calls===2) {
+                if (failure==='provider') throw new Error('Provider unavailable');
+                return JSON.stringify({brief:[], selected:[],discard:[]});
+            }
+            const rows=JSON.parse(input).articles;
+            return JSON.stringify({brief:[], selected:[rows[0].id],discard:rows.slice(1).map(row=>row.id)});
+        };
+        await assert.rejects(p.writeNewsletter(),failure==='provider' ? /Provider unavailable/ : /source selection/);
+        assert.equal(calls,2);
+        assert.deepEqual(JSON.parse(contents.get(p.dataPath)),before);
+        assert.equal(contents.size,1);
+    }
 });
 
 test('selection goes straight to writing without summaries before revision and publication',async()=>{
@@ -492,7 +754,7 @@ test('selection goes straight to writing without summaries before revision and p
             const context=JSON.parse(input);
             stages.push(context.instructions);
             assert.notEqual(context.instructions,'Runtime summaries');
-            if (context.instructions!=='Runtime selection') assert.deepEqual(context.articles.map(article=>article.id),[1]);
+            if (context.instructions!=='Runtime selection') assert.deepEqual(context.articles.map(article=>article.id),[1,2]);
             if (context.instructions==='My runtime prompt') assert.ok(!Object.hasOwn(context,'summaries'));
         }
         return generate(connection,system,input,...rest);
@@ -518,7 +780,7 @@ test('the selected full articles go directly to the writer without a separate re
     const note=await p.writeNewsletter();
     assert.equal(seen.length,1);
     assert.deepEqual(seen[0].articles.map(({id,title,content})=>({id,title,content})),
-        [data.articles[0],data.articles[3]].map(({id,title,content})=>({id,title,content})));
+        [data.articles[0],data.articles[1],data.articles[3]].map(({id,title,content})=>({id,title,content})));
     const markdown=contents.get(note.path);
     assert.ok(markdown.includes('First paragraph.'));
     assert.ok(!markdown.includes('## Revue de presse'));
@@ -540,7 +802,7 @@ test('failed, invalid or cancelled writing cannot save a partial edition or cons
         p.generate=async(connection,system,input,...rest)=>{
             const context=JSON.parse(input);stages.push(context.instructions);
             if (context.instructions==='My runtime prompt') {
-                assert.deepEqual(context.articles.map(article=>article.id),[1,4]);
+                assert.deepEqual(context.articles.map(article=>article.id),[1,2,4]);
                 if (failure==='error') throw new Error('Writer unavailable');
                 if (failure==='cancel') p.aiController.abort();
                 return JSON.stringify({paragraphs:failure==='empty' ? [] : ['First paragraph.','Second paragraph.'],
@@ -607,7 +869,7 @@ test('debug off still revises the newsletter without creating or overwriting com
     assert.equal(contents.get(revision),'Previous revision');
 });
 test('daily draft and revision snapshots preserve both bodies and are replaced on regeneration',async()=>{
-    const {p,contents,seen}=await newsletterFixture();
+    const {p,contents,seen,entries}=await newsletterFixture();
     p.settings.debug=true;
     const before=contents.get(p.dataPath),generate=p.generate,day=p.newsletter.day();
     const draft='Data/brouillon-'+day+'.md',revision='Data/revision-'+day+'.md';
@@ -622,8 +884,9 @@ test('daily draft and revision snapshots preserve both bodies and are replaced o
         return generate(connection,system,input,...rest);
     };
     await p.writeNewsletter();
-    assert.equal(contents.get(draft),'First paragraph.\n\nSecond paragraph.\n');
-    assert.equal(contents.get(revision),'Revised first paragraph.\n\nSecond paragraph.\n');
+    const original=JSON.parse(writerResponse(['First paragraph.','Second paragraph.'],entries.slice(0,2))).paragraphs.join('\n\n')+'\n';
+    assert.equal(contents.get(draft),original);
+    assert.equal(contents.get(revision),original.replace('First paragraph.','Revised first paragraph.'));
     assert.ok(!contents.get(draft).includes('A new newsletter'));
     const after=contents.get(p.dataPath);
     p.generate=async(connection,system,input,...rest)=>system.startsWith('Runtime rewriter')
@@ -636,13 +899,13 @@ test('daily draft and revision snapshots preserve both bodies and are replaced o
     assert.deepEqual(seen[1].previousNewsletters,[]);
 });
 test('a rejected revision remains available for comparison while the newsletter keeps the original text',async()=>{
-    const {p,contents}=await newsletterFixture();
+    const {p,contents,entries}=await newsletterFixture();
     p.settings.debug=true;
     const generate=p.generate,day=p.newsletter.day();
     p.generate=async(connection,system,input,...rest)=>system.startsWith('Runtime rewriter')
         ? JSON.stringify({paragraphs:['Short.','Truncated.']}) : generate(connection,system,input,...rest);
     const note=await p.writeNewsletter();
-    assert.equal(contents.get('Data/brouillon-'+day+'.md'),'First paragraph.\n\nSecond paragraph.\n');
+    assert.equal(contents.get('Data/brouillon-'+day+'.md'),JSON.parse(writerResponse(['First paragraph.','Second paragraph.'],entries.slice(0,2))).paragraphs.join('\n\n')+'\n');
     const revision=contents.get('Data/revision-'+day+'.md');
     assert.ok(revision.includes('original article retained'));
     assert.ok(revision.includes('```\nShort.\n\nTruncated.\n```'));
@@ -684,6 +947,285 @@ test('publisher errors, invalid output and cancellation preserve the saved note 
     }
 });
 
+test('a one-publication selection is reconsidered before writing a multi-publication press review',async()=>{
+    const {p,contents}=await newsletterFixture();
+    const generate=p.generate;
+    let selections=0;
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+        if (context?.instructions==='Runtime selection') {
+            selections++;
+            if (selections===1) return JSON.stringify({selected:[1],brief:[2],discard:[]});
+            assert.ok(system.includes(p.i18n.t('selectionMultiplePublications')));
+        }
+        return generate(connection,system,input,...rest);
+    };
+    const progress=[],note=await p.writeNewsletter(message=>progress.push(message));
+    assert.equal(selections,2);
+    assert.ok(progress.includes(p.i18n.t('newsletterReselectingSources')));
+    assert.ok(contents.get(note.path).includes('First paragraph.'));
+    assert.ok(!contents.get(note.path).includes('### In brief'));
+});
+
+test('a writer using only one publication is asked to rewrite before any note is saved',async()=>{
+    const {p,contents}=await newsletterFixture();
+    const generate=p.generate,before=contents.get(p.dataPath);
+    let attempts=0;
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+        if (context?.instructions==='My runtime prompt') {
+            attempts++;
+            assert.equal(contents.get(p.dataPath),before);
+            if (attempts===1) return JSON.stringify({paragraphs:['One author describes a practice.','Another post by the same author develops it.'],used:[1]});
+            assert.ok(system.includes(p.i18n.t('writerMultiplePublications')));
+        }
+        return generate(connection,system,input,...rest);
+    };
+    const progress=[],note=await p.writeNewsletter(message=>progress.push(message));
+    assert.equal(attempts,2);
+    assert.ok(progress.includes(p.i18n.t('newsletterExpandingReview')));
+    assert.ok(contents.get(note.path).includes('First paragraph.'));
+});
+
+test('a press review from one publication cannot replace the saved edition or consume articles',async()=>{
+    for (const failure of ['same-publication','selection','writer','writer-citations']) {
+        const {p,contents}=await newsletterFixture();
+        const data=JSON.parse(contents.get(p.dataPath));
+        if (failure==='same-publication') data.articles[1].url='https://www.example.com/another-post';
+        const before=JSON.stringify(data);contents.set(p.dataPath,before);
+        const path='Data/text-machine-'+p.newsletter.day()+'.md';
+        await p.app.vault.create(path,'# Previous edition');
+        const generate=p.generate;
+        let selections=0,writers=0;
+        p.generate=async(connection,system,input,...rest)=>{
+            let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+            if (context?.instructions==='Runtime selection') {
+                selections++;
+                if (failure==='selection') return JSON.stringify({selected:[1],brief:[2],discard:[]});
+            }
+            if (context?.instructions==='My runtime prompt') {
+                writers++;
+                if (failure==='writer') return JSON.stringify({paragraphs:['A single author.', 'The same author again.'],used:[1]});
+                if (failure==='writer-citations') return JSON.stringify({paragraphs:['A [single author](https://example.com/used).','The same author again.'],used:[1,2]});
+                assert.fail('Do not write a RP when the selection has only one publication');
+            }
+            return generate(connection,system,input,...rest);
+        };
+        p.generateIllustration=()=>assert.fail('Do not illustrate a rejected RP');
+        await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t('newsletterMultiplePublications'));
+        assert.equal(contents.get(path),'# Previous edition');
+        assert.equal(contents.get(p.dataPath),before);
+        assert.equal(selections,failure==='selection' ? 2 : 1);
+        assert.equal(writers,failure.startsWith('writer') ? 2 : 0);
+    }
+});
+
+test('the brief includes blocked sources, secondary selections and every selected article omitted by the writer',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.settings.generateImages=false;
+    const source=(id,title,extra={})=>({...entries[0],id,title,url:'https://example.com/story-'+id,...extra});
+    const rows=[source(11,'Major literary development'),source(12,'Another publication',{url:'https://other.example/story-12'}),source(13,'Minor scandal in India'),
+        source(14,'Unrelated politics'),source(15,'Blocked literary article',{status:'forbidden',content:''}),
+        source(16,'Blocked football article',{status:'forbidden',content:''}),source(17,'Useful secondary perspective')];
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:18,articles:rows}));
+    const generate=p.generate;let translated=[];
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+        if (context?.instructions==='Runtime selection') return JSON.stringify({selected:[11,12,17],brief:[13],discard:[14]});
+        if (context?.instructions==='My runtime prompt') return JSON.stringify({paragraphs:[
+            'A major literary development changes publishing practices. The [source](https://example.com/story-11) reports the facts.',
+            'The [other publication](https://other.example/story-12) adds another finding.'],used:[11,12]});
+        if (system.startsWith('Runtime brief')) {
+            translated=context;
+            assert.ok(system.includes(p.i18n.t('briefSelectedContract',{ids:'13, 17'})));
+            return JSON.stringify({titles:context.map(row=>({id:row.id,title:row.id===16 ? null : 'Translated '+row.title,
+                category:row.id===16 ? null : row.id===17 ? 'Pratiques d’écriture' : 'Vie littéraire'}))});
+        }
+        if (context?.instructions==='Runtime verifier') assert.deepEqual(context.articles.map(row=>row.id),[11,12]);
+        return generate(connection,system,input,...rest);
+    };
+    const note=await p.writeNewsletter(),markdown=contents.get(note.path);
+    assert.deepEqual(translated.map(row=>row.id),[15,16,13,17]);
+    assert.equal(translated.find(row=>row.id===13).context,rows.find(row=>row.id===13).content);
+    assert.equal(translated.find(row=>row.id===17).context,rows.find(row=>row.id===17).content);
+    assert.ok(translated.filter(row=>[15,16].includes(row.id)).every(row=>!Object.hasOwn(row,'context')));
+    const [body,brief]=markdown.split('### In brief');
+    assert.ok(brief.includes('#### Vie littéraire'));
+    assert.ok(brief.includes('#### Pratiques d’écriture'));
+    assert.ok(brief.indexOf('https://example.com/story-13')<brief.indexOf('#### Pratiques d’écriture'));
+    assert.ok(body.includes('https://example.com/story-11'));
+    assert.ok(!body.includes('Minor scandal in India'));
+    for (const id of [13,15,17]) assert.ok(brief.includes('https://example.com/story-'+id));
+    assert.ok(body.includes('https://other.example/story-12'));
+    assert.ok(!brief.includes('https://other.example/story-12'));
+    for (const id of [11,14,16]) assert.ok(!brief.includes('https://example.com/story-'+id));
+    const saved=JSON.parse(contents.get(p.dataPath)).articles;
+    assert.deepEqual(saved.map(row=>row.title),rows.map(row=>row.title));
+    assert.ok(saved.every(row=>row.usedAt===p.newsletter.day()));
+    assert.equal(saved.find(row=>row.id===15).status,'forbidden');
+});
+
+test('secondary-only editions are saved without forcing a main article or losing a source declined by the writer',async()=>{
+    for (const decline of [false,true]) {
+        const {p,contents}=await newsletterFixture();
+        p.settings.generateImages=false;
+        const generate=p.generate;
+        let writing=0;
+        p.generate=async(connection,system,input,...rest)=>{
+            let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+            if (context?.instructions==='Runtime selection') return JSON.stringify({selected:decline ? [1,2] : [],brief:decline ? [] : [1,2],discard:[]});
+            if (context?.instructions==='My runtime prompt') {writing++;return JSON.stringify({paragraphs:[],used:[]});}
+            if (input.startsWith('Runtime publisher') || context?.instructions==='Runtime verifier') assert.fail('No main article to publish or verify');
+            return generate(connection,system,input,...rest);
+        };
+        const note=await p.writeNewsletter(),text=contents.get(note.path);
+        assert.equal(writing,decline ? 1 : 0);
+        assert.ok(text.includes('[used](https://example.com/used)'));
+        assert.ok(!text.includes('First paragraph.'));
+        assert.equal(JSON.parse(contents.get(p.dataPath)).articles[0].usedAt,p.newsletter.day());
+    }
+});
+
+test('translation cannot silently remove an article already selected for the brief',async()=>{
+    const {p,contents}=await newsletterFixture();
+    const before=contents.get(p.dataPath),generate=p.generate;
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+        if (context?.instructions==='Runtime selection') return JSON.stringify({selected:[],brief:[1,2],discard:[]});
+        if (system.startsWith('Runtime brief')) return JSON.stringify({titles:[{id:1,title:'A title',category:'Écriture'},{id:2,title:null,category:null}]});
+        return generate(connection,system,input,...rest);
+    };
+    p.generateIllustration=()=>assert.fail('Do not generate an image after a missing brief title');
+    await assert.rejects(p.writeNewsletter(),/Translation.*incomplete or invalid/);
+    assert.equal(contents.get(p.dataPath),before);
+    assert.equal(contents.size,1);
+});
+
+test('overlong introductions are retried only at publication and the retired verifier is never called',async()=>{
+    for (const phase of ['publisher','verifier']) {
+        const {p,contents}=await newsletterFixture();
+        p.settings.generateImages=false;
+        const generate=p.generate,long=Array.from({length:36},(_,index)=>'word'+index).join(' ');
+        const short='Publishers confront a concrete change in literary practice.';
+        let calls=0;
+        p.generate=async(connection,system,input,...rest)=>{
+            let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+            if (phase==='publisher' ? input.startsWith('Runtime publisher') : context?.instructions==='Runtime verifier') {
+                calls++;
+                if (calls===2) assert.ok(system.includes(p.i18n.t('publicationShorten')));
+                return JSON.stringify(phase==='publisher' ? {title:'A concrete change',chapeau:calls===1 ? long : short}
+                    : {...context.newsletter,chapeau:calls===1 ? long : short,issues:[]});
+            }
+            return generate(connection,system,input,...rest);
+        };
+        const progress=[];
+        if (phase==='verifier') {
+            const note=await p.writeNewsletter(message=>progress.push(message));
+            assert.equal(calls,0);
+            assert.ok(contents.get(note.path).includes('Books meet AI.'));
+            assert.ok(!contents.get(note.path).includes(long));
+            assert.ok(!progress.includes(p.i18n.t('newsletterShorteningChapeau')));
+            continue;
+        }
+        const note=await p.writeNewsletter(message=>progress.push(message));
+        assert.equal(calls,2);
+        assert.ok(contents.get(note.path).includes(short));
+        assert.ok(!contents.get(note.path).includes(long));
+        assert.ok(progress.includes(p.i18n.t('newsletterShorteningChapeau')));
+    }
+});
+
+test('a repeatedly overlong introduction preserves the saved edition and article usage',async()=>{
+    for (const phase of ['publisher','verifier']) {
+        const {p,contents}=await newsletterFixture();
+        const before=contents.get(p.dataPath),generate=p.generate,path='Data/text-machine-'+p.newsletter.day()+'.md';
+        await p.app.vault.create(path,'# Saved edition');
+        let calls=0;
+        p.generate=async(connection,system,input,...rest)=>{
+            let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+            if (phase==='publisher' ? input.startsWith('Runtime publisher') : context?.instructions==='Runtime verifier') {
+                calls++;
+                const chapeau=Array.from({length:36},()=> 'word').join(' ');
+                return JSON.stringify(phase==='publisher' ? {title:'Title',chapeau} : {...context.newsletter,chapeau,issues:[]});
+            }
+            return generate(connection,system,input,...rest);
+        };
+        if (phase==='verifier') {
+            const note=await p.writeNewsletter();
+            assert.equal(calls,0);
+            assert.ok(contents.get(note.path).includes('Books meet AI.'));
+            continue;
+        }
+        p.generateIllustration=()=>assert.fail('Do not generate an image with an overlong introduction');
+        await assert.rejects(p.writeNewsletter(),error=>error.code==='CHAPEAU_TOO_LONG');
+        assert.equal(calls,2);
+        assert.equal(contents.get(path),'# Saved edition');
+        assert.equal(contents.get(p.dataPath),before);
+    }
+});
+
+test('publication saves the writer and publisher output without calling a final verifier',async()=>{
+    const {p,contents,publisher}=await newsletterFixture();
+    const data=JSON.parse(contents.get(p.dataPath));
+    data.articles[0].authors=['Anne R. Allen'];
+    data.articles[0].content='Anne R. Allen received two emails from scammers claiming to run an AI detection service. Their identities are unknown.';
+    contents.set(p.dataPath,JSON.stringify(data));
+    publisher.chapeau='Deux courriels accusent Anne R. Allen et lui réclament de l’argent.';
+    const original=['Deux courriels accusent la romancière Anne R. Allen et lui réclament de l’argent pour nettoyer ses textes.',
+        'Elle raconte cette tentative d’extorsion sur [son blog](https://example.com/used). Une [autre publication](https://other.example/another) rapporte une autre analyse.'];
+    const generate=p.generate;
+    let verifications=0,imageInput='';
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;try {context=JSON.parse(input);} catch { /* Article body in revision. */ }
+        if (context?.instructions==='My runtime prompt') return JSON.stringify({paragraphs:original,used:context.articles.map(article=>article.id)});
+        if (context?.instructions==='Runtime verifier') {
+            verifications++;
+            assert.fail('The retired verifier must not run');
+        }
+        return generate(connection,system,input,...rest);
+    };
+    p.generateIllustration=async(_key,prompt)=>{imageInput=prompt;return new ArrayBuffer(8);};
+    const note=await p.writeNewsletter();
+    assert.equal(verifications,0);
+    assert.ok(contents.get(note.path).includes(publisher.title));
+    assert.ok(contents.get(note.path).includes(publisher.chapeau));
+    assert.ok(contents.get(note.path).includes(original[0]));
+    assert.ok(!contents.get(note.path).includes('Des escrocs se présentant'));
+    assert.ok(imageInput.includes(publisher.title));
+    assert.ok(imageInput.includes(original[0]));
+});
+
+test('missing or failing retired verifier resources cannot block newsletter generation',async()=>{
+    for (const failure of ['empty-prompt','provider','invalid','unresolved','links','cancel']) {
+        const {p,contents}=await newsletterFixture();
+        const generate=p.generate,path='Data/text-machine-'+p.newsletter.day()+'.md';
+        await p.app.vault.create(path,'# Existing edition');
+        if (failure==='empty-prompt') {
+            const read=p.app.vault.adapter.read;
+            p.app.vault.adapter.read=async path=>path.endsWith('/prompts/verifier.md') ? '' : read(path);
+        }
+        let verifications=0,images=0;
+        p.generate=async(connection,system,input,...rest)=>{
+            let context;try {context=JSON.parse(input);} catch { /* Article body in revision. */ }
+            if (context?.instructions!=='Runtime verifier') return generate(connection,system,input,...rest);
+            verifications++;
+            if (failure==='provider') throw new Error('Verifier unavailable');
+            if (failure==='invalid') return '{broken';
+            if (failure==='cancel') p.aiController.abort();
+            return JSON.stringify({issues:failure==='unresolved' ? ['Cannot identify the sender from the source.'] : [],
+                ...(failure==='links' ? {paragraphs:[...context.newsletter.paragraphs,'See [invented source](https://other.test/article).']} : {})});
+        };
+        p.generateIllustration=async()=>{images++;return new ArrayBuffer(8);};
+        const note=await p.writeNewsletter();
+        assert.equal(note.path,path);
+        assert.equal(verifications,0);
+        assert.equal(images,1);
+        assert.ok(contents.get(path).includes('A new newsletter'));
+        assert.ok(!contents.get(path).includes('invented source'));
+        assert.ok([...contents.keys()].some(path=>path.endsWith('.png')));
+    }
+});
+
 test('saved reference sources are passed to selection and writing without overriding relevance',async()=>{
     const {p,contents}=await newsletterFixture();
     p.settings.referenceSources='news.example.com';
@@ -695,7 +1237,7 @@ test('saved reference sources are passed to selection and writing without overri
         let context;
         try {context=JSON.parse(input);} catch { /* Revisions receive plain prose. */ }
         if (context?.instructions==='Runtime selection' || context?.instructions==='My runtime prompt') {
-            const ids=context.articles.map(article=>article.id).join(', ');
+            const ids='1';
             assert.ok(system.includes(p.i18n.t('referenceSourcesContract',{ids})));
             seen.push(context.instructions);
         }
@@ -715,7 +1257,7 @@ test('invalid selection and writer responses stop before writing or generating a
         await p.app.vault.create(path,'# Existing edition');
         p.generate=async(connection,system,input,...rest)=>{
             if (JSON.parse(input).instructions===stage) return stage==='Runtime selection'
-                ? JSON.stringify({selected:[1],discard:[]}) : JSON.stringify({paragraphs:[]});
+                ? JSON.stringify({brief:[], selected:[1],discard:[]}) : JSON.stringify({paragraphs:[]});
             return generate(connection,system,input,...rest);
         };
         p.generateIllustration=async()=>{throw new Error('An invalid stage cannot generate an image');};
@@ -767,7 +1309,7 @@ test('the runtime rewriter prompt runs after writing and its revision is saved b
 });
 
 test('only article paragraphs are revised; titles, chapeau and captions stay outside the request',async()=>{
-    const {p,contents,publisher}=await newsletterFixture();
+    const {p,contents,publisher,entries}=await newsletterFixture();
     p.settings.newsletterLanguage='English';
     Object.assign(publisher,{title:'TITLE MUST STAY',chapeau:'CHAPEAU MUST STAY'});
     const paragraphs=['The original article prose.','The second paragraph [Source](https://example.com/used).'];
@@ -775,7 +1317,7 @@ test('only article paragraphs are revised; titles, chapeau and captions stay out
     p.generate=withStages(p, async(_connection,system,input)=>{
         if (system.startsWith('Runtime rewriter')) {
             revisions++;
-            assert.equal(input,paragraphs.join('\n\n'));
+            assert.equal(input,JSON.parse(writerResponse(paragraphs,entries.slice(0,2))).paragraphs.join('\n\n'));
             assert.deepEqual(JSON.parse(system.split('\n\n').at(-1)).jsonSchema,require('../../models/rewriter.json'));
             for (const absent of ['TITLE MUST STAY','CHAPEAU MUST STAY','![','illustrations/']) assert.ok(!input.includes(absent));
             return rewriteResponse(input.replace('original article prose','revised article prose'));
@@ -792,7 +1334,7 @@ test('only article paragraphs are revised; titles, chapeau and captions stay out
 });
 
 test('Codex receives the revision schema with plain article paragraphs and no image input',async()=>{
-    const {p,contents}=await newsletterFixture();
+    const {p,contents,entries}=await newsletterFixture();
     p.settings.newsletterLanguage='English';
     p.settings.aiModel='__codex__';
     p.settings.codexModel='fixture';
@@ -804,7 +1346,7 @@ test('Codex receives the revision schema with plain article paragraphs and no im
         if (system.startsWith('Runtime rewriter')) {
             revisions++;
             assert.deepEqual(JSON.parse(JSON.stringify(schema)),require('../../models/rewriter.json'));
-            assert.equal(input,'First paragraph.\n\nSecond paragraph.');
+            assert.equal(input,JSON.parse(writerResponse(['First paragraph.','Second paragraph.'],entries.slice(0,2))).paragraphs.join('\n\n'));
             assert.equal(image,undefined);
             return rewriteResponse(input.replace('First paragraph.','Revised paragraph.'));
         }
@@ -887,13 +1429,13 @@ test('selection receives history even when only its prompt requests it, excludin
         if (context?.instructions==='Runtime selection') {
             selections++;
             assert.deepEqual(context.previousNewsletters,[{name:'text-machine-2000-01-01.md',content:contents.get(oldPath)}]);
-            return JSON.stringify({selected:[2],discard:[1]});
+            return JSON.stringify({brief:[], selected:[1,2],discard:[]});
         }
         return generate(connection,system,input,...rest);
     };
     assert.equal((await p.writeNewsletter()).path,today);
     assert.equal(selections,1);
-    assert.deepEqual(seen[0].articles.map(article=>article.id),[2]);
+    assert.deepEqual(seen[0].articles.map(article=>article.id),[1,2]);
     assert.ok(!Object.hasOwn(seen[0],'previousNewsletters'));
     assert.equal(contents.get(oldPath),'# Earlier coverage of the Orélien affair');
 });
@@ -933,7 +1475,7 @@ test('author publications are excluded before selection and supplied only as top
     const note=await p.writeNewsletter();
     assert.equal(selections,1);
     assert.ok(!contents.get(note.path).includes(own.url));
-    assert.deepEqual(seen[0].articles.map(article=>article.id),[1]);
+    assert.deepEqual(seen[0].articles.map(article=>article.id),[1,2]);
     assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.slice(-2),[own,ownBrief]);
 });
 test('a writer or publisher reusing an author-feed link cannot replace the saved newsletter',async()=>{
@@ -945,7 +1487,7 @@ test('a writer or publisher reusing an author-feed link cannot replace the saved
         p.generate=async(connection,system,input,...rest)=>{
             if (stage==='publisher' && input.startsWith('Runtime publisher')) return JSON.stringify({title:'My post',chapeau:'See '+own});
             let context;try {context=JSON.parse(input);} catch { /* Prose in later stages. */ }
-            if (stage==='writer' && context?.instructions==='My runtime prompt') return JSON.stringify({paragraphs:['A reference [My post]('+own+').','Second paragraph.']});
+            if (stage==='writer' && context?.instructions==='My runtime prompt') return writerResponse(['A reference [My post]('+own+').','Second paragraph.'],context.articles);
             return generate(connection,system,input,...rest);
         };
         await assert.rejects(p.writeNewsletter(),/author-feed link/);
@@ -1019,6 +1561,142 @@ test('AuthorFeed works in both prompts and author content is fetched only once',
         assert.equal(revisions,1);
         assert.equal(seen[0].posts.length,inWriter ? 1 : 0);
     }
+});
+
+test('RSS-only runs collect, crawl and write a newsletter without Gmail credentials or reconnection',async()=>{
+    for (const stale of [false,true]) {
+        const {p,contents,seen}=await newsletterFixture();
+        p.settings.labelId='';
+        p.settings.authorFeeds='';
+        p.settings.includeFeeds='https://source.example/feed';
+        contents.set(p.dataPath,JSON.stringify({version:1,articles:[]}));
+        if (stale) {
+            p.account.scope=p.gmail.SCOPE;
+            p.authorizationRequired=true;
+        } else {
+            p.account=null;
+            p.oauth=null;
+        }
+        assert.equal(p.isConnected,false);
+        p.client={unreadMessages:()=>assert.fail('RSS must not list mail'),message:()=>assert.fail('RSS must not read mail'),
+            markRead:()=>assert.fail('RSS must not mark mail read'),labels:()=>assert.fail('RSS must not list Gmail labels')};
+        p.connect=()=>assert.fail('RSS must not request Gmail reconnection');
+        const requests=[],crawled=[];
+        p.request=async options=>{requests.push(options.url);return {status:200,text:'feed'};};
+        const publish=new Date(Date.now()-1000).toISOString();
+        p.newsletter.readFeed=()=>[{title:'Books and AI',url:'https://source.example/story',publish},
+            {title:'Another literary perspective',url:'https://another.example/story',publish}];
+        p.crawler={...p.crawler,crawl:async article=>{crawled.push(article.url);return {...article,content:'Full article about books and AI.'};}};
+        p.openTextMachine('Data');
+        const dialog=p.runDialog;
+        dialog.render=()=>{};
+        await dialog.advance();
+        assert.equal(dialog.error,'');
+        assert.ok(dialog.result.includes('RSS articles added: 2'),dialog.result);
+        assert.equal(JSON.parse(contents.get(p.dataPath)).articles[0]?.content,'Full article about books and AI.');
+        assert.equal(dialog.notePath,'Data/text-machine-'+p.newsletter.day()+'.md');
+        assert.ok(contents.get(dialog.notePath).includes('First paragraph.'));
+        assert.ok(dialog.result.includes('RSS articles added: 2'));
+        assert.ok(!dialog.result.includes('Messages added'));
+        assert.deepEqual(requests,['https://source.example/feed']);
+        assert.deepEqual(crawled,['https://source.example/story','https://another.example/story']);
+        assert.equal(seen[0].articles[0].url,'https://source.example/story');
+        const saved=JSON.parse(contents.get(p.dataPath)).articles;
+        assert.equal(saved.length,2);
+        assert.equal(saved[0].content,'Full article about books and AI.');
+        assert.equal(saved[0].usedAt,p.newsletter.day());
+        assert.equal(p.isConnected,false);
+        dialog.onClose();
+    }
+});
+
+test('a connected account still collects unread mail and RSS together and requires its label',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.account.scope=p.gmail.SCOPE;
+    p.settings.includeFeeds='https://source.example/feed';
+    let marked=0,listed=0;
+    p.client={unreadMessages:async function*(label){assert.equal(label,'Label_1');listed++;yield 'mail';},
+        message:async()=>({labelIds:['UNREAD','Label_1']}),markRead:async id=>{assert.equal(id,'mail');marked++;}};
+    p.articles={...p.articles,messageArticles:()=>[{...entries[0],title:'Editorial choice',url:'https://example.com/editorial'}]};
+    p.request=async()=>({status:200,text:'feed'});
+    const publish=new Date(Date.now()-1000).toISOString();
+    p.newsletter.readFeed=()=>[{title:'RSS choice',url:'https://source.example/rss-choice',publish}];
+    p.crawler={...p.crawler,crawl:async article=>({...article,content:'Full article.'})};
+    assert.equal(p.isConnected,true);
+    const result=await p.importUnread();
+    assert.equal(listed,1);assert.equal(marked,1);
+    assert.ok(result.includes('Messages added: 1'));
+    assert.ok(result.includes('RSS articles added: 1'));
+    const saved=JSON.parse(contents.get(p.dataPath)).articles;
+    assert.ok(saved.some(article=>article.url==='https://example.com/editorial'));
+    assert.ok(saved.some(article=>article.url==='https://source.example/rss-choice'));
+    p.settings.labelId='';
+    p.settings.includeFeeds='';
+    await assert.rejects(p.importUnread(),/choose a label/);
+    assert.equal(listed,1);
+});
+
+test('folder setup, source exclusions and data controls remain available without Gmail',async()=>{
+    const {p,obsidian}=await newsletterFixture();
+    p.account=null;
+    p.oauth=null;
+    p.settings.debug=true;
+    p.configurationError=p.i18n.t('oauthNotConfigured');
+    const buttonFor=row=>{
+        const button={buttonEl:{addClass(){}},setButtonText(value){this.text=value;return this;},setDisabled(value){this.disabled=value;return this;},
+            setCta(){this.cta=true;return this;},onClick(){return this;}};
+        row.render({addButton:callback=>callback(button)});
+        return button;
+    };
+    for (const busy of [false,true]) {
+        p.busy=busy;
+        const groups=p.settingsTab.getSettingDefinitions(),rows=groups.flatMap(row=>row.items || [row]);
+        assert.ok(groups.find(group=>group.heading==='Gmail account (optional)').items.some(row=>row.name===p.configurationError));
+        assert.ok(!groups.some(row=>row.name===p.configurationError));
+        for (const name of ['Data','Reset JSON']) {
+            const candidates=rows.filter(row=>row.name===name);
+            for (const row of candidates) assert.equal(buttonFor(row).disabled,busy);
+        }
+        let disabled;
+        rows.find(row=>row.name==='Excluded sources').render({addTextArea:callback=>callback({inputEl:{setAttribute(){}},
+            setPlaceholder(){return this;},setValue(){return this;},setDisabled(value){disabled=value;return this;},onChange(){return this;}})});
+        assert.equal(disabled,busy);
+    }
+    p.busy=false;
+    p.settings.outputFolder='';
+    const row=p.settingsTab.getSettingDefinitions().find(group=>group.heading==='Choose where to store your data').items[0];
+    const create=buttonFor(row);
+    assert.equal(create.text,'Create folder');assert.equal(create.disabled,false);assert.equal(create.cta,true);
+
+    const messages=[],buttons=[];
+    obsidian.Setting=class {
+        setName(){return this;}
+        addText(callback){callback({inputEl:{setAttribute(){}},setValue(){return this;},setPlaceholder(){return this;},onChange(){return this;}});return this;}
+        addButton(callback){const button={setButtonText(text){buttons.push(text);return this;},setCta(){return this;},setDisabled(){return this;},onClick(){return this;}};callback(button);return this;}
+    };
+    p.openTextMachine('Data');
+    const dialog=p.runDialog;
+    dialog.contentEl={empty(){messages.length=0;buttons.length=0;},createEl(_tag,options){if(options?.text) messages.push(options.text);return {setText(){}};}};
+    dialog.render();
+    assert.ok(buttons.includes('Create folder'));
+    assert.ok(!buttons.includes('Connect Gmail'));
+    p.settings.outputFolder='Data';
+    await assert.rejects(p.importUnread(),/Connect Gmail or configure RSS feeds/);
+    await dialog.advance();
+    assert.ok(messages.includes(p.i18n.t('connectToRun')));
+    p.settings.includeFeeds='https://source.example/feed';
+    dialog.render();
+    assert.ok(!buttons.includes('Connect Gmail'));
+    assert.ok(!messages.includes(p.i18n.t('connectToRun')));
+    dialog.contentEl.createDiv=()=>({createSpan(options){if(options.text) messages.push(options.text);return {};}});
+    dialog.working=true;
+    dialog.render();
+    assert.ok(messages.includes(p.i18n.t('readingFeeds')));
+    p.settings.includeFeeds='';
+    dialog.render();
+    assert.ok(messages.includes(p.i18n.t('finishInBrowser')));
+    dialog.working=false;
+    dialog.onClose();
 });
 
 test('include feeds share email deduplication, exclusions, forbidden statuses and article crawling',async()=>{
@@ -1151,7 +1829,7 @@ test('closing the run during generation prevents a late note and status changes'
 
 test('irrelevant articles are discarded without creating a note',async()=>{
     const {p,contents} = await newsletterFixture();
-    p.generate = async()=>JSON.stringify({selected:[],discard:[1,2]});
+    p.generate = async()=>JSON.stringify({brief:[], selected:[],discard:[1,2]});
     assert.equal(await p.writeNewsletter(),null);
     assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.status),['discard','discard','']);
     assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.usedAt),['','','unknown']);
@@ -1354,7 +2032,7 @@ test('blocked-source diagnostics report empty domains, exclude PDFs, and stop wh
 
 test('crawled authors are saved and passed to the writer for source attribution',async()=>{
     const {p,contents,entries,seen}=await newsletterFixture();
-    contents.set(p.dataPath,JSON.stringify({version:1,nextId:2,articles:[{...entries[0],content:''}]}));
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:3,articles:[{...entries[0],content:''},entries[1]]}));
     p.crawler={...p.crawler,crawl:async article=>({...article,content:'A complete source article.',authors:['Jane Doe','Jean Dupont']})};
     await p.crawlArticles();
     assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles[0].authors,['Jane Doe','Jean Dupont']);
@@ -1363,10 +2041,41 @@ test('crawled authors are saved and passed to the writer for source attribution'
 });
 test('an explicit signature in cached content reaches the writer without crawling the source again',async()=>{
     const {p,contents,entries,seen}=await newsletterFixture();
-    contents.set(p.dataPath,JSON.stringify({version:1,nextId:2,articles:[{...entries[0],content:'By Emmanuel Bernet\n\nA complete source article.'}]}));
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:3,articles:[{...entries[0],content:'By Emmanuel Bernet\n\nA complete source article.'},entries[1]]}));
     p.loadPage=async()=>{throw new Error('Cached articles must not be fetched again');};
     await p.writeNewsletter();
     assert.deepEqual(seen[0].articles[0].authors,['Emmanuel Bernet']);
+});
+
+test('HTTP 404 pages are excluded from the newsletter while paywalls remain in brief',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    const extra=(id,url,status='')=>({...entries[0],id,url,title:url,content:'',status});
+    const missing=extra(4,'https://missing.example/article');
+    const paywall=extra(5,'https://paywall.example/article');
+    const legacy=extra(6,'https://paywall.example/deleted','404');
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:7,articles:[...entries,missing,paywall,legacy]}));
+    const calls=[];
+    p.loadPage=async url=>{calls.push(url);return {url,status:url===missing.url ? 404 : 403,html:''};};
+    await p.crawlArticles();
+    await p.crawlArticles();
+    assert.deepEqual(calls,[missing.url,paywall.url]);
+    const saved=JSON.parse(contents.get(p.dataPath)).articles;
+    assert.equal(saved.find(article=>article.id===4).status,'404');
+    assert.equal(saved.find(article=>article.id===5).status,'forbidden');
+    assert.equal(saved.find(article=>article.id===6).status,'404');
+    assert.deepEqual(JSON.parse(contents.get('Data/blocked.json')),['paywall.example']);
+    const generate=p.generate;
+    let brief;
+    p.generate=async(connection,system,input,...rest)=>{
+        if (system.startsWith('Runtime brief')) brief=JSON.parse(input);
+        return generate(connection,system,input,...rest);
+    };
+    const file=await p.writeNewsletter();
+    assert.deepEqual(brief.map(article=>article.id),[5]);
+    const note=contents.get(file.path);
+    assert.ok(note.includes(paywall.url));
+    assert.ok(!note.includes(missing.url));
+    assert.ok(!note.includes(legacy.url));
 });
 
 test('crawl retains blocked and inaccessible articles as forbidden without retrying them',async()=>{
@@ -1388,7 +2097,7 @@ test('crawl retains blocked and inaccessible articles as forbidden without retry
     const saved = JSON.parse(contents.get(p.dataPath));
     assert.equal(saved.articles.length,5);
     assert.equal(saved.articles[0].status,'');
-    assert.ok(saved.articles.slice(1).every(article=>article.status==='forbidden'));
+    assert.deepEqual(saved.articles.slice(1).map(article=>article.status),['forbidden','404','forbidden','forbidden']);
     assert.equal(saved.annotation,'Keep annotation');
     assert.deepEqual(JSON.parse(contents.get('Data/blocked.json')),['blocked.example','denied.example']);
 });
@@ -1396,7 +2105,7 @@ test('crawl retains blocked and inaccessible articles as forbidden without retry
 test('mail from blocked domains is retained as forbidden metadata and marked read',async()=>{
     const {p,contents,entries} = await newsletterFixture();
     p.account.scope = p.gmail.SCOPE;
-    p.readBlocked = async()=>['example.com'];
+    p.readBlocked = async()=>['example.com','other.example','older.example'];
     p.articles = {...p.articles,messageArticles:()=>[{...entries[0],url:'https://news.example.com/new-article',title:'New article'}]};
     let marked = 0;
     p.client = {unreadMessages:async function*(){yield 'message';},message:async()=>({id:'message',labelIds:['UNREAD','Label_1']}),markRead:async()=>{marked++;}};
@@ -1412,12 +2121,12 @@ test('mail from blocked domains is retained as forbidden metadata and marked rea
 
 test('legacy links recover used articles from today’s note while older notes supply history',async()=>{
     const {p,contents,entries,seen} = await newsletterFixture();
-    contents.set(p.dataPath,JSON.stringify({version:1,articles:[{...entries[0],status:'used'},entries[2]]}));
+    contents.set(p.dataPath,JSON.stringify({version:1,articles:[{...entries[0],status:'used'},entries[1],entries[2]]}));
     const today = 'Data/text-machine-'+p.newsletter.day()+'.md';
     await p.app.vault.create(today,'# Old edition\n\n[Source]('+entries[0].url+')');
     await p.app.vault.create('Data/text-machine-2000-01-01.md','# Older angle');
     assert.equal((await p.writeNewsletter()).path,today);
-    assert.deepEqual(seen[0].articles.map(article=>article.url),[entries[0].url]);
+    assert.deepEqual(seen[0].articles.map(article=>article.url),[entries[0].url,entries[1].url]);
     assert.equal(seen[0].previousNewsletters[0].content,'# Older angle');
     assert.equal(contents.get('Data/text-machine-2000-01-01.md'),'# Older angle');
     assert.equal(JSON.parse(contents.get(p.dataPath)).articles[0].usedAt,p.newsletter.day());
@@ -1442,7 +2151,7 @@ test('an empty regeneration keeps the saved edition and used articles while disc
     data.nextId = 5;
     data.articles.push({...entries[0],id:4,url:'https://example.com/irrelevant-new',title:'irrelevant-new'});
     contents.set(p.dataPath,JSON.stringify(data));
-    p.generate = async(_connection,_system,input)=>JSON.stringify({selected:[],discard:JSON.parse(input).articles.map(article=>article.id)});
+    p.generate = async(_connection,_system,input)=>JSON.stringify({brief:[], selected:[],discard:JSON.parse(input).articles.map(article=>article.id)});
     assert.equal(await p.writeNewsletter(),null);
     assert.equal(contents.get(note.path),before);
     const saved = JSON.parse(contents.get(p.dataPath));
@@ -1498,7 +2207,7 @@ test('mixed editions translate brief titles separately from the writer and prese
         translated=true;
         assert.ok(system.includes('Custom brief prompt in français'));
         assert.deepEqual(JSON.parse(input),[{id:4,title:blocked.title}]);
-        return JSON.stringify({titles:[{id:4,title:'Nouvelle étude sur l’écriture avec l’IA'}]});
+        return JSON.stringify({titles:[{id:4,title:'Nouvelle étude sur l’écriture avec l’IA',category:'Recherche'}]});
     });
     const note=await p.writeNewsletter();
     assert.ok(translated);
@@ -1513,7 +2222,7 @@ test('mixed editions translate brief titles separately from the writer and prese
 test('brief translation failures and cancellation preserve the saved edition and article timestamps',async()=>{
     for (const failure of ['empty-prompt','incomplete','wrong-id','error','cancel']) {
         const {p,contents,entries}=await newsletterFixture();
-        const before=JSON.stringify({version:1,nextId:5,articles:[{...entries[0],status:'forbidden'},{...entries[0],id:4,title:'Readable',url:'https://example.com/readable'}]});
+        const before=JSON.stringify({version:1,nextId:5,articles:[{...entries[0],status:'forbidden'},entries[1],{...entries[0],id:4,title:'Readable',url:'https://example.com/readable'}]});
         contents.set(p.dataPath,before);
         const path='Data/text-machine-'+p.newsletter.day()+'.md';
         await p.app.vault.create(path,'# Existing edition');
@@ -1525,8 +2234,8 @@ test('brief translation failures and cancellation preserve the saved edition and
         p.generate=withStages(p, async(...args)=>{
             if (!args[1].startsWith('Runtime brief')) return generate(...args);
             if (failure==='error') throw new Error('Translation unavailable');
-            if (failure==='cancel') {p.aiController.abort();return JSON.stringify({titles:[{id:1,title:'Late title'}]});}
-            return JSON.stringify({titles:failure==='incomplete' ? [] : [{id:99,title:'Unknown title'}]});
+            if (failure==='cancel') {p.aiController.abort();return JSON.stringify({titles:[{id:1,title:'Late title',category:'Écriture'}]});}
+            return JSON.stringify({titles:failure==='incomplete' ? [] : [{id:99,title:'Unknown title',category:'Écriture'}]});
         });
         await assert.rejects(p.writeNewsletter(),/bref.md.*empty|incomplete or invalid|Translation unavailable|cancelled/);
         assert.equal(contents.get(path),'# Existing edition');
@@ -1546,17 +2255,76 @@ test('Codex receives a separate constrained schema for brief titles without call
         assert.equal(executable,'/test/codex');
         assert.equal(model,'fixture');
         assert.ok(!signal.aborted);
-        if (input.includes('Runtime selection')) return JSON.stringify({selected:[],discard:[2]});
+        if (input.includes('Runtime selection')) return JSON.stringify({brief:[], selected:[],discard:[2]});
         assert.ok(system.includes('Runtime brief English'));
         assert.deepEqual(JSON.parse(input),[{id:1,title:'used'}]);
         assert.ok(schema.properties.titles);
         assert.equal(schema.additionalProperties,false);
-        return JSON.stringify({titles:[{id:1,title:'Translated title'}]});
+        return JSON.stringify({titles:[{id:1,title:'Translated title',category:'Writing'}]});
     }};
     p.generate=withStages(p, async()=>{throw new Error('Cloud API must not be called');});
     const note=await p.writeNewsletter();
     assert.equal(calls,2);
     assert.ok(contents.get(note.path).includes('* [Translated title](https://example.com/used)'));
+});
+
+test('disabled illustrations skip generation, keys, prompts and cached images',async()=>{
+    for (const cached of [false,true]) {
+        const {p,contents}=await newsletterFixture();
+        p.settings.generateImages=false;
+        const image='Data/illustrations/text-machine-'+p.newsletter.day()+'.png';
+        if (cached) await p.app.vault.create(image,'Existing illustration');
+        p.getAIKey=()=>assert.fail('Disabled images must not read an image API key');
+        p.generateIllustration=async()=>assert.fail('Disabled images must not generate');
+        p.createIllustration=async()=>assert.fail('Disabled images must not decode');
+        const read=p.app.vault.adapter.read;
+        p.app.vault.adapter.read=async path=>{assert.ok(!path.endsWith('/prompts/image.md'));return read(path);};
+        const note=await p.writeNewsletter();
+        assert.ok(contents.get(note.path).includes('First paragraph.'));
+        assert.ok(!contents.get(note.path).includes('!['));
+        assert.equal(contents.get(image),cached ? 'Existing illustration' : undefined);
+        assert.equal(JSON.parse(contents.get(p.dataPath)).articles[0].usedAt,p.newsletter.day());
+    }
+});
+
+test('the image toggle precedes its edit button and persists through reloads',async()=>{
+    const {p}=await fixture();
+    const rows=p.settingsTab.getSettingDefinitions().flatMap(row=>row.items || [row]);
+    const row=rows.find(row=>row.name===p.i18n.t('promptImage'));
+    const order=[];let change;
+    row.render({addToggle:render=>{order.push('toggle');render({toggleEl:{setAttribute(){}},setValue(){return this;},setDisabled(){return this;},onChange(callback){change=callback;return this;}});},
+        addButton:render=>{order.push('edit');render({setButtonText(){return this;},setDisabled(){return this;},onClick(){return this;}});}});
+    assert.deepEqual(order,['toggle','edit']);
+    assert.equal(p.settings.generateImages,true);
+    for (const value of [false,true]) {
+        await change(value);
+        assert.equal(p.savedSettings.generateImages,value);
+        await p.onload();
+        assert.equal(p.settings.generateImages,value);
+    }
+});
+
+test('Codex handles both text and images with the same configured model and effort without a separate image API',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    const connection={provider:'codex',model:'chosen-by-user',effort:'high',apiKey:''};
+    p.getAIConnection=()=>connection;
+    const generate=p.generate;let images=0;
+    p.codex={...p.codex,findCodex:async()=>'/test/codex',
+        generate:async(_path,system,input,model,_signal,_progress,_schema,_image,effort)=>{
+            assert.equal(model,connection.model);assert.equal(effort,connection.effort);
+            return generate(connection,system,input);
+        },
+        generateImage:async(executable,system,input,model,signal,_progress,effort)=>{
+            images++;
+            assert.equal(executable,'/test/codex');assert.equal(model,connection.model);assert.equal(effort,connection.effort);
+            assert.ok(!signal.aborted);assert.ok(system.includes('Image caption'));
+            assert.deepEqual(JSON.parse(input).paragraphs,JSON.parse(writerResponse(['First paragraph.','Second paragraph.'],entries.slice(0,2))).paragraphs);
+            return new ArrayBuffer(8);
+        }};
+    p.getAIKey=()=>assert.fail('Codex must not read a separate image API key');
+    p.generateIllustration=async()=>assert.fail('Codex images must not call the cloud image API');
+    const note=await p.writeNewsletter();
+    assert.equal(images,1);assert.ok(contents.get(note.path).includes('](illustrations/'));
 });
 
 test('the illustration is generated from the revised article without loading source photographs',async()=>{
@@ -1572,8 +2340,9 @@ test('the illustration is generated from the revised article without loading sou
         ? rewriteResponse(input.replace('Original first paragraph.','Revised first paragraph.'))
         : JSON.stringify({paragraphs:['Original first paragraph.','A second paragraph.']}));
     let images=0;
-    p.generateIllustration=async(_key,prompt,_request,signal)=>{
+    p.generateIllustration=async(connection,prompt,_request,signal)=>{
         images++;
+        assert.equal(connection.model,'fixture');assert.equal(connection.provider,'openai');
         assert.ok(!signal.aborted);
         assert.ok(prompt.includes('Revised first paragraph.'));
         assert.ok(!prompt.includes('Original first paragraph.'));
@@ -1693,26 +2462,30 @@ test('settings definitions are searchable without IO and redraw uses the declara
 });
 
 
-test('RSS age filtering skips archives and undated entries without changing Gmail or cached text',async()=>{
+test('RSS collection and crawling accept old and undated articles while preserving cached text and deduplication',async()=>{
     const {p,contents,entries}=await newsletterFixture();
-    const now=Date.now(), publish=new Date(now-3600000).toISOString();
     p.settings.includeFeeds='https://publisher.example/feed';
     p.request=async()=>({status:200,text:'feed'});
-    const incoming=[{title:'Fresh',url:'https://example.com/fresh',publish},
-        ...['', 'invalid',new Date(now-49*3600000).toISOString(),new Date(now+3600000).toISOString()].map((publish,i)=>({title:'Skip '+i,url:'https://example.com/skip-'+i,publish}))];
+    const incoming=['2026-11-03T12:00:00Z','2010-01-01T12:00:00Z','','2099-01-01T12:00:00Z']
+        .map((publish,i)=>({title:'Article '+i,url:'https://example.com/story-'+i,publish}));
     p.newsletter.readFeed=()=>incoming;
-    assert.equal(await p.importFeeds(),1);
+    assert.equal(await p.importFeeds(),incoming.length);
     const saved=JSON.parse(contents.get(p.dataPath));
     assert.deepEqual(saved.articles.slice(0,3),entries);
-    assert.equal(saved.articles.length,4);
-    saved.articles.push({...entries[0],id:5,title:'Old pending RSS',url:'https://example.com/old-rss',source:'RSS: publisher.example',content:''},
-        {...entries[0],id:6,title:'Old mail',url:'https://example.com/old-mail',content:''});
-    saved.nextId=7;
+    assert.equal(saved.articles.length,entries.length+incoming.length);
+    const nextId=saved.nextId;
+    saved.articles.push({...entries[0],id:nextId,title:'Old pending RSS',url:'https://example.com/old-rss',source:'RSS: publisher.example',content:''},
+        {...entries[0],id:nextId+1,title:'Old mail',url:'https://example.com/old-mail',content:''});
+    saved.nextId=nextId+2;
     contents.set(p.dataPath,JSON.stringify(saved));
     const crawled=[];
     p.crawler={...p.crawler,crawl:async article=>{crawled.push(article.url);return {...article,content:'Full text'};}};
     await p.crawlArticles();
-    assert.deepEqual(crawled,['https://example.com/fresh','https://example.com/old-mail']);
+    const expected=[...incoming.map(article=>article.url),'https://example.com/old-rss','https://example.com/old-mail'];
+    assert.deepEqual(crawled,expected);
+    assert.equal(await p.importFeeds(),0);
+    await p.crawlArticles();
+    assert.deepEqual(crawled,expected);
 });
 
 test('complete RSS bodies are reused once, summaries crawled and forbidden sources preserved',async()=>{
@@ -1909,7 +2682,7 @@ test('debug selection discards remain repeatable without recording statuses',asy
     p.settings.debug=true;
     p.settings.minimumSources=10;
     const before=contents.get(p.dataPath);
-    p.generate=async(_connection,_system,input)=>JSON.stringify({selected:[],discard:JSON.parse(input).articles.map(article=>article.id)});
+    p.generate=async(_connection,_system,input)=>JSON.stringify({brief:[], selected:[],discard:JSON.parse(input).articles.map(article=>article.id)});
     assert.equal(await p.writeNewsletter(),null);
     assert.equal(contents.get(p.dataPath),before);
     assert.equal(await p.writeNewsletter(),null);
@@ -1965,7 +2738,7 @@ test('brief titles explicitly rejected as off-topic never appear in test newslet
     data.nextId=6;contents.set(p.dataPath,JSON.stringify(data));
     const before=contents.get(p.dataPath),generate=p.generate;
     p.generate=async(connection,system,input,...rest)=>system.startsWith('Runtime brief')
-        ? JSON.stringify({titles:JSON.parse(input).map(row=>({id:row.id,title:row.id===4 ? null : 'Les romanciers déclarent leurs usages de l’IA'}))})
+        ? JSON.stringify({titles:JSON.parse(input).map(row=>({id:row.id,title:row.id===4 ? null : 'Les romanciers déclarent leurs usages de l’IA',category:row.id===4 ? null : 'Création'}))})
         : generate(connection,system,input,...rest);
     const note=await p.writeNewsletter();
     assert.ok(!contents.get(note.path).includes('wall-street'));
@@ -1975,7 +2748,7 @@ test('brief titles explicitly rejected as off-topic never appear in test newslet
     data.articles=data.articles.slice(3);
     contents.set(p.dataPath,JSON.stringify(data));
     p.generateIllustration=async()=>{throw new Error('An empty edition must not generate an image');};
-    p.generate=async()=>JSON.stringify({titles:[{id:4,title:null},{id:5,title:null}]});
+    p.generate=async()=>JSON.stringify({titles:[{id:4,title:null,category:null},{id:5,title:null,category:null}]});
     assert.equal(await p.writeNewsletter(),null);
     assert.equal(contents.get(p.dataPath),JSON.stringify(data));
 });
@@ -1988,7 +2761,7 @@ test('RSS URL fingerprints survive reopening and retain rejected URLs and syndic
     data.articles.push({...entries[0],id:4,title:'Discarded',url:'https://example.com/discarded',status:'discard',content:''},
         {...entries[0],id:5,title:'Consumed',url:'https://example.com/consumed',usedAt:'unknown',content:''});
     data.nextId=6;contents.set(p.dataPath,JSON.stringify(data));
-    const publish=new Date(Date.now()-1000).toISOString();
+    const publish='2010-01-01T12:00:00Z';
     const rows=[{title:'Used',url:'https://www.example.com/used/?utm_source=feed',publish},
         {title:'Discarded',url:'https://example.com/discarded',publish},
         {title:'Excluded',url:'https://ignored.example/post',publish},

@@ -1,12 +1,10 @@
-Rédige en {{language}} une revue de presse qui fait dialoguer les articles par des faits précis et des citations attribuées. Vise 1 500 signes : c’est la longueur attendue, pas un plafond.
+Rédige en {{language}} une revue de presse vivante d’environ 1 500 signes sur l’IA, la littérature, l’écriture et les métiers du livre. Fais découvrir des faits et des points de vue, en passant d’une publication à l’autre sans imposer de fil rouge.
 
-Les articles fournis ont déjà été sélectionnés : chacun apporte un élément nouveau. Ouvre sur un fait saillant ou une scène concrète, puis passe d’une source à l’autre par des faits et des citations. Accorde à chaque source la place que son apport mérite.
+Vise 3 à 5 sources complémentaires, issues d’au moins deux publications distinctes. Plusieurs billets du même site restent une seule voix. Garde les informations qui méritent d’être racontées. Si un sujet exige trop de préalables pour être compris dans cette revue de presse courte, laisse-le de côté : les nouvelles pertinentes non utilisées iront en bref. Deux sources bien racontées suffisent. Un incident local ne prend pas une portée générale par une formule.
 
-Choisis des extraits qui donnent à voir ou à comprendre. Situe les acteurs et la situation avant la citation, puis rebondis sans expliquer ce qu’elle vient de dire. Relie les sources par un détail concret ; quand le sujet change, annonce simplement le changement. Une réaction brève du narrateur peut donner du relief. Termine sur un fait, une image ou une citation, sans morale générale. L’ensemble porte sur l’IA dans la littérature, l’écriture et les métiers du livre.
+Choisis une idée principale par source et fais-la comprendre avant de passer à la suivante. Présente la situation, puis ce que le journaliste ou la personne citée en dit, et pourquoi. Garde seulement les détails nécessaires à cette idée. Accumuler les références ou condenser tout le raisonnement d’un article rend le passage illisible. Une citation doit éclairer ce qui est raconté, pas demander une explication supplémentaire.
 
-Attribue chaque extrait à son auteur (champ authors), sinon au média, avec un lien Markdown vers l’article. Distingue les propos du journaliste de ceux des personnes citées. Traduis fidèlement les citations ; préserve les faits, les chiffres et leur contexte, y compris le caractère fictif d’un exemple. N’invente rien.
-
-Les pronoms et possessifs doivent renvoyer à un élément nommé clairement. Garde les détails nécessaires pour comprendre à la première lecture.
+Le lecteur connaît déjà l’IA : n’en développe pas le sigle. Il n’a pas lu les articles. Situe les personnes et les faits ; distingue ce qui se passe dans une œuvre de l’interprétation qu’en propose le journaliste. Attribue les citations et les informations à leur source avec un lien Markdown vers l’article. Distingue la voix du journaliste de celle des personnes citées ; traduis fidèlement, sans inventer ni effacer les nuances nécessaires. Le lecteur doit comprendre les phrases et leurs références dès la première lecture.
 
 # Exemple de revue de Presse France Inter
 
@@ -22,7 +20,7 @@ Et pas que chez nous, d’ailleurs, si on lit Olivier Tosseri dans [*Les Échos*
 
 # Sujets déjà traités
 
-Écarte les sujets présents dans cet historique. Il sert uniquement à éviter les répétitions : ne le cite pas et ne reprends pas ses liens.
+Écarte ce qui répète un sujet, un argument ou un mécanisme déjà développé dans cet historique. Un nouveau concours ou un autre protagoniste ne suffit pas à renouveler une histoire de soupçon d’IA ou de disqualification : il faut une évolution substantielle à raconter. L’historique sert uniquement à éviter les répétitions : ne le cite pas et ne reprends pas ses liens.
 
 Anciennes newsletters :
 {{previousNewsletters}}
