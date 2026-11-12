@@ -13,7 +13,8 @@ import {domainOf} from './domains';
 
 interface Editorial {title: string; chapeau: string; paragraphs: string[]}
 export interface Newsletter extends Editorial {
-    image: {url: string; source: string; caption: string; verified: boolean; generated?: boolean} | null;
+    image: {url: string; source: string; caption: string; verified: boolean; generated?: boolean; markdown?: string} | null;
+    paragraphImages?: {paragraph: number; url: string; source: string; caption: string}[];
     used: string[];
     discard: string[];
 }
@@ -90,13 +91,13 @@ function renderPrompt(prompt: string, values: Record<string,string>) {
     });
 }
 
-function selectionRequest(prompt: string, articles: Article[], language: string, referenceSources = '', previous: {name: string; content: string}[] = [], feed: FeedEntry[] = []) {
+function selectionRequest(prompt: string, articles: Article[], language: string, referenceSources = '', previous: {name: string; content: string}[] = [], feed: FeedEntry[] = [], commentedArticles = 3) {
     const schema = structuredClone(selectionSchema);
     const ids = articles.map(article=>article.id);
     for (const key of ['selected','brief','discard'] as const) Object.assign(schema.properties[key].items,{enum:ids});
     const editorial=articles.filter(article=>isEditorialSource(article.source)).map(article=>article.id);
     const priority=editorial.length ? '\n\n'+t('editorialSourcesContract',{ids:editorial.join(', ')}) : '';
-    return {input:articleInput(prompt,articles,language,{now:new Date().toString(),previousNewsletters:JSON.stringify(previous),AuthorFeed:JSON.stringify(feed),recentPosts:JSON.stringify(feed)}),system:t('selectionContract')+referenceInstructions(articles,referenceSources)+priority+'\n\n'+JSON.stringify({jsonSchema:schema}),schema};
+    return {input:articleInput(prompt,articles,language,{commentedArticles:String(commentedArticles),now:new Date().toString(),previousNewsletters:JSON.stringify(previous),AuthorFeed:JSON.stringify(feed),recentPosts:JSON.stringify(feed)}),system:t('selectionContract')+'\n\n'+t('commentedArticlesContract',{count:commentedArticles})+referenceInstructions(articles,referenceSources)+priority+'\n\n'+JSON.stringify({jsonSchema:schema}),schema};
 }
 
 async function selectArticles(articles: Article[], build: (articles: Article[])=>ReturnType<typeof selectionRequest>,
@@ -241,9 +242,10 @@ function articleInput(prompt: string, articles: Article[], language: string, val
     });
 }
 
-function writerRequest(prompt: string, articles: Article[], previous: {name: string; content: string}[], feed: FeedEntry[], language = 'français', referenceSources = '') {
+function writerRequest(prompt: string, articles: Article[], previous: {name: string; content: string}[], feed: FeedEntry[], language = 'français', referenceSources = '', commentedArticles = 3) {
     if (!prompt.trim()) throw new Error(t('writerPromptEmpty'));
     const values = {
+        commentedArticles:String(commentedArticles),
         previousNewsletters:JSON.stringify(previous),
         recentPosts:JSON.stringify(feed),
         AuthorFeed:JSON.stringify(feed),
@@ -251,7 +253,7 @@ function writerRequest(prompt: string, articles: Article[], previous: {name: str
     const editorialSchema = structuredClone(writerSchema);
     Object.assign(editorialSchema.properties.used.items,{enum:articles.map(article=>article.id)});
     return {
-        system:t('writerContract') + referenceInstructions(articles,referenceSources) + '\n\n' + JSON.stringify({jsonSchema:editorialSchema}),schema:editorialSchema,
+        system:t('writerContract')+'\n\n'+t('commentedArticlesContract',{count:commentedArticles}) + referenceInstructions(articles,referenceSources) + '\n\n' + JSON.stringify({jsonSchema:editorialSchema}),schema:editorialSchema,
         input:articleInput(prompt,articles,language,values),
     };
 }
@@ -261,12 +263,15 @@ function renderNewsletter(template: string, result: Newsletter, brief: (Pick<Art
     const escape = (value: string) => value.replace(/[\r\n]+/g,' ').replace(/[\\`*_[\]<>]/g,'\\$&');
     const link = (url: string) => new URL(url).href.replace(/[()]/g,char=>char === '(' ? '%28' : '%29');
     const image = result.image?.verified === true && result.image.caption.trim() ? result.image : null;
+    const paragraphs=result.paragraphs.map((text,index)=>[text,...(result.paragraphImages || [])
+        .filter(image=>image.paragraph===index)
+        .map(image=>`[![${escape(image.caption)}](${link(image.url)})](${link(image.source)})`)].join('\n\n'));
     interface Context {[key: string]: string | Context[]}
     const values: Context = {
         title:escape(result.title || t('newsletterBriefTitle')),chapeau:escape(result.chapeau),
-        paragraphs_before_image:result.paragraphs.slice(0,2).join('\n\n'),
-        image:image ? (image.generated ? `![${escape(image.caption)}](${image.url})` : `[![${escape(image.caption)}](${link(image.url)})](${link(image.source)})`) : '',
-        paragraphs_after_image:result.paragraphs.slice(2).join('\n\n'),
+        paragraphs_before_image:paragraphs.slice(0,2).join('\n\n'),
+        image:image ? (image.generated ? image.markdown || `![${escape(image.caption)}](${image.url})` : `[![${escape(image.caption)}](${link(image.url)})](${link(image.source)})`) : '',
+        paragraphs_after_image:paragraphs.slice(2).join('\n\n'),
     };
     const briefRows = brief.map(article=>{
         const url=new URL(article.url);

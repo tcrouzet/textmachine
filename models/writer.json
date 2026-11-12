@@ -14,7 +14,7 @@
         "type": "string",
         "minLength": 1
       },
-      "description": "RP à plusieurs voix, exploitant au moins deux publications distinctes et idéalement 3 à 5 sources. Sans titre, chapeau, image ni liste de résumés. Au moins deux paragraphes si used n’est pas vide ; liste vide sinon.",
+      "description": "RP à plusieurs voix, fondée sur au moins deux publications distinctes. Vise le nombre d’articles demandé dans les consignes. Sans titre, chapeau, image ni liste de résumés. Au moins deux paragraphes si used n’est pas vide ; liste vide sinon.",
       "minItems": 0
     },
     "used": {

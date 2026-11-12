@@ -9,6 +9,32 @@ const {generate} = require('../../plugin/ai/generate');
 const template = fs.readFileSync(path.join(__dirname,'../../models/newsletter.md'),'utf8');
 const article = (slug, extra = {}) => ({date:'2026-11-03',title:slug,url:'https://example.com/'+slug,source:'User',authors:[],status:'',usedAt:'',publish:'2026-11-01',content:'An article about AI and books.',image:'',...extra});
 const articles = [article('a',{id:1,image:'https://example.com/image.jpg',imageCaption:'Original caption'}),article('b',{id:2})];
+
+test('selection and writing receive the configured article target even in customized prompts',()=>{
+    const prompt='{"articles":{{articles}},"count":{{commentedArticles}}}';
+    for (const count of [2,3,7]) {
+        for (const request of [selectionRequest(prompt,articles,'English','',[],[],count),
+            writerRequest(prompt,articles,[],[],'English','',count)]) {
+            assert.equal(JSON.parse(request.input).count,count);
+            assert.ok(request.system.includes('Aim to discuss '+count+' supplied articles'));
+            assert.ok(!request.input.includes('{{commentedArticles}}'));
+        }
+    }
+});
+
+test('source thumbnails follow their cited paragraphs and keep their complete captions in image Markdown',()=>{
+    const paragraphs=['First cited paragraph.','Second cited paragraph.','Last cited paragraph.'];
+    const newsletter={title:'Review',chapeau:'Introduction',paragraphs,image:null,used:[articles[0].url,articles[1].url],discard:[],
+        paragraphImages:[{paragraph:0,url:'https://images.example/first(photo).jpg',source:articles[0].url,caption:'Original [caption]. Photo: Author / Agency.'},
+            {paragraph:0,url:'https://images.example/other.jpg',source:articles[1].url,caption:'Another source'},
+            {paragraph:2,url:'https://images.example/last.jpg',source:articles[1].url,caption:'Last source'}]};
+    const text=renderNewsletter(template,newsletter);
+    const first='[![Original \\[caption\\]. Photo: Author / Agency.](https://images.example/first%28photo%29.jpg)](https://example.com/a)';
+    assert.ok(text.includes(paragraphs[0]+'\n\n'+first+'\n\n[![Another source]'));
+    assert.ok(text.includes(paragraphs[2]+'\n\n[![Last source]'));
+    assert.equal(text.split(first).length,2);
+    assert.deepEqual(newsletter.paragraphs,paragraphs);
+});
 const data = JSON.stringify({version:1,notes:'Keep notes',articles});
 const prompt = '{"instructions":"Editorial instructions","language":"{{language}}","articles":{{articles}},"previousNewsletters":{{previousNewsletters}},"recentPosts":{{recentPosts}}}';
 const result = {title:'A new angle',chapeau:'Books and AI.',paragraphs:['First paragraph.','Second paragraph. [Source](https://example.com/a)','Last paragraph.'],

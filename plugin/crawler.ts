@@ -134,6 +134,22 @@ function extractImageCaption(html: string, url: string, image: string) {
     return captionFromDocument(doc,image,url,{image:images});
 }
 
+function extractSocialImage(html: string, url: string) {
+    const doc=parseHTML(html);
+    for (const name of ['og:image:secure_url','og:image','twitter:image','twitter:image:src']) {
+        for (const node of doc.querySelectorAll(`meta[property="${name}"], meta[name="${name}"]`)) {
+            const value=node.getAttribute('content')?.trim();
+            if (!value) continue;
+            try {
+                const image=new URL(value,url);
+                if (!['http:','https:'].includes(image.protocol) || image.username || image.password) continue;
+                return {image:image.href,imageCaption:extractImageCaption(html,url,image.href)};
+            } catch { continue; }
+        }
+    }
+    return null;
+}
+
 function extractPage(html: string, url: string): {blocked?: boolean; content?: string; publish?: string; authors?: string[]; image?: string; imageCaption?: string} {
     const doc = pageDocument(html,url);
     const meta = (name: string) => doc.querySelector(`meta[property="${name}"], meta[name="${name}"]`)?.getAttribute('content') || '';
@@ -235,4 +251,4 @@ async function crawl(article: Article, blocked: string[], signal: AbortSignal | 
     return {...article, status:'forbidden'};
 }
 
-export {publicationDate, parseBlocked, isBlocked, block, extractPage, extractImageCaption, crawl};
+export {publicationDate, parseBlocked, isBlocked, block, extractPage, extractImageCaption, extractSocialImage, crawl};

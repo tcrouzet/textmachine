@@ -7,6 +7,23 @@
     margin-block: var(--size-4-6);
 }
 
+.text-machine-settings .text-machine-newsletter {
+    margin-block: var(--size-4-6);
+    padding: var(--size-4-4);
+    border-radius: var(--radius-l);
+    background: var(--background-secondary);
+}
+
+.text-machine-settings .text-machine-newsletter-picker {
+    border-top: 0;
+    justify-content: flex-end;
+}
+
+.text-machine-settings .text-machine-newsletter-picker .setting-item-control {
+    margin-inline-start: auto;
+    justify-content: flex-end;
+}
+
 .text-machine-settings .text-machine-note {
     color: var(--text-muted);
     font-size: var(--font-ui-small);

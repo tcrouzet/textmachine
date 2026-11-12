@@ -14,6 +14,7 @@ async function main() {
     const settings=JSON.parse(fs.readFileSync(path.join(root,'data.json'),'utf8'));
     assert.equal(settings.aiModel,'__codex__','This check uses the configured account and model only');
     const profile=settings.newsletters?.find(profile=>profile.id===settings.activeNewsletter);
+    const commentedArticles=profile?.commentedArticles ?? settings.commentedArticles ?? 3;
     const folder=path.resolve(root,'../../..',profile?.outputFolder || settings.outputFolder);
     const date=process.argv[2] || day();
     assert.match(date,/^\d{4}-\d{2}-\d{2}$/);
@@ -47,11 +48,11 @@ async function main() {
     };
     save();
     const selection=await selectArticles(sources,articles=>selectionRequest(read('sélection.md'),articles,language,
-        profile?.referenceSources || settings.referenceSources,previous,[]),request=>respond('selection',request));
+        profile?.referenceSources || settings.referenceSources,previous,[],commentedArticles),request=>respond('selection',request));
     report.stages.selection={selected:selection.selected.map(article=>article.id),brief:selection.brief.map(article=>article.id),discard:selection.discard};save();
     const complex=sources.find(article=>article.url.includes('mindmatters.ai/2026/11/for-c-s-lewis'));
     if (complex) assert.ok(selection.brief.some(article=>article.id===complex.id),'The source needing extensive context belongs in brief');
-    const writer=parseWriter(await respond('writer',writerRequest(read('writer.md'),selection.selected,previous,[],language,profile?.referenceSources || settings.referenceSources)),selection.selected);
+    const writer=parseWriter(await respond('writer',writerRequest(read('writer.md'),selection.selected,previous,[],language,profile?.referenceSources || settings.referenceSources,commentedArticles)),selection.selected);
     assert.ok(writer.paragraphs.length,'The clarity check needs an actual press review');
     report.used=writer.used.map(article=>article.id);report.stages.writer=writer.paragraphs;save();
     const result={title:'',chapeau:'',paragraphs:writer.paragraphs,image:null,used:writer.used.map(article=>article.url),discard:[]};

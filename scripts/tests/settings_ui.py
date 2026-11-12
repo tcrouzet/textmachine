@@ -137,14 +137,14 @@ try:
         assert '{{language}}' in page.locator('.setting-item').filter(has_text='Langue de la newsletter').inner_text()
         language.fill('español')
         page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).newsletterLanguage === 'español'")
-        minimum = page.get_by_role('spinbutton', name='Minimum d’articles avec texte', exact=True)
-        assert minimum.input_value() == '10'
+        minimum = page.get_by_role('spinbutton', name='Articles commentés dans la newsletter', exact=True)
+        assert minimum.input_value() == '3'
         minimum.fill('12')
-        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).minimumSources === 12")
-        for invalid in ('0', '-1', '2.5', ''):
+        page.wait_for_function("async () => (await app.plugins.plugins['text-machine'].loadData()).commentedArticles === 12")
+        for invalid in ('0', '1', '-1', '2.5', ''):
             minimum.fill(invalid)
             expect(minimum).to_have_attribute('aria-invalid', 'true')
-            assert page.evaluate("app.plugins.plugins['text-machine'].settings.minimumSources") == 12
+            assert page.evaluate("app.plugins.plugins['text-machine'].settings.commentedArticles") == 12
             minimum.press('Tab')
             expect(minimum).to_have_value('12')
         references = page.get_by_role('textbox', name='Sources de référence', exact=True)
@@ -471,8 +471,13 @@ try:
         page.evaluate("() => { app.plugins.plugins['text-machine'].account=window.diagnosticAccount; delete window.diagnosticAccount; }")
         settings()
         exclusions = page.get_by_role('textbox', name='Sources exclues', exact=True)
-        newsletter = page.locator('.text-machine-section').filter(has=page.get_by_role('textbox', name='Sources de référence', exact=True))
-        assert newsletter.locator('.setting-item-heading .setting-item-name').all_text_contents() == ['Newsletter', 'Sources', 'Prompts']
+        newsletter = page.locator('.text-machine-newsletter')
+        expected_headings = page.evaluate("""() => {
+            const p=app.plugins.plugins['text-machine'];
+            return [p.i18n.t('selectedNewsletterHeading',{name:p.newsletters.find(row=>row.id===p.settings.activeNewsletter).name}),
+                p.i18n.t('journalFolder'),p.i18n.t('sourceHeading'),p.i18n.t('newsletterSourcesHeading'),p.i18n.t('newsletterPromptsHeading')];
+        }""")
+        assert newsletter.locator('.setting-item-heading .setting-item-name').all_text_contents() == expected_headings
         assert newsletter.get_by_role('textbox', name='Sources exclues', exact=True).count() == 1
         assert newsletter.get_by_role('textbox', name='Sites bloqués', exact=True).count() == 1
         assert newsletter.get_by_role('textbox', name='Include feeds', exact=True).count() == 1
@@ -654,7 +659,7 @@ try:
         }""")
         assert page.evaluate("""() => {
             const p = app.plugins.plugins['text-machine'];
-            return p.settings.minimumSources === 12 && p.settings.newsletterLanguage === 'español' && p.settings.referenceSources === ['theguardian.com','bbc.co.uk'].join(String.fromCharCode(10))
+            return p.settings.commentedArticles === 12 && p.settings.newsletterLanguage === 'español' && p.settings.referenceSources === ['theguardian.com','bbc.co.uk'].join(String.fromCharCode(10))
                 && p.settings.aiModel === '__codex__' && p.settings.codexModel === 'codex-fixture' && p.settings.codexEffort === 'high'
                 && p.settings.authorFeeds === ['https://example.substack.com','https://other.example/feed'].join(String.fromCharCode(10))
                 && p.settings.includeFeeds === ''

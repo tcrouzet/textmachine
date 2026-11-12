@@ -6,11 +6,11 @@ export interface NewsletterSettings {
     outputFolder: string;
     excludedSources: string;
     newsletterLanguage: string;
-    minimumSources: number;
+    commentedArticles: number;
     referenceSources: string;
     includeFeeds: string;
     authorFeeds: string;
-    generateImages: boolean;
+    imageMode: 'none' | 'extracted' | 'generated';
 }
 export interface NewsletterProfile extends NewsletterSettings {
     id: string;

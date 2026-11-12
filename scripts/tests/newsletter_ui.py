@@ -52,6 +52,8 @@ try:
         page.evaluate('data => window.fixtureImage = data', base64.b64encode((root / 'scripts/tests/fixtures/illustration.png').read_bytes()).decode())
         page.evaluate(r"""async () => {
             const p = app.plugins.plugins['text-machine'];
+            app.vault.setConfig('attachmentFolderPath','Media Test');
+            app.vault.setConfig('useMarkdownLinks',true);
             p.codex = {...p.codex,findCodex:async()=>null};
             p.account = {email:'reader@example.com',refreshToken:'fixture',scope:p.gmail.SCOPE,clientId:p.oauth.clientId};
             p.loaded = true;
@@ -167,22 +169,8 @@ try:
             app.workspace.trigger('file-menu',menu,app.vault.getAbstractFileByPath('TextMachine'),'file-explorer');
             menu.showAtPosition({x:120,y:120});
         }""")
-        page.locator('.menu-item').filter(has_text='Text Machine').click()
-        page.get_by_role('alert').filter(has_text='2 articles lisibles disponibles ; 10 minimum requis').wait_for()
-        assert page.evaluate('window.pipelineStages.length === 0 && window.imageCalls === 0')
         page.evaluate('async () => { await app.vault.delete(app.vault.getAbstractFileByPath(window.previousNote)); }')
-        page.get_by_role('button', name='Réessayer', exact=True).click()
-        page.get_by_role('alert').filter(has_text='3 articles lisibles disponibles ; 10 minimum requis').wait_for()
-        assert page.evaluate('window.pipelineStages.length === 0 && window.imageCalls === 0')
-        assert len(list((vault / 'TextMachine').glob('text-machine-*.md'))) == 2
-        assert (vault / page.evaluate('window.firstNote')).read_text().startswith('# Earlier edition')
-        data = json.loads((vault / 'TextMachine/textmachine.json').read_text())
-        assert data['articles'][0]['usedAt'] == 'unknown'
-        assert data['articles'][1]['usedAt'] == page.evaluate('window.previousDay')
-        assert not list((vault / 'TextMachine').glob('brouillon-*.md'))
-        assert not list((vault / 'TextMachine').glob('revision-*.md'))
-        page.evaluate("app.plugins.plugins['text-machine'].settings.minimumSources = 1")
-        page.get_by_role('button', name='Réessayer', exact=True).click()
+        page.locator('.menu-item').filter(has_text='Text Machine').click()
         page.locator('.text-machine-live-output').filter(has_text='First paragraph.').wait_for()
         spinner = page.locator('.text-machine-spinner')
         model = page.locator('.text-machine-run-model')
@@ -230,8 +218,7 @@ try:
         assert page.evaluate('window.imageCalls === 1 && window.unexpectedSourceLoads === 0')
         assert page.evaluate('window.rewriterUsed === true')
         assert page.evaluate('JSON.stringify(window.pipelineStages)') == json.dumps(['selection','writer','bref','revision','publisher','image'],separators=(',',':'))
-        image_path = (vault / generated).with_suffix('.png')
-        image_path = image_path.parent / 'illustrations' / image_path.name
+        image_path = vault / 'Media Test' / pathlib.Path(generated).with_suffix('.png').name
         assert image_path.exists()
         assert markdown.count('![Books and AI](') == 1
         assert markdown.index('Second paragraph.') < markdown.index('![Books and AI](') < markdown.index('A new angle.')
@@ -355,9 +342,9 @@ try:
         }""")
         assert image_path.read_bytes() == first_image
         assert page.evaluate('window.imageCalls === 1 && window.unexpectedSourceLoads === 0')
-        images=list((vault / 'TextMachine/illustrations').glob('*.png'))
+        images=list((vault / 'Media Test').glob('*.png'))
         assert len(images) == 1 and images[0].name == pathlib.Path(generated).with_suffix('.png').name
-        page.wait_for_function("Array.from(document.querySelectorAll('.markdown-preview-view img')).some(image=>image.src.includes('/illustrations/') && image.naturalWidth===1600 && image.naturalHeight===1200)")
+        page.wait_for_function("Array.from(document.querySelectorAll('.markdown-preview-view img')).some(image=>decodeURIComponent(image.src).includes('/Media Test/') && image.naturalWidth===1600 && image.naturalHeight===1200)")
         dimensions=page.evaluate("""async encoded=>{
             const image=new Image();image.src='data:image/png;base64,'+encoded;await image.decode();
             const canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;

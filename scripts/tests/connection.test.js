@@ -20,7 +20,7 @@ async function fixture(initialSecrets = {}) {
     }
     let secret = JSON.stringify({email:'reader@example.com',clientId:'123-test.apps.googleusercontent.com',refreshToken:'old',scope:'https://www.googleapis.com/auth/gmail.readonly'});
     const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},setIcon:()=>{},Plugin,PluginSettingTab:class {},Modal:class {open() {}},Notice:class {},getLanguage:()=> 'en',requireApiVersion:()=>false};
-    const context = {module:{exports:{}},AbortController,URL,Date,performance,setTimeout,clearTimeout,structuredClone,window:{setTimeout,clearTimeout,setInterval,clearInterval},
+    const context = {module:{exports:{}},AbortController,URL,URLSearchParams,Date,performance,setTimeout,clearTimeout,structuredClone,window:{setTimeout,clearTimeout,setInterval,clearInterval},
         MutationObserver:class {observe() {} disconnect() {}},
         document:{body:{},querySelectorAll:()=>[]},CSS:{escape:value=>value},
         require:name=> name==='obsidian' ? obsidian : name==='electron' ? {shell:{}} : name==='@electron/remote' ? {BrowserWindow:class {}} : require(name)};
@@ -247,7 +247,7 @@ test('native secret references reuse existing keys and never copy values into se
 
 async function newsletterFixture() {
     const {p,obsidian,events} = await fixture();
-    p.settings.minimumSources=1;
+    p.settings.commentedArticles=2;
     const article = (name,extra={}) => ({date:'2026-11-03',title:name,url:'https://example.com/'+name,source:'User',authors:[],status:'',usedAt:'',publish:'2026-11-01',content:'Article about AI and books.',image:'',...extra});
     const entries = [article('used',{id:1}),article('another',{id:2,url:'https://other.example/another'}),article('old',{id:3,url:'https://older.example/old',usedAt:'unknown'})];
     const contents = new Map([['Data/textmachine.json',JSON.stringify({version:1,nextId:4,notes:'Keep notes',articles:entries})]]);
@@ -275,7 +275,7 @@ async function newsletterFixture() {
         create:async (path,text)=>{
             if (failCreate) throw new Error('Disk full');
             if (files.has(path)) throw new Error('File exists');
-            const file = Object.assign(new obsidian.TFile(),{path,name:path.split('/').pop(),stat:{mtime:Date.now()}});
+            const file = Object.assign(new obsidian.TFile(),{path,name:path.split('/').pop(),extension:path.split('.').pop(),stat:{mtime:Date.now()}});
             files.set(path,file);contents.set(path,text);
             files.get(path.split('/').slice(0,-1).join('/'))?.children.push(file);
             return file;
@@ -291,9 +291,21 @@ async function newsletterFixture() {
             : path.endsWith('/prompts/image.md') ? 'Image caption in {{language}}'
                 : path.endsWith('/prompts/rewriter.md') ? 'Runtime rewriter {{language}}'
                     : path.endsWith('/prompts/bref.md') ? 'Runtime brief {{language}}'
-                        : path.endsWith('/prompts/sélection.md') ? '{"instructions":"Runtime selection","language":"{{language}}","articles":{{articles}}}'
-                : '{"instructions":"My runtime prompt","language":"{{language}}","articles":{{articles}},"previousNewsletters":{{previousNewsletters}},"recentPosts":{{recentPosts}}}'},
+                        : path.endsWith('/prompts/sélection.md') ? '{"instructions":"Runtime selection","language":"{{language}}","commentedArticles":{{commentedArticles}},"articles":{{articles}}}'
+                : '{"instructions":"My runtime prompt","language":"{{language}}","commentedArticles":{{commentedArticles}},"articles":{{articles}},"previousNewsletters":{{previousNewsletters}},"recentPosts":{{recentPosts}}}'},
     };
+    p.app.fileManager={getAvailablePathForAttachment:async(name,source)=>{
+        assert.ok(source.startsWith(p.settings.outputFolder+'/'));
+        assert.ok(files.has(source),'Obsidian needs an existing source file to resolve relative attachment folders');
+        if (!files.has('Attachments')) await p.app.vault.createFolder('Attachments');
+        let destination='Attachments/'+name,index=1;
+        while (files.has(destination)) {
+            destination='Attachments/'+name.replace(/\.png$/, ' '+index+'.png');
+            index++;
+        }
+        return destination;
+    },generateMarkdownLink:(file,_source,_subpath,alias)=>'['+alias+']('+file.path+')'};
+    p.app.metadataCache={getFirstLinkpathDest:(link,source)=>files.get(link) || files.get(path.posix.normalize(path.posix.join(path.posix.dirname(source),link))) || null};
     p.app.workspace.getLeaf = ()=>({openFile:async()=>{}});
     p.createIllustration = async()=>({name:'illustration-0000000000000000.png',data:new ArrayBuffer(8)});
     p.generateIllustration = async()=>new ArrayBuffer(8);
@@ -316,14 +328,33 @@ async function newsletterFixture() {
     return {p,obsidian,events,contents,files,entries,seen,publisher,failCreate:()=>{failCreate=true;},failSave:()=>{failSave=true;}};
 }
 
-test('minimum readable sources defaults to ten and restores only positive safe integers',async()=>{
+test('commented articles defaults to three and restores only valid review targets',async()=>{
     const {p}=await fixture();
-    assert.equal(p.settings.minimumSources,10);
+    assert.equal(p.settings.commentedArticles,3);
     for (const value of [1,3,12,0,-1,2.5,'10',null,undefined,Infinity,Number.MAX_SAFE_INTEGER+1]) {
-        p.savedSettings={...p.settings,minimumSources:value};
+        p.savedSettings={...p.settings,commentedArticles:value};
         await p.onload();
-        assert.equal(p.settings.minimumSources,Number.isSafeInteger(value) && value>0 ? value : 10);
+        assert.equal(p.settings.commentedArticles,Number.isSafeInteger(value) && value>=2 ? value : 3);
     }
+});
+
+test('the old collection minimum becomes a default writing target for every newsletter',async()=>{
+    const {p}=await fixture();
+    const {commentedArticles,...profile}=p.newsletters[0];
+    assert.equal(commentedArticles,3);
+    p.savedSettings={...p.settings,minimumSources:20,newsletters:[{...profile,minimumSources:20},
+        {...profile,id:'other',name:'Other',minimumSources:15}]};
+    delete p.savedSettings.commentedArticles;
+    await p.onload();
+    assert.equal(p.settings.commentedArticles,3);
+    assert.deepEqual(Array.from(p.newsletters,row=>row.commentedArticles),[3,3]);
+    assert.ok(!Object.hasOwn(p.settings,'minimumSources'));
+    p.settings.commentedArticles=5;
+    await p.saveData(p.settings);
+    await p.selectNewsletter('other');
+    assert.equal(p.settings.commentedArticles,3);
+    await p.selectNewsletter(profile.id);
+    assert.equal(p.settings.commentedArticles,5);
 });
 
 test('newsletter profiles preserve existing settings and independent prompts across selection and reload',async()=>{
@@ -331,7 +362,7 @@ test('newsletter profiles preserve existing settings and independent prompts acr
     const {p}=await newsletterFixture();
     const first=p.settings.activeNewsletter;
     Object.assign(p.settings,{labelId:'Label_first',includeFeeds:'https://first.example/feed',authorFeeds:'https://author.example/feed',
-        excludedSources:'ignored.example',referenceSources:'first.example',newsletterLanguage:'English',minimumSources:3,generateImages:false,
+        excludedSources:'ignored.example',referenceSources:'first.example',newsletterLanguage:'English',commentedArticles:3,imageMode:'none',
         aiModel:'__codex__',codexModel:'chosen-model',codexEffort:'high'});
     const originalSettings=newsletterValues(p.settings),original=await p.readPrompt('writer.md');
     const legacy={...p.settings};delete legacy.newsletters;delete legacy.activeNewsletter;
@@ -351,7 +382,7 @@ test('newsletter profiles preserve existing settings and independent prompts acr
     const template=await p.readPrompt('newsletter.md');
     await p.savePrompt('newsletter.md',template+'\nSecond edition footer\n',template);
     Object.assign(p.settings,{outputFolder:'Second',labelId:'Label_second',includeFeeds:'https://second.example/feed',
-        newsletterLanguage:'español',minimumSources:7,referenceSources:'second.example',generateImages:true});
+        newsletterLanguage:'español',commentedArticles:7,referenceSources:'second.example',imageMode:'generated'});
     const secondSettings=newsletterValues(p.settings);
     await p.selectNewsletter(first);
     assert.deepEqual(newsletterValues(p.settings),originalSettings);
@@ -371,13 +402,13 @@ test('newsletter profiles preserve existing settings and independent prompts acr
     await p.selectNewsletter(first);
     assert.deepEqual(newsletterValues(p.settings),originalSettings);
     const groups=p.settingsTab.getSettingDefinitions().filter(item=>item.type==='group');
-    assert.deepEqual(Array.from(groups.slice(0,3),item=>item.heading),['Gmail account (optional)','Artificial intelligence','Newsletters']);
+    assert.deepEqual(Array.from(groups.slice(0,3),item=>item.heading),['Gmail account (optional)','Artificial intelligence','Newsletter: Data']);
 });
 
 test('each newsletter collects and generates in its own folder and context-menu opening selects that newsletter',async()=>{
     const {p,contents,files,events,seen,obsidian}=await newsletterFixture();
     const first=p.settings.activeNewsletter;
-    Object.assign(p.settings,{labelId:'Label_1',authorFeeds:'',includeFeeds:'https://first.example/feed',generateImages:false});
+    Object.assign(p.settings,{labelId:'Label_1',authorFeeds:'',includeFeeds:'https://first.example/feed',imageMode:'none'});
     p.account.scope=p.gmail.SCOPE;
     const mailLabels=[];
     p.client.unreadMessages=label=>{mailLabels.push(label);return [];};
@@ -385,7 +416,7 @@ test('each newsletter collects and generates in its own folder and context-menu 
     const second=await p.createNewsletter('Other newsletter');
     p.app.vault.adapter.list=async()=>({files:[],folders:[]});
     await p.ensureData('Other');
-    Object.assign(p.settings,{outputFolder:'Other',includeFeeds:'https://second.example/feed',minimumSources:1,generateImages:false});
+    Object.assign(p.settings,{outputFolder:'Other',includeFeeds:'https://second.example/feed',commentedArticles:2,imageMode:'none'});
     const original=await p.readPrompt('writer.md');
     await p.savePrompt('writer.md',original.replace('My runtime prompt','My runtime prompt","tone":"Second newsletter'),original);
     const requests=[],crawled=[],publish=new Date(Date.now()-1000).toISOString();
@@ -469,7 +500,7 @@ test('profile validation, busy work and failed saves preserve the active newslet
 test('invalid saved profiles cannot replace settings and shared Gmail account changes clear every old label',async()=>{
     const {readProfiles,newsletterDefaults}=require('../../plugin/profiles');
     const valid={...newsletterDefaults,id:'first',name:'First',outputFolder:'First'};
-    for (const invalid of [null,[],[valid,valid],[{...valid,minimumSources:0}],[{...valid,includeFeeds:5}],
+    for (const invalid of [null,[],[valid,valid],[{...valid,commentedArticles:0}],[{...valid,includeFeeds:5}],
         [{...valid,prompts:[]}],[valid,{...valid,id:'second',outputFolder:'First/Child'}]])
         assert.throws(()=>readProfiles(invalid,newsletterDefaults),/configuration is invalid/);
     const {p,profile}=await fixture();
@@ -489,30 +520,30 @@ test('invalid saved profiles cannot replace settings and shared Gmail account ch
     assert.equal(p.savedSettings,invalid);
 });
 
-test('nine readable sources wait intact; a tenth allows generation and same-day regeneration',async()=>{
+test('the writing target blocks generation until enough readable sources exist and allows same-day regeneration',async()=>{
     const {p,contents,entries,seen}=await newsletterFixture();
-    p.settings.minimumSources=10;
+    p.settings.commentedArticles=10;
     const data={version:1,nextId:10,notes:'Keep notes',articles:Array.from({length:9},(_,i)=>({...entries[0],id:i+1,title:'Source '+i,url:'https://publisher-'+(i%2)+'.example/source-'+i}))};
     contents.set(p.dataPath,JSON.stringify(data));
     const generate=p.generate;
-    p.generate=async()=>assert.fail('No AI call below the minimum');
+    p.generate=()=>assert.fail('Do not call AI below the configured article threshold');
     await assert.rejects(p.writeNewsletter(),/9.*10/);
     assert.deepEqual(JSON.parse(contents.get(p.dataPath)),data);
     assert.equal(contents.size,1);
-    assert.equal(p.aiController,null);
     data.articles.push({...entries[0],id:10,title:'Tenth source',url:'https://example.com/tenth'});
     data.nextId=11;
     contents.set(p.dataPath,JSON.stringify(data));
     p.generate=generate;
     const note=await p.writeNewsletter();
     assert.equal(seen[0].articles.length,10);
+    assert.equal(seen[0].commentedArticles,10);
     assert.ok(JSON.parse(contents.get(p.dataPath)).articles.every(article=>article.usedAt===p.newsletter.day()));
     assert.equal((await p.writeNewsletter()).path,note.path);
 });
 
-test('the minimum counts readable eligible articles before selection and excludes author feeds',async()=>{
+test('selection receives only readable eligible articles and the requested writing target',async()=>{
     const {p,contents,entries,seen}=await newsletterFixture();
-    p.settings.minimumSources=10;
+    p.settings.commentedArticles=10;
     p.settings.excludedSources='excluded.example';
     await p.app.vault.create('Data/text-machine-2000-01-01.md','# Earlier edition');
     const readable=Array.from({length:9},(_,i)=>({...entries[0],id:i+1,title:'Source '+i,url:'https://publisher-'+(i%2)+'.example/source-'+i}));
@@ -523,10 +554,10 @@ test('the minimum counts readable eligible articles before selection and exclude
     const data={version:1,nextId:17,articles:[...readable,...other]};
     contents.set(p.dataPath,JSON.stringify(data));
     const generate=p.generate;
-    p.generate=async()=>assert.fail('Ineligible articles must not satisfy the minimum');
+    p.generate=()=>assert.fail('Blocked, empty, excluded and author articles must not satisfy the threshold');
     await assert.rejects(p.writeNewsletter(),/9.*10/);
     assert.deepEqual(JSON.parse(contents.get(p.dataPath)),data);
-    p.settings.minimumSources=9;
+    p.settings.commentedArticles=4;
     p.generate=async(...args)=>{
         if (args[2].includes('Runtime selection')) {
             const context=JSON.parse(args[2]);
@@ -537,12 +568,27 @@ test('the minimum counts readable eligible articles before selection and exclude
     };
     assert.ok(await p.writeNewsletter());
     assert.equal(seen[0].articles.length,2);
+    assert.equal(seen[0].commentedArticles,4);
 });
 
-test('deleting consecutive newsletters automatically recovers their sources for the minimum',async()=>{
+test('the default threshold blocks two texts before AI and preserves the existing newsletter',async()=>{
+    const {p,contents}=await newsletterFixture();
+    p.settings.commentedArticles=3;
+    const name='Data/text-machine-'+p.newsletter.day()+'.md';
+    await p.app.vault.create(name,'# Existing newsletter');
+    const before=contents.get(p.dataPath);
+    p.generate=()=>assert.fail('No AI call with only two readable texts');
+    p.generateIllustration=()=>assert.fail('No illustration below the threshold');
+    await assert.rejects(p.writeNewsletter(),/2.*3/);
+    assert.equal(contents.get(p.dataPath),before);
+    assert.equal(contents.get(name),'# Existing newsletter');
+    assert.equal(p.aiController,null);
+});
+
+test('deleting consecutive newsletters recovers sources without crossing a surviving later edition',async()=>{
     const {p,contents,files,entries,seen}=await newsletterFixture();
     p.newsletter={...p.newsletter,day:()=> '2026-11-05'};
-    p.settings.minimumSources=10;
+    p.settings.commentedArticles=10;
     const articles=Array.from({length:10},(_,i)=>({...entries[0],id:i+1,title:'Source '+i,url:'https://publisher-'+(i%2)+'.example/source-'+i,
         usedAt:i<5 ? '2026-11-04' : '2026-11-03'}));
     articles.push({...entries[2],id:11,usedAt:'2026-11-01'});
@@ -702,7 +748,8 @@ test('oversized individual sources and a selection that never reduces preserve n
         const {p,contents,entries}=await newsletterFixture();
         const articles=Array.from({length:count},(_,index)=>({...entries[0],id:index+1,title:'Source '+index,
             url:'https://example.com/source-'+index,content:'x'.repeat(count===1 ? 1100000 : 300000)}));
-        const before={version:1,nextId:count+1,articles};
+        if (count===1) articles.push({...entries[1],id:2});
+        const before={version:1,nextId:articles.length+1,articles};
         contents.set(p.dataPath,JSON.stringify(before));
         let calls=0;
         p.generate=async(_connection,_system,input)=>{
@@ -1022,7 +1069,7 @@ test('a press review from one publication cannot replace the saved edition or co
 
 test('the brief includes blocked sources, secondary selections and every selected article omitted by the writer',async()=>{
     const {p,contents,entries}=await newsletterFixture();
-    p.settings.generateImages=false;
+    p.settings.imageMode='none';
     const source=(id,title,extra={})=>({...entries[0],id,title,url:'https://example.com/story-'+id,...extra});
     const rows=[source(11,'Major literary development'),source(12,'Another publication',{url:'https://other.example/story-12'}),source(13,'Minor scandal in India'),
         source(14,'Unrelated politics'),source(15,'Blocked literary article',{status:'forbidden',content:''}),
@@ -1068,7 +1115,7 @@ test('the brief includes blocked sources, secondary selections and every selecte
 test('secondary-only editions are saved without forcing a main article or losing a source declined by the writer',async()=>{
     for (const decline of [false,true]) {
         const {p,contents}=await newsletterFixture();
-        p.settings.generateImages=false;
+        p.settings.imageMode='none';
         const generate=p.generate;
         let writing=0;
         p.generate=async(connection,system,input,...rest)=>{
@@ -1104,7 +1151,7 @@ test('translation cannot silently remove an article already selected for the bri
 test('overlong introductions are retried only at publication and the retired verifier is never called',async()=>{
     for (const phase of ['publisher','verifier']) {
         const {p,contents}=await newsletterFixture();
-        p.settings.generateImages=false;
+        p.settings.imageMode='none';
         const generate=p.generate,long=Array.from({length:36},(_,index)=>'word'+index).join(' ');
         const short='Publishers confront a concrete change in literary practice.';
         let calls=0;
@@ -1319,7 +1366,7 @@ test('only article paragraphs are revised; titles, chapeau and captions stay out
             revisions++;
             assert.equal(input,JSON.parse(writerResponse(paragraphs,entries.slice(0,2))).paragraphs.join('\n\n'));
             assert.deepEqual(JSON.parse(system.split('\n\n').at(-1)).jsonSchema,require('../../models/rewriter.json'));
-            for (const absent of ['TITLE MUST STAY','CHAPEAU MUST STAY','![','illustrations/']) assert.ok(!input.includes(absent));
+            for (const absent of ['TITLE MUST STAY','CHAPEAU MUST STAY','![','Attachments/']) assert.ok(!input.includes(absent));
             return rewriteResponse(input.replace('original article prose','revised article prose'));
         }
         return JSON.stringify({paragraphs});
@@ -1330,7 +1377,7 @@ test('only article paragraphs are revised; titles, chapeau and captions stay out
     assert.ok(markdown.startsWith('# TITLE MUST STAY'));
     assert.ok(markdown.includes('*CHAPEAU MUST STAY*'));
     assert.ok(markdown.includes('The revised article prose.'));
-    assert.ok(markdown.includes('](illustrations/'));
+    assert.ok(markdown.includes('](Attachments/'));
 });
 
 test('Codex receives the revision schema with plain article paragraphs and no image input',async()=>{
@@ -1355,7 +1402,7 @@ test('Codex receives the revision schema with plain article paragraphs and no im
     const note=await p.writeNewsletter();
     assert.equal(revisions,1);
     assert.ok(contents.get(note.path).includes('Revised paragraph.'));
-    assert.ok(contents.get(note.path).includes('](illustrations/'));
+    assert.ok(contents.get(note.path).includes('](Attachments/'));
 });
 
 test('failed body revisions save the original article while cancellation still prevents saving',async()=>{
@@ -1386,7 +1433,7 @@ test('failed body revisions save the original article while cancellation still p
             const markdown=contents.get(note.path);
             assert.ok(markdown.includes('First paragraph. [Source](https://example.com/used)'));
             assert.ok(!markdown.includes('https://other.com/used'));
-            assert.ok(markdown.includes('](illustrations/'));
+            assert.ok(markdown.includes('](Attachments/'));
             assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.status),['','','']);
             assert.ok(progress.some(entry=>entry.message.includes('original article retained')));
             assert.ok(progress.some(entry=>entry.stream && entry.reset && entry.message.includes('First paragraph.')));
@@ -1563,6 +1610,100 @@ test('AuthorFeed works in both prompts and author content is fetched only once',
     }
 });
 
+test('generation reconnects configured Gmail before collecting mail, including alongside RSS',async()=>{
+    for (const feeds of ['', 'https://source.example/feed']) {
+        const {p}=await newsletterFixture();
+        p.settings.includeFeeds=feeds;
+        p.authorizationRequired=true;
+        const steps=[],connect=p.connect.bind(p);
+        p.connect=async()=>{
+            steps.push('connect');
+            await connect();
+            p.client.request=async options=>{
+                assert.equal(new URL(options.url).searchParams.get('labelIds'),'Label_1');
+                steps.push('mail');return {status:200,json:{messages:[]}};
+            };
+        };
+        p.importFeeds=async()=>{steps.push('feeds');return 0;};
+        p.crawlArticles=async()=>{};
+        p.writeNewsletter=async()=>{steps.push('write');return {path:'Data/newsletter.md'};};
+        await p.openTextMachine('Data');
+        const dialog=p.runDialog;
+        dialog.render=()=>{};
+        await dialog.advance();
+        assert.equal(dialog.error,'');
+        assert.equal(dialog.notePath,'Data/newsletter.md');
+        assert.deepEqual(steps,['connect','mail','feeds','write']);
+        assert.equal(p.isConnected,true);
+        dialog.onClose();
+    }
+});
+
+test('Gmail authorization loss during collection reconnects once and resumes generation',async()=>{
+    for (const failure of ['', 'AUTH_REQUIRED', 'NETWORK', 'cancelled']) {
+        const {p}=await newsletterFixture();
+        p.account.scope=p.gmail.SCOPE;
+        let connects=0,reads=0,writes=0;
+        p.client.request=async options=>{
+            assert.equal(options.url,'https://oauth2.googleapis.com/token');
+            reads++;return {status:400,json:{error:'invalid_grant'}};
+        };
+        const connect=p.connect.bind(p);
+        p.connect=async()=>{
+            connects++;
+            if (failure==='cancelled') throw new Error('Connection cancelled');
+            await connect();
+            p.client.request=async()=>{
+                reads++;return {status:failure==='AUTH_REQUIRED' ? 401 : failure ? 503 : 200,json:{messages:[]}};
+            };
+        };
+        p.crawlArticles=async()=>{};
+        p.writeNewsletter=async()=>{writes++;return {path:'Data/newsletter.md'};};
+        await p.openTextMachine('Data');
+        const dialog=p.runDialog;
+        dialog.render=()=>{};
+        await dialog.advance();
+        assert.equal(connects,1);
+        assert.equal(reads,failure==='cancelled' ? 1 : 2);
+        assert.equal(writes,failure ? 0 : 1);
+        assert.equal(Boolean(dialog.error),Boolean(failure));
+        assert.equal(p.busy,false);
+        dialog.onClose();
+    }
+});
+
+test('cancelled automatic reconnection preserves the account and stops generation',async()=>{
+    const {p}=await newsletterFixture();
+    const account=p.account;
+    let attempts=0;
+    p.settings.includeFeeds='https://source.example/feed';
+    p.gmail.authorize=async()=>{attempts++;throw new Error('Connection cancelled');};
+    p.importFeeds=()=>assert.fail('Cancelled Gmail must not silently become RSS-only');
+    p.writeNewsletter=()=>assert.fail('Cancelled Gmail must not generate');
+    await p.openTextMachine('Data');
+    const dialog=p.runDialog;
+    dialog.render=()=>{};
+    await dialog.advance();
+    assert.equal(attempts,1);
+    assert.equal(dialog.error,'Connection cancelled');
+    assert.equal(p.account,account);
+    assert.equal(p.settings.labelId,'Label_1');
+    assert.equal(p.auth,null);
+    assert.equal(p.busy,false);
+    dialog.onClose();
+});
+
+test('collection does not reconnect for network errors or before data setup',async()=>{
+    const {p}=await newsletterFixture();
+    p.account.scope=p.gmail.SCOPE;
+    p.connect=()=>assert.fail('No authorization failure to reconnect');
+    p.client.get=async()=>{throw new Error('Network unavailable');};
+    await assert.rejects(p.importUnread(),/Network unavailable/);
+    p.settings.outputFolder='';
+    p.authorizationRequired=true;
+    await assert.rejects(p.importUnread(),/Create/);
+});
+
 test('RSS-only runs collect, crawl and write a newsletter without Gmail credentials or reconnection',async()=>{
     for (const stale of [false,true]) {
         const {p,contents,seen}=await newsletterFixture();
@@ -1664,7 +1805,7 @@ test('folder setup, source exclusions and data controls remain available without
     }
     p.busy=false;
     p.settings.outputFolder='';
-    const row=p.settingsTab.getSettingDefinitions().find(group=>group.heading==='Choose where to store your data').items[0];
+    const row=p.settingsTab.getSettingDefinitions().find(group=>group.cls==='text-machine-newsletter').items.find(row=>row.name==='Choose an empty folder');
     const create=buttonFor(row);
     assert.equal(create.text,'Create folder');assert.equal(create.disabled,false);assert.equal(create.cta,true);
 
@@ -2174,17 +2315,26 @@ test('AI cannot return article status changes or unknown IDs to alter the saved 
 });
 
 
-test('forbidden articles alone cannot generate an edition or consume articles',async()=>{
+test('forbidden articles cannot satisfy the threshold and debug sends only their titles to AI',async()=>{
     const {p,contents,entries} = await newsletterFixture();
     p.settings.authorFeeds='';
     p.settings.newsletterLanguage='français';
     const original={...entries[0],title:'How AI changes writing',status:'forbidden',content:'Unverified content must never be sent to AI'};
     contents.set(p.dataPath,JSON.stringify({version:1,articles:[original]}));
-    p.generate=async()=>assert.fail('No AI call without readable articles');
+    p.settings.imageMode='none';
+    p.generate=async(_connection,system,input)=>{
+        assert.ok(system.startsWith('Runtime brief'));
+        assert.deepEqual(JSON.parse(input),[{id:original.id,title:original.title}]);
+        return JSON.stringify({titles:[{id:original.id,title:'L’IA transforme l’écriture',category:'Écriture'}]});
+    };
     p.request = async()=>{throw new Error('No feed needed');};
     p.loadPage = async()=>{throw new Error('Forbidden sources must not be loaded');};
-    await assert.rejects(p.writeNewsletter(),/0.*1/);
+    await assert.rejects(p.writeNewsletter(),/0.*2/);
     assert.equal(contents.size,1);
+    p.settings.debug=true;
+    const note=await p.writeNewsletter();
+    assert.ok(contents.get(note.path).includes('L’IA transforme l’écriture'));
+    assert.ok(!contents.get(note.path).includes('Unverified content'));
     const saved = JSON.parse(contents.get(p.dataPath)).articles[0];
     assert.equal(saved.title,original.title);
     assert.equal(saved.content,original.content);
@@ -2244,8 +2394,9 @@ test('brief translation failures and cancellation preserve the saved edition and
     }
 });
 
-test('Codex receives a separate constrained schema for brief titles without calling the writer',async()=>{
+test('debug uses a separate Codex schema for brief titles without calling the writer',async()=>{
     const {p,contents,entries}=await newsletterFixture();
+    p.settings.debug=true;
     contents.set(p.dataPath,JSON.stringify({version:1,articles:[{...entries[0],status:'forbidden'},entries[1]]}));
     p.settings.newsletterLanguage='English';
     p.getAIConnection=()=>({provider:'codex',model:'fixture'});
@@ -2271,8 +2422,8 @@ test('Codex receives a separate constrained schema for brief titles without call
 test('disabled illustrations skip generation, keys, prompts and cached images',async()=>{
     for (const cached of [false,true]) {
         const {p,contents}=await newsletterFixture();
-        p.settings.generateImages=false;
-        const image='Data/illustrations/text-machine-'+p.newsletter.day()+'.png';
+        p.settings.imageMode='none';
+        const image='Attachments/text-machine-'+p.newsletter.day()+'.png';
         if (cached) await p.app.vault.create(image,'Existing illustration');
         p.getAIKey=()=>assert.fail('Disabled images must not read an image API key');
         p.generateIllustration=async()=>assert.fail('Disabled images must not generate');
@@ -2287,20 +2438,42 @@ test('disabled illustrations skip generation, keys, prompts and cached images',a
     }
 });
 
-test('the image toggle precedes its edit button and persists through reloads',async()=>{
+test('the image selector offers three modes, persists them and enables its prompt only for generation',async()=>{
     const {p}=await fixture();
-    const rows=p.settingsTab.getSettingDefinitions().flatMap(row=>row.items || [row]);
-    const row=rows.find(row=>row.name===p.i18n.t('promptImage'));
-    const order=[];let change;
-    row.render({addToggle:render=>{order.push('toggle');render({toggleEl:{setAttribute(){}},setValue(){return this;},setDisabled(){return this;},onChange(callback){change=callback;return this;}});},
-        addButton:render=>{order.push('edit');render({setButtonText(){return this;},setDisabled(){return this;},onClick(){return this;}});}});
-    assert.deepEqual(order,['toggle','edit']);
-    assert.equal(p.settings.generateImages,true);
-    for (const value of [false,true]) {
+    assert.equal(p.settings.imageMode,'generated');
+    for (const value of ['none','extracted','generated']) {
+        p.settingsTab.redraw=()=>{};
+        const rows=p.settingsTab.getSettingDefinitions().flatMap(row=>row.items || [row]);
+        const row=rows.find(row=>row.name===p.i18n.t('promptImage'));
+        const order=[],options=[];let change,disabled;
+        row.render({addDropdown:render=>{order.push('select');render({selectEl:{setAttribute(){}},
+            addOption(value){options.push(value);return this;},setValue(){return this;},setDisabled(){return this;},onChange(callback){change=callback;return this;}});},
+            addButton:render=>{order.push('edit');render({setButtonText(){return this;},setDisabled(value){disabled=value;return this;},onClick(){return this;}});}});
+        assert.deepEqual(order,['select','edit']);
+        assert.deepEqual(options,['none','extracted','generated']);
+        assert.equal(disabled,p.settings.imageMode!=='generated');
         await change(value);
-        assert.equal(p.savedSettings.generateImages,value);
+        assert.equal(p.savedSettings.imageMode,value);
         await p.onload();
-        assert.equal(p.settings.generateImages,value);
+        assert.equal(p.settings.imageMode,value);
+    }
+});
+
+test('legacy image preferences migrate independently for each newsletter',async()=>{
+    const {p}=await fixture();
+    const profile=p.newsletters[0];
+    const {imageMode,...legacy}=profile;
+    assert.equal(imageMode,'generated');
+    p.savedSettings={...p.settings,generateImages:false,newsletters:[{...legacy,generateImages:false},
+        {...legacy,id:'second',name:'Second',generateImages:true}]};
+    delete p.savedSettings.imageMode;
+    await p.onload();
+    assert.equal(p.settings.imageMode,'none');
+    assert.deepEqual(Array.from(p.newsletters,row=>row.imageMode),['none','generated']);
+    await p.selectNewsletter('second');
+    assert.equal(p.settings.imageMode,'generated');
+    for (const value of ['wrong',false,null]) {
+        assert.throws(()=>require('../../plugin/profiles').readImageMode(value),/invalid/);
     }
 });
 
@@ -2324,7 +2497,7 @@ test('Codex handles both text and images with the same configured model and effo
     p.getAIKey=()=>assert.fail('Codex must not read a separate image API key');
     p.generateIllustration=async()=>assert.fail('Codex images must not call the cloud image API');
     const note=await p.writeNewsletter();
-    assert.equal(images,1);assert.ok(contents.get(note.path).includes('](illustrations/'));
+    assert.equal(images,1);assert.ok(contents.get(note.path).includes('](Attachments/'));
 });
 
 test('the illustration is generated from the revised article without loading source photographs',async()=>{
@@ -2352,10 +2525,10 @@ test('the illustration is generated from the revised article without loading sou
         return new ArrayBuffer(8);
     };
     const note=await p.writeNewsletter();
-    const image='illustrations/'+note.name.replace(/\.md$/,'.png');
+    const image='Attachments/'+note.name.replace(/\.md$/,'.png');
     assert.equal(images,1);
     assert.ok(contents.get(note.path).includes('![A synthesis]('+image+')'));
-    assert.ok(contents.has('Data/'+image));
+    assert.ok(contents.has(image));
 });
 
 test('source photographs do not constrain the article or provide the illustration',async()=>{
@@ -2367,7 +2540,7 @@ test('source photographs do not constrain the article or provide the illustratio
     const note=await p.writeNewsletter();
     const markdown=contents.get(note.path);
     assert.ok(markdown.includes('First paragraph.'));
-    assert.ok(markdown.includes('](illustrations/'+note.name.replace(/\.md$/,'.png')+')'));
+    assert.ok(markdown.includes('](Attachments/'+note.name.replace(/\.md$/,'.png')+')'));
     assert.ok(!markdown.includes('Source caption'));
     assert.ok(!markdown.includes('source.jpg'));
 });
@@ -2386,7 +2559,7 @@ test('the existing daily illustration is reused without image generation, decodi
     let images=0;
     p.generateIllustration=async()=>{images++;return new ArrayBuffer(8);};
     const note=await p.writeNewsletter();
-    const image='Data/illustrations/'+note.name.replace(/\.md$/,'.png');
+    const image='Attachments/'+note.name.replace(/\.md$/,'.png');
     const before=contents.get(image);
     p.getAIKey=()=>{throw new Error('No image key should be read for a cached illustration');};
     p.createIllustration=async()=>{throw new Error('A cached image must not be rendered again');};
@@ -2395,6 +2568,22 @@ test('the existing daily illustration is reused without image generation, decodi
     assert.equal(images,1);
     assert.equal(contents.get(image),before);
     assert.equal([...contents.keys()].filter(path=>path.endsWith('.png')).length,1);
+});
+
+test('existing daily attachments remain reusable through Markdown and wiki embeds',async()=>{
+    for (const wiki of [false,true]) {
+        const {p,contents}=await newsletterFixture();
+        const name='text-machine-'+p.newsletter.day(),image='Data/illustrations/'+name+'.png';
+        await p.app.vault.create(image,'Existing daily image');
+        await p.app.vault.create('Data/'+name+'.md','# Existing\n\n'+(wiki
+            ? '![[illustrations/'+name+'.png|Caption]]' : '![Caption](illustrations/'+name+'.png)'));
+        p.generateIllustration=()=>assert.fail('Reuse the existing daily image');
+        p.app.fileManager.getAvailablePathForAttachment=()=>assert.fail('No new attachment is needed');
+        const note=await p.writeNewsletter();
+        assert.ok(contents.get(note.path).includes(']('+image+')'));
+        assert.equal(contents.get(image),'Existing daily image');
+        assert.equal([...contents.keys()].filter(path=>path.endsWith('.png')).length,1);
+    }
 });
 
 test('cancelling image generation prevents any late note or status write',async()=>{
@@ -2445,7 +2634,7 @@ test('settings definitions are searchable without IO and redraw uses the declara
     const tab=p.settingsTab;
     const definitions=tab.getSettingDefinitions();
     const rows=definitions.flatMap(item=>item.items || [item]);
-    for (const key of ['newsletterLanguage','minimumSources','newsletterSourcesHeading','referenceSources','includeFeeds','authorFeeds','aiDefaultModel','aiAnthropicKey','aiOpenaiKey']) {
+    for (const key of ['newsletterLanguage','commentedArticles','newsletterSourcesHeading','referenceSources','includeFeeds','authorFeeds','aiDefaultModel','aiAnthropicKey','aiOpenaiKey']) {
         assert.ok(rows.some(row=>row.name===p.i18n.t(key) && row.searchable!==false),key);
     }
     let updates=0;
@@ -2573,20 +2762,50 @@ test('execution timer spans collection and AI, freezes on completion and cleans 
 test('settings show the configured folder path and invite creation only when no data folder exists',async()=>{
     const {p}=await newsletterFixture();
     let groups=p.settingsTab.getSettingDefinitions();
-    let group=groups.find(row=>row.heading==='Data folder');
+    let group=groups.find(row=>row.cls==='text-machine-newsletter');
     assert.ok(group);
-    assert.equal(group.items[0].name,'Data');
+    const folderRow=group.items.find(row=>row.name==='Data');
+    assert.ok(folderRow);
+    assert.ok(group.items.some(row=>row.name==='Data folder'));
     assert.ok(!group.items.some(row=>row.name==='Choose an empty folder'));
-    assert.ok(!group.items.some(row=>['Data','Reset JSON'].includes(row.name) && row!==group.items[0]));
+    assert.ok(!group.items.some(row=>['Data','Reset JSON'].includes(row.name) && row!==folderRow));
     p.settings.debug=true;
-    const debugGroup=p.settingsTab.getSettingDefinitions().find(row=>row.heading==='Data folder');
-    assert.ok(debugGroup.items.some(row=>row.name==='Data' && row!==debugGroup.items[0]));
+    const debugGroup=p.settingsTab.getSettingDefinitions().find(row=>row.cls==='text-machine-newsletter');
+    assert.equal(debugGroup.items.filter(row=>row.name==='Data').length,2);
     assert.ok(debugGroup.items.some(row=>row.name==='Reset JSON'));
     p.settings.debug=false;
     p.settings.outputFolder='';
     groups=p.settingsTab.getSettingDefinitions();
-    group=groups.find(row=>row.heading==='Choose where to store your data');
-    assert.equal(group.items[0].name,'Choose an empty folder');
+    group=groups.find(row=>row.cls==='text-machine-newsletter');
+    assert.ok(group.items.some(row=>row.name==='Choose where to store your data'));
+    assert.ok(group.items.some(row=>row.name==='Choose an empty folder'));
+});
+
+test('newsletter settings share one named panel below the selector while debug stays global',async()=>{
+    const {p}=await newsletterFixture();
+    const first=p.settings.activeNewsletter;
+    await p.createNewsletter('Second newsletter');
+    for (const id of [first,p.settings.activeNewsletter]) {
+        await p.selectNewsletter(id);
+        const definitions=p.settingsTab.getSettingDefinitions();
+        const heading=definitions.findIndex(row=>row.name===p.i18n.t('newslettersHeading'));
+        assert.equal(definitions[heading].desc,p.i18n.t('newsletterChoiceDescription'));
+        assert.equal(definitions[heading+1].name,'');
+        assert.equal(definitions[heading+1].desc,undefined);
+        const panel=definitions[heading+2];
+        assert.equal(panel.cls,'text-machine-newsletter');
+        assert.equal(panel.heading,p.i18n.t('selectedNewsletterHeading',{name:p.newsletters.find(row=>row.id===id).name}));
+        assert.equal(panel.items[0].name,p.i18n.t(p.dataReady ? 'journalFolder' : 'folderHeading'));
+        const writer=panel.items.findIndex(row=>row.name===p.i18n.t('promptWriter'));
+        assert.equal(panel.items[writer+1].name,p.i18n.t('commentedArticles'));
+        assert.ok(panel.items[writer+1].desc.includes('{{commentedArticles}}'));
+        for (const key of ['gmailLabel','newsletterLanguage','commentedArticles','referenceSources','includeFeeds','authorFeeds','promptSelection','promptWriter','promptBrief','promptRewriter','promptPublisher','promptImage','newsletterTemplate'])
+            assert.ok(panel.items.some(row=>row.name===p.i18n.t(key)),key);
+        for (const key of ['debug','activeNewsletter','emailAddress','aiDefaultModel'])
+            assert.ok(!panel.items.some(row=>row.name===p.i18n.t(key)),key);
+        assert.equal(definitions.at(-1).name,p.i18n.t('debug'));
+        assert.ok(!('type' in definitions.at(-1)));
+    }
 });
 
 test('moving the data folder uses Obsidian rename and preserves all files and their contents',async()=>{
@@ -2652,18 +2871,18 @@ test('debug collection leaves mail unread, deduplicates repeated runs and normal
     assert.equal(JSON.parse(contents.get(p.dataPath)).articles.length,4);
 });
 
-test('debug newsletters bypass the minimum and preserve real editions, images and article usage',async()=>{
+test('debug newsletters preserve real editions, images and article usage while keeping the writing target',async()=>{
     const {p,contents,seen}=await newsletterFixture();
-    p.settings.minimumSources=10;
+    p.settings.commentedArticles=10;
     p.settings.debug=true;
     const day=p.newsletter.day(),real='Data/text-machine-'+day+'.md';
-    const realImage='Data/illustrations/text-machine-'+day+'.png';
+    const realImage='Attachments/text-machine-'+day+'.png';
     await p.app.vault.create(real,'# Real newsletter');
     await p.app.vault.create(realImage,'Real illustration');
     const before=contents.get(p.dataPath);
     const note=await p.writeNewsletter();
     assert.equal(note.path,'Data/test-text-machine-'+day+'.md');
-    assert.ok(contents.get(note.path).includes('illustrations/test-text-machine-'+day+'.png'));
+    assert.ok(contents.get(note.path).includes('Attachments/test-text-machine-'+day+'.png'));
     assert.equal(contents.get(real),'# Real newsletter');
     assert.equal(contents.get(realImage),'Real illustration');
     assert.equal(contents.get(p.dataPath),before);
@@ -2671,16 +2890,18 @@ test('debug newsletters bypass the minimum and preserve real editions, images an
     assert.equal(contents.get(p.dataPath),before);
     assert.ok(seen.every(context=>context.previousNewsletters.every(note=>!note.name.startsWith('test-'))));
     p.settings.debug=false;
-    await assert.rejects(p.writeNewsletter(),/at least 10 required/);
-    p.settings.minimumSources=1;
+    await assert.rejects(p.writeNewsletter(),/2.*10/);
+    assert.equal(contents.get(p.dataPath),before);
+    p.settings.commentedArticles=2;
     assert.equal((await p.writeNewsletter()).path,real);
+    assert.equal(seen.at(-1).commentedArticles,2);
     assert.notEqual(contents.get(p.dataPath),before);
 });
 
 test('debug selection discards remain repeatable without recording statuses',async()=>{
     const {p,contents}=await newsletterFixture();
     p.settings.debug=true;
-    p.settings.minimumSources=10;
+    p.settings.commentedArticles=10;
     const before=contents.get(p.dataPath);
     p.generate=async(_connection,_system,input)=>JSON.stringify({brief:[], selected:[],discard:JSON.parse(input).articles.map(article=>article.id)});
     assert.equal(await p.writeNewsletter(),null);

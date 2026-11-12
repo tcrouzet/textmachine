@@ -12,7 +12,7 @@
   "properties": {
     "selected": {
       "type": "array",
-      "description": "IDs des sources dont les faits ou le désaccord peuvent se comprendre en quelques phrases sans préalables spécialisés. Au moins deux publications distinctes ; 3 à 5 sources si leur qualité le permet. Liste vide si aucune RP à plusieurs voix n’est possible.",
+      "description": "IDs des sources dont les faits ou le désaccord peuvent se comprendre en quelques phrases sans préalables spécialisés. Vise le nombre d’articles demandé, issus d’au moins deux publications distinctes, si leur qualité le permet. Liste vide si aucune RP à plusieurs voix n’est possible.",
       "items": {
         "type": "integer",
         "minimum": 1

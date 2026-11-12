@@ -2,11 +2,17 @@ import {t} from './i18n';
 import {NewsletterProfile,NewsletterSettings,Settings,record} from './types';
 
 export const newsletterDefaults: NewsletterSettings={labelId:'',outputFolder:'',excludedSources:'',newsletterLanguage:'français',
-    minimumSources:10,referenceSources:'',includeFeeds:'',authorFeeds:'',generateImages:true};
+    commentedArticles:3,referenceSources:'',includeFeeds:'',authorFeeds:'',imageMode:'generated'};
+
+export function readImageMode(value: unknown, legacy?: unknown): NewsletterSettings['imageMode'] {
+    if (value===undefined) return legacy===false ? 'none' : 'generated';
+    if (value==='none' || value==='extracted' || value==='generated') return value;
+    throw new Error(t('invalidNewsletters'));
+}
 
 export function newsletterValues(settings: NewsletterSettings): NewsletterSettings {
-    const {labelId,outputFolder,excludedSources,newsletterLanguage,minimumSources,referenceSources,includeFeeds,authorFeeds,generateImages}=settings;
-    return {labelId,outputFolder,excludedSources,newsletterLanguage,minimumSources,referenceSources,includeFeeds,authorFeeds,generateImages};
+    const {labelId,outputFolder,excludedSources,newsletterLanguage,commentedArticles,referenceSources,includeFeeds,authorFeeds,imageMode}=settings;
+    return {labelId,outputFolder,excludedSources,newsletterLanguage,commentedArticles,referenceSources,includeFeeds,authorFeeds,imageMode};
 }
 
 export function newsletterProfiles(settings: Settings): NewsletterProfile[] {
@@ -18,12 +24,14 @@ export function readProfiles(value: unknown, legacy: NewsletterSettings): Newsle
     if (!Array.isArray(value) || !value.length) throw new Error(t('invalidNewsletters'));
     const profiles: NewsletterProfile[]=[],ids=new Set<string>();
     for (const entry of value) {
-        const row=record(entry);
+        const row={...record(entry)};
+        if (row.commentedArticles===undefined) row.commentedArticles=newsletterDefaults.commentedArticles;
+        row.imageMode=readImageMode(row.imageMode,row.generateImages);
         if (typeof row.id!=='string' || !row.id.trim() || ids.has(row.id) || typeof row.name!=='string' || !row.name.trim()) throw new Error(t('invalidNewsletters'));
         for (const key of Object.keys(newsletterDefaults) as (keyof NewsletterSettings)[]) {
             if (typeof row[key]!==typeof newsletterDefaults[key]) throw new Error(t('invalidNewsletters'));
         }
-        if (!Number.isSafeInteger(row.minimumSources) || Number(row.minimumSources)<1) throw new Error(t('invalidNewsletters'));
+        if (!Number.isSafeInteger(row.commentedArticles) || Number(row.commentedArticles)<2) throw new Error(t('invalidNewsletters'));
         if (row.prompts!==undefined && (typeof row.prompts!=='object' || row.prompts===null || Array.isArray(row.prompts)
             || Object.values(row.prompts).some(text=>typeof text!=='string'))) throw new Error(t('invalidNewsletters'));
         const profile={id:row.id,name:row.name,...newsletterValues(row as unknown as NewsletterSettings),
