@@ -154,6 +154,23 @@ test('unread listing paginates within the chosen label and accepts empty mailbox
     await assert.rejects(async () => { for await (const id of client.unreadMessages('Label_1')) assert.fail(id); }, /Pagination/);
 });
 
+test('cancelled unread listing does not fetch another page or yield stale mail IDs',async()=>{
+    for (const alreadyCancelled of [false,true]) {
+        const client=new GmailClient(credentials,()=>{},()=>{}),controller=new AbortController();
+        let entered,release,calls=0;
+        const started=new Promise(resolve=>{entered=resolve;}),page=new Promise(resolve=>{release=resolve;});
+        client.get=async()=>{calls++;entered();return page;};
+        if (alreadyCancelled) controller.abort();
+        const pending=client.unreadMessages('Label_1',controller.signal).next();
+        if (!alreadyCancelled) {
+            await started;controller.abort();
+            release({messages:[{id:'late'}],nextPageToken:'another-page'});
+        }
+        await assert.rejects(pending,/annulée/);
+        assert.equal(calls,alreadyCancelled ? 0 : 1);
+    }
+});
+
 test('decodes nested MIME bodies and external text bodies, ignores file attachments', async () => {
     const client = new GmailClient(credentials, () => {}, () => {});
     const encode = text => Buffer.from(text).toString('base64url');

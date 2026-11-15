@@ -178,15 +178,17 @@ class GmailClient {
         });
     }
 
-    async *unreadMessages(labelId: string) {
+    async *unreadMessages(labelId: string, signal?: AbortSignal) {
         if (!labelId) throw new Error(t('selectGmailLabel'));
         let pageToken = '';
         const pages = new Set<string>();
         const ids = new Set<string>();
         do {
+            if (signal?.aborted) throw new Error(t('newsletterCancelled'));
             const query = new URLSearchParams({ labelIds: labelId, q: 'is:unread', maxResults: '500' });
             if (pageToken) query.set('pageToken', pageToken);
             const page = await this.get('messages?' + query.toString());
+            if (signal?.aborted) throw new Error(t('newsletterCancelled'));
             if (!page || (page.messages !== undefined && !Array.isArray(page.messages))) {
                 throw new Error(t('invalidMessages'));
             }

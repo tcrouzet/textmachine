@@ -30,7 +30,7 @@
               "null"
             ],
             "minLength": 1,
-            "description": "Titre de presse descriptif et compréhensible pour un lecteur non spécialiste, fidèle au sujet. Remplacer les jeux de mots et allusions obscures par une formulation directe. Jargon clarifié, acteurs identifiés par leur rôle si leur nom est peu connu. Obligatoire pour les IDs confirmés pertinents. Pour les autres seulement : null si hors sujet ou trop incertain."
+            "description": "Titre de presse clair, fidèle au sujet et traduit dans la langue demandée. Acteurs identifiés par leur rôle si nécessaire. Null si le lien avec la création littéraire ou les métiers du livre et l’IA est absent ou incertain, même pour un article déjà sélectionné."
           },
           "category": {
             "type": [
@@ -38,7 +38,7 @@
               "null"
             ],
             "minLength": 1,
-            "description": "Catégorie thématique courte dans la langue demandée. Réutiliser exactement le même libellé pour les titres du même thème. Null uniquement si title est null."
+            "description": "Pour tout article retenu dont le texte d’origine est en français : exactement Le coin francophone, indépendamment de son thème. Pour les autres : catégorie thématique courte dans la langue demandée, identique pour les titres du même thème. Se baser sur le titre et l’extrait avant traduction pour reconnaître le français. Null uniquement si title est null."
           }
         }
       }

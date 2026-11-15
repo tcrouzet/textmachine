@@ -12,7 +12,7 @@
   "properties": {
     "selected": {
       "type": "array",
-      "description": "IDs des sources dont les faits ou le désaccord peuvent se comprendre en quelques phrases sans préalables spécialisés. Vise le nombre d’articles demandé, issus d’au moins deux publications distinctes, si leur qualité le permet. Liste vide si aucune RP à plusieurs voix n’est possible.",
+      "description": "IDs des articles apportant des faits, expériences ou analyses précises sur le rapport entre IA et littérature. Une mention accessoire ou une opinion générale sur l’IA ne suffit pas. Classer par intérêt décroissant pour la pratique littéraire et par solidité des sources ; favoriser les sources de référence et les publications reconnues. Vise le nombre demandé, avec au moins deux publications distinctes. Liste vide si aucune RP substantielle à plusieurs voix n’est possible.",
       "items": {
         "type": "integer",
         "minimum": 1
@@ -20,7 +20,7 @@
     },
     "brief": {
       "type": "array",
-      "description": "IDs des nouvelles pertinentes secondaires ou trop limitées pour la RP, ainsi que des analyses ou débats exigeant trop de contexte pour une RP courte.",
+      "description": "IDs des nouvelles secondaires avec un apport réel sur l’IA et la littérature. Exclure aussi d’ici les entretiens littéraires raccrochés à l’IA par une opinion générale, sans information substantielle.",
       "items": {
         "type": "integer",
         "minimum": 1

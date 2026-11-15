@@ -10,6 +10,19 @@ const template = fs.readFileSync(path.join(__dirname,'../../models/newsletter.md
 const article = (slug, extra = {}) => ({date:'2026-11-03',title:slug,url:'https://example.com/'+slug,source:'User',authors:[],status:'',usedAt:'',publish:'2026-11-01',content:'An article about AI and books.',image:'',...extra});
 const articles = [article('a',{id:1,image:'https://example.com/image.jpg',imageCaption:'Original caption'}),article('b',{id:2})];
 
+test('unresolved short links cannot be cited in the review or the brief',()=>{
+    const short=article('short',{id:3,url:'https://flip.it/MtZqB9'});
+    assert.deepEqual(availableArticles(JSON.stringify({version:1,articles:[short]})),[]);
+    assert.deepEqual(briefArticles(JSON.stringify({version:1,articles:[{...short,status:'forbidden'}]})),[]);
+});
+
+test('cached navigation pages cannot qualify as full articles or brief items',()=>{
+    const sources=['https://linguistlist.org/','https://example.com/forums/','https://example.com/novel-analysis'].map((url,i)=>article('Source '+i,{id:i+1,url}));
+    const database=articles=>JSON.stringify({version:1,articles});
+    assert.deepEqual(availableArticles(database(sources)).map(source=>source.id),[3]);
+    assert.deepEqual(briefArticles(database(sources.map(source=>({...source,status:'forbidden'})))).map(source=>source.id),[3]);
+});
+
 test('selection and writing receive the configured article target even in customized prompts',()=>{
     const prompt='{"articles":{{articles}},"count":{{commentedArticles}}}';
     for (const count of [2,3,7]) {
@@ -22,6 +35,34 @@ test('selection and writing receive the configured article target even in custom
     }
 });
 
+test('the editorial priority order chosen during selection reaches the writer unchanged',()=>{
+    const candidates=[article('incident',{id:1}),article('practice',{id:2}),article('interview',{id:3})];
+    const choice=parseSelection(JSON.stringify({selected:[3,2,1],brief:[],discard:[]}),candidates);
+    assert.deepEqual(choice.selected.map(article=>article.id),[3,2,1]);
+    const request=writerRequest('{{articles}}',choice.selected,[],[],'français');
+    assert.deepEqual(JSON.parse(request.input).map(article=>article.id),[3,2,1]);
+    assert.deepEqual(candidates.map(article=>article.id),[1,2,3]);
+});
+
+test('title screening sends only bounded titles and URLs with a strict ID schema, without article content or state',()=>{
+    const {titleRequest}=require('../../plugin/newsletter');
+    const candidates=[article('Title',{id:41,title:'x'.repeat(2000),url:'https://example.com/article?q='+'x'.repeat(3000),privateNotes:'Private',content:'Private cached body'})];
+    const before=JSON.stringify(candidates);
+    const request=titleRequest('{{articles}}',candidates,'français');
+    const rows=JSON.parse(request.input);
+    assert.deepEqual(Object.keys(rows[0]).sort(),['id','title','url']);
+    assert.equal(rows[0].title.length,500);assert.equal(rows[0].url.length,2048);
+    assert.ok(!request.input.includes('Private'));
+    assert.deepEqual(request.schema.required,['selected','brief','discard']);
+    for (const key of request.schema.required) assert.deepEqual(request.schema.properties[key].items.enum,[41]);
+    assert.deepEqual(parseSelection(JSON.stringify({selected:[],brief:[41],discard:[]}),candidates).brief,candidates);
+    assert.throws(()=>titleRequest('',candidates,'français'),/titres.md/);
+    assert.throws(()=>titleRequest('Filter titles',candidates,'français'),/\{\{articles\}\}/);
+    assert.throws(()=>titleRequest('{{articles}} {{unknown}}',candidates,'français'),/Unknown prompt variable/);
+    assert.equal(JSON.stringify(candidates),before);
+    assert.ok(!Object.hasOwn(require('../../models/titres.json').properties.selected.items,'enum'));
+});
+
 test('source thumbnails follow their cited paragraphs and keep their complete captions in image Markdown',()=>{
     const paragraphs=['First cited paragraph.','Second cited paragraph.','Last cited paragraph.'];
     const newsletter={title:'Review',chapeau:'Introduction',paragraphs,image:null,used:[articles[0].url,articles[1].url],discard:[],
@@ -29,11 +70,20 @@ test('source thumbnails follow their cited paragraphs and keep their complete ca
             {paragraph:0,url:'https://images.example/other.jpg',source:articles[1].url,caption:'Another source'},
             {paragraph:2,url:'https://images.example/last.jpg',source:articles[1].url,caption:'Last source'}]};
     const text=renderNewsletter(template,newsletter);
+    assert.ok(!text.includes('[example.com](https://example.com/a)'), 'The source link belongs on the image, without a separate source line');
     const first='[![Original \\[caption\\]. Photo: Author / Agency.](https://images.example/first%28photo%29.jpg)](https://example.com/a)';
     assert.ok(text.includes(paragraphs[0]+'\n\n'+first+'\n\n[![Another source]'));
+    assert.equal(text.split('Photo: Author / Agency.').length-1,1);
     assert.ok(text.includes(paragraphs[2]+'\n\n[![Last source]'));
     assert.equal(text.split(first).length,2);
     assert.deepEqual(newsletter.paragraphs,paragraphs);
+});
+test('source thumbnails without a caption are never rendered',()=>{
+    const newsletter={...result,paragraphImages:[{paragraph:0,url:'https://images.example/empty.jpg',source:articles[0].url,caption:''},
+        {paragraph:0,url:'https://images.example/blank.jpg',source:articles[0].url,caption:' \n '}]};
+    const text=renderNewsletter(template,newsletter);
+    assert.ok(!text.includes('!['));
+    assert.ok(text.includes(result.paragraphs[0]));
 });
 const data = JSON.stringify({version:1,notes:'Keep notes',articles});
 const prompt = '{"instructions":"Editorial instructions","language":"{{language}}","articles":{{articles}},"previousNewsletters":{{previousNewsletters}},"recentPosts":{{recentPosts}}}';
@@ -146,6 +196,27 @@ test('writer gets JSON requirements and editorial context without the Markdown t
     assert.equal(context.recentPosts[0].title,'Latest blog post');
     assert.throws(()=>writerRequest('',articles,[],[]),/writer.md/);
 });
+
+test('selection and writing identify the publication separately from email or feed provenance',()=>{
+    const source=article('Literary reporting',{id:41,url:'https://www.theatlantic.com/books/article/',source:'User (inferred)'});
+    const before=JSON.stringify(source);
+    for (const request of [selectionRequest('{{articles}}',[source],'français'),writerRequest('{{articles}}',[source],[],[],'français')]) {
+        const row=JSON.parse(request.input)[0];
+        assert.equal(row.publication,'theatlantic.com');
+        assert.equal(row.source,'User (inferred)');
+        assert.equal(row.url,source.url);
+    }
+    assert.equal(JSON.stringify(source),before);
+});
+test('hosted blogs retain their subdomain in source links and editorial inputs',()=>{
+    const source=article('Prix Pascal',{id:42,url:'https://mastereditionstrasbourg.wordpress.com/2026/11/11/prix-pascal-le-pere-de-la-pascaline-devient-le-parrain-de-la-litterature-ia/'});
+    for (const request of [selectionRequest('{{articles}}',[source],'français'),writerRequest('{{articles}}',[source],[],[],'français')]) {
+        assert.equal(JSON.parse(request.input)[0].publication,'mastereditionstrasbourg.wordpress.com');
+    }
+    const markdown=renderNewsletter(template,result,[source]);
+    assert.ok(markdown.includes('[mastereditionstrasbourg.wordpress.com](https://mastereditionstrasbourg.wordpress.com/)'));
+    assert.ok(!markdown.includes('[wordpress.com](https://wordpress.com/)'));
+});
 test('selection classifies every article once and rejects invented sources or extra fields',()=>{
     const answer={brief:[], selected:[1],discard:[2]};
     const normalized=parseSelection(JSON.stringify(answer),articles);
@@ -192,7 +263,7 @@ test('translated brief titles are rendered without changing original article tit
     const markdown=renderNewsletter(template,result,translated);
     assert.ok(markdown.includes('* [Título traducido](https://example.com/a) - [example.com](https://example.com/)'));
     const subdomain=renderNewsletter(template,result,[{title:'Research [results]',url:'https://news.example.co.uk/article?q=1#section',source:'Google Alerts'}]);
-    assert.ok(subdomain.includes('* [Research \\[results\\]](https://news.example.co.uk/article?q=1#section) - [example.co.uk](https://example.co.uk/)'));
+    assert.ok(subdomain.includes('* [Research \\[results\\]](https://news.example.co.uk/article?q=1#section) - [news.example.co.uk](https://news.example.co.uk/)'));
     assert.ok(!subdomain.includes('Google Alerts'));
     assert.equal(articles[0].title,'a');
     for (const title of ['',{},false,0]) {
@@ -208,7 +279,7 @@ test('brief categories preserve every retained link and group related items in t
         {id:1,title:'Un roman',category:'Création'},
         {id:4,title:'Une étude',category:'Recherche'},
         {id:3,title:'Un autre roman',category:'Création'},
-    ]}),sources,sources);
+    ]}),sources);
     assert.deepEqual(translated.map(article=>article.id),[2,1,4,3]);
     const markdown=renderNewsletter(template,result,translated);
     assert.equal((markdown.match(/#### Création/g) || []).length,1);
@@ -219,6 +290,33 @@ test('brief categories preserve every retained link and group related items in t
     const briefOnly=renderNewsletter(template,{title:'',chapeau:'',paragraphs:[],image:null,used:[],discard:[]},translated);
     assert.ok(briefOnly.includes('## Outils'));
     assert.ok(!briefOnly.includes('#### Outils'));
+});
+
+test('the French-language corner leads the brief without duplicate rows, and only readable full texts get a marker',()=>{
+    const sources=[
+        article('English source',{id:1,category:'Outils'}),
+        article('Premier texte français',{id:2,category:'Le coin francophone'}),
+        article('Another English source',{id:3,category:'Édition',content:''}),
+        article('Autre texte français',{id:4,category:'Le coin francophone',status:'forbidden',content:'Unverified cached text'}),
+        article('Empty text',{id:5,category:'Outils',content:'  '}),
+    ].map((source,index)=>({...source,url:'https://example.com/brief-'+index}));
+    const before=JSON.stringify(sources);
+    for (const newsletter of [result,{...empty,discard:[]}]) {
+        const markdown=renderNewsletter(template,newsletter,sources);
+        assert.ok(markdown.indexOf('Le coin francophone')<markdown.indexOf('Outils'));
+        assert.ok(markdown.indexOf('Le coin francophone')<markdown.indexOf('Édition'));
+        assert.equal(markdown.split('Le coin francophone').length-1,1);
+        for (const source of sources) {
+            const line=markdown.split('\n').find(line=>line.startsWith('* [') && line.includes(']('+source.url+')'));
+            assert.ok(line);
+            assert.equal(line.endsWith(' ⊞'),source.status==='' && !!source.content.trim());
+            assert.equal(markdown.split(']('+source.url+')').length-1,1);
+        }
+    }
+    assert.equal(JSON.stringify(sources),before);
+    assert.ok(!renderNewsletter(template,result,[sources[0]]).includes('Le coin francophone'));
+    const custom='# {{title}}\n\n{{#brief}}{{heading}}\n{{#articles}}[{{title}}]({{url}}){{/articles}}{{/brief}}';
+    assert.ok(renderNewsletter(custom,result,[sources[1]]).includes(']('+sources[1].url+') ⊞'));
 });
 
 test('brief categories are mandatory for retained titles and null only for rejected titles',()=>{
@@ -335,7 +433,8 @@ test('AI input uses stored IDs and excludes persistent state, images and private
     const original = [{...articles[0],image,status:'used',usedAt:'2026-11-03',privateNotes:'Do not send'}];
     const before = JSON.stringify(original);
     const input = JSON.parse(writerRequest(prompt,original,[],[]).input);
-    assert.deepEqual(Object.keys(input.articles[0]),['id','title','url','source','authors','publish','content']);
+    assert.deepEqual(Object.keys(input.articles[0]),['id','title','url','publication','source','authors','publish','content']);
+    assert.equal(input.articles[0].publication,'example.com');
     assert.equal(input.articles[0].id,1);
     assert.ok(!Object.hasOwn(input.articles[0],'hasImage'));
     assert.equal(JSON.stringify(original),before);
@@ -386,7 +485,7 @@ test('brief translation receives bounded context only from readable articles wit
     const readable={...articles[0],title:'Making documentation pages agent friendly',content:'Agents need readable documentation. '.repeat(100),privateNotes:'Private annotation'};
     const blocked={...articles[1],status:'forbidden',content:'Unverified content must never be used'};
     const before=JSON.stringify([readable,blocked]);
-    const request=briefRequest('Brief in {{language}}',[readable,blocked],'français',[readable]);
+    const request=briefRequest('Brief in {{language}}',[readable,blocked],'français');
     assert.deepEqual(JSON.parse(request.input),[
         {id:readable.id,title:readable.title,context:readable.content.slice(0,2000)},
         {id:blocked.id,title:blocked.title},
@@ -439,7 +538,7 @@ test('forbidden articles appear only as translated linked titles in the brief se
 
 test('source photo availability does not change the selected source or provide the illustration',()=>{
     const parsed=parseSelection(JSON.stringify({brief:[], selected:[2,1],discard:[]}),articles);
-    assert.deepEqual(parsed.selected.map(article=>article.url),articles.map(article=>article.url));
+    assert.deepEqual(parsed.selected.map(article=>article.url),[articles[1].url,articles[0].url]);
     const input=JSON.parse(writerRequest(prompt,parsed.selected,[],[]).input);
     assert.ok(input.articles.every(article=>!Object.hasOwn(article,'image')));
     assert.ok(!renderNewsletter(template,result).includes('!['));
@@ -465,6 +564,14 @@ test('the writer identifies supplied sources actually used without returning sta
     for (const invalid of [{paragraphs},{paragraphs,used:[99]},{paragraphs,used:[1,1]},{paragraphs,used:['1']},
         {paragraphs,used:[]},{paragraphs:[],used:[1]},{paragraphs,used:[1],status:'used'}])
         assert.throws(()=>parseWriter(JSON.stringify(invalid),articles),/Invalid AI response/);
+});
+
+test('the requested commented-article minimum counts cited articles rather than claimed IDs',()=>{
+    const sources=[articles[0],{...articles[1],url:'https://second.example/article'},article('third',{id:3,url:'https://third.example/article'})];
+    const paragraphs=['A finding from [one publication]('+sources[0].url+').','Another from [a second publication]('+sources[1].url+').'];
+    assert.throws(()=>parseWriter(JSON.stringify({paragraphs,used:[1,2,3]}),sources,3),/2.*3/);
+    paragraphs.push('A third finding from [a third publication]('+sources[2].url+').');
+    assert.deepEqual(parseWriter(JSON.stringify({paragraphs,used:[1,2,3]}),sources,3).used,sources);
 });
 
 test('stored article IDs stay the same in the AI input and resolve independently of their position',()=>{
@@ -545,15 +652,16 @@ test('selection batching retains secondary articles from every batch and the fin
     assert.deepEqual(result.discard,[]);
 });
 
-test('confirmed relevant brief articles must all survive translation while blocked off-topic titles may be rejected',()=>{
+test('brief filtering can reject readable and blocked off-topic articles but must classify every ID',()=>{
     const blocked=article('Blocked',{id:3,status:'forbidden',content:''});
-    const pool=[...articles,blocked],request=briefRequest('Brief {{language}}',pool,'français',articles);
-    assert.ok(request.system.includes('1, 2'));
+    const pool=[...articles,blocked];
     const answer={titles:[{id:1,title:'Premier titre',category:'Écriture'},{id:2,title:'Autre nouvelle',category:'Écriture'},{id:3,title:null,category:null}]};
-    assert.deepEqual(parseBrief(JSON.stringify(answer),pool,articles).map(row=>row.id),[1,2]);
+    assert.deepEqual(parseBrief(JSON.stringify(answer),pool).map(row=>row.id),[1,2]);
     answer.titles[1].title=null;
     answer.titles[1].category=null;
-    assert.throws(()=>parseBrief(JSON.stringify(answer),pool,articles),/incomplete or invalid/);
+    assert.deepEqual(parseBrief(JSON.stringify(answer),pool).map(row=>row.id),[1]);
+    answer.titles.pop();
+    assert.throws(()=>parseBrief(JSON.stringify(answer),pool),/incomplete or invalid/);
 });
 
 test('the introduction has a mandatory 35-word maximum, including French nonbreaking spaces',()=>{

@@ -48,7 +48,16 @@ try:
         print('Plugin:', page.evaluate('JSON.stringify({loaded:!!app.plugins.plugins["text-machine"],secretStorage:!!app.secretStorage})'), flush=True)
         print('Load result:', page.evaluate('async () => { await app.plugins.setEnable(true); await app.plugins.loadManifests(); await app.plugins.loadPlugin("text-machine"); return !!app.plugins.plugins["text-machine"]; }'), flush=True)
         assert page.evaluate('!!app.plugins.plugins["text-machine"]')
-        page.evaluate("() => { const p = app.plugins.plugins['text-machine']; p.codex = {...p.codex, findCodex:async () => null}; p.writeNewsletter = async () => null; }")
+        page.evaluate(r"""() => {
+            const p=app.plugins.plugins['text-machine'];
+            p.generate=async(_connection,system)=>{
+                if (!system.includes(p.i18n.t('titleFilterContract'))) throw new Error('Unexpected AI request');
+                const schema=JSON.parse(system.split('\n\n').at(-1)).jsonSchema;
+                return JSON.stringify({selected:schema.properties.selected.items.enum,brief:[],discard:[]});
+            };
+            p.codex={...p.codex,findCodex:async()=>null,generate:async(_executable,system)=>p.generate(null,system)};
+            p.writeNewsletter=async()=>null;
+        }""")
         page.evaluate('() => { app.setting.open(); app.setting.openTabById("text-machine"); }')
         page.get_by_role('button', name='Connecter', exact=True).wait_for()
         icon = page.locator('.vertical-tab-nav-item[data-setting-id="text-machine"] .vertical-tab-nav-item-icon')
@@ -70,6 +79,7 @@ try:
 
         icon.locator('..').screenshot(path=str(temporary / 'settings-icon.png'))
         for index, (filename, label) in enumerate([
+            ('titres.md', 'Titres avant lecture'),
             ('sélection.md', 'Sélection des sources'), ('writer.md', 'Rédaction de l’article'),
             ('bref.md', 'En bref'), ('rewriter.md', 'Révision du texte'),
             ('publisher.md', 'Titre et chapeau'), ('image.md', 'Illustration'),

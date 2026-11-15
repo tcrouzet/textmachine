@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Préfiltrage des titres avant lecture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["selected", "brief", "discard"],
+  "properties": {
+    "selected": {
+      "type": "array",
+      "description": "IDs des titres pertinents, dont les articles doivent être chargés.",
+      "items": {"type": "integer", "minimum": 1}
+    },
+    "brief": {
+      "type": "array",
+      "description": "IDs des titres ambigus. Charger leurs articles pour décider avec le texte intégral.",
+      "items": {"type": "integer", "minimum": 1}
+    },
+    "discard": {
+      "type": "array",
+      "description": "IDs des titres manifestement hors sujet. Ne pas charger leurs articles.",
+      "items": {"type": "integer", "minimum": 1}
+    }
+  }
+}

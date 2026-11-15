@@ -25,9 +25,10 @@ import imagePrompt from '../prompts/image.md';
 import rewriterPrompt from '../prompts/rewriter.md';
 import brefPrompt from '../prompts/bref.md';
 import selectionPrompt from '../prompts/sélection.md';
+import titlesPrompt from '../prompts/titres.md';
 import textMachineIcon from '../icon.svg';
 const {t} = i18n;
-const prompts = {'sélection.md':selectionPrompt,'writer.md':writerPrompt,'bref.md':brefPrompt,
+const prompts = {'titres.md':titlesPrompt,'sélection.md':selectionPrompt,'writer.md':writerPrompt,'bref.md':brefPrompt,
     'rewriter.md':rewriterPrompt,'publisher.md':publisherPrompt,'image.md':imagePrompt};
 type PromptName = keyof typeof prompts;
 interface PromptDefinition {file: PromptName | 'newsletter.md'; name: string; desc: string; variables: string}
@@ -87,6 +88,7 @@ export default class TextMachine extends Plugin {
     auth: AbortController | null = null;
     aiController: AbortController | null = null;
     crawlController: AbortController | null = null;
+    private titleChecks = new Set<string>();
     runDialog: TextMachineRun | null = null;
     folderIconDocuments = new Set<Document>();
     loadPage = (url: string, signal: AbortSignal | undefined, blocked: (url: string) => boolean) => browser.retrievePage(url, signal, blocked, BrowserWindow);
@@ -261,6 +263,7 @@ export default class TextMachine extends Plugin {
     }
 
     async openTextMachine(folderPath: string) {
+        if (this.runDialog?.closed) await this.runDialog.finished;
         if (this.busy || this.runDialog) return;
         const profile=this.newsletters.find(item=>item.outputFolder===folderPath);
         if (profile && profile.id!==this.settings.activeNewsletter) await this.selectNewsletter(profile.id);
@@ -462,7 +465,43 @@ export default class TextMachine extends Plugin {
         } finally {if (this.crawlController===controller) this.crawlController=null;}
     }
 
-    async crawlArticles(progress?: Progress) {
+    private async filterTitles(articles: Article[], signal: AbortSignal, progress?: Progress) {
+        const discard=new Set<number>();
+        if (!articles.length) return discard;
+        const prompt=await this.readPrompt('titres.md');
+        const context=this.newsletter.renderPrompt(prompt,{articles:'',language:this.settings.newsletterLanguage});
+        const key=(article: Article)=>createHash('sha256').update(JSON.stringify([context,article.url,article.title])).digest('hex');
+        const candidates=articles.filter(article=>!this.titleChecks.has(key(article)));
+        if (!candidates.length) return discard;
+        const connection=this.getAIConnection(),originals=new Map(candidates.map(article=>[article.id,article]));
+        const provider=connection.provider==='codex' ? 'Codex' : connection.provider==='anthropic' ? 'Anthropic' : connection.baseUrl ? t('aiLocalServer') : 'OpenAI';
+        const check=()=>{if (this.disposed || signal.aborted) throw new Error(t('newsletterCancelled'));};
+        check();
+        for (let offset=0;offset<candidates.length;offset+=100) {
+            const batch=candidates.slice(offset,offset+100);
+            const request=this.newsletter.titleRequest(prompt,batch,this.settings.newsletterLanguage);
+            progress?.(t('newsletterFilteringTitles',{current:offset+batch.length,total:candidates.length}),false,false,provider+' · '+(connection.model || t('aiDefaultCodexModel')));
+            const response=connection.provider==='codex'
+                ? await this.codex.generate(await this.codex.findCodex(),request.system,request.input,connection.model,signal,progress,request.schema,undefined,connection.effort)
+                : await this.generate(connection,request.system,request.input,this.requestAI,signal,progress);
+            check();
+            for (const id of this.newsletter.parseSelection(response,batch).discard) discard.add(id);
+        }
+        if (discard.size) await this.app.vault.process(this.dataFile,text=>{
+            check();
+            const data=this.articles.parseData(text);
+            for (const saved of data.articles) {
+                const original=originals.get(saved.id);
+                if (original && discard.has(saved.id) && saved.url===original.url && saved.title===original.title
+                    && saved.status===original.status && saved.content===original.content && saved.usedAt===original.usedAt) saved.status='discard';
+            }
+            return JSON.stringify(data,null,2)+'\n';
+        });
+        for (const article of candidates) if (!discard.has(article.id)) this.titleChecks.add(key(article));
+        return discard;
+    }
+
+    async crawlArticles(progress?: Progress, signal?: AbortSignal) {
         const vault = this.app.vault;
         const log = this.dataFile;
         const blocked = await this.readBlocked();
@@ -470,11 +509,20 @@ export default class TextMachine extends Plugin {
         if (blockedFile && !(blockedFile instanceof TFile)) throw new Error(t('invalidBlockedFile'));
         if (blockedFile) await vault.process(blockedFile, text => JSON.stringify(this.crawler.parseBlocked(text), null, 2) + '\n');
         const articles = this.articles.parseData(await vault.read(log)).articles;
-        this.crawlController = new AbortController();
+        if (signal?.aborted) throw new Error(t('newsletterCancelled'));
+        const controller=this.crawlController = new AbortController();
+        const abort=()=>controller.abort();
+        signal?.addEventListener('abort',abort,{once:true});
         try {
+            const candidates=articles.filter(article=>article.status==='' && !article.content && !article.usedAt
+                && !this.articles.isPdf(article.url) && !this.crawler.isBlocked(article.url,blocked));
+            const discarded=await this.filterTitles(candidates,controller.signal,progress);
             for (const article of articles) {
                 if (this.disposed) throw new Error(t('pluginDisabled'));
-                if (article.status === 'forbidden' || article.status === '404' || article.status === 'discard' || (!article.content && article.usedAt)) continue;
+                if (controller.signal.aborted) throw new Error(t('newsletterCancelled'));
+                if (discarded.has(article.id)) continue;
+                const short=this.articles.isShortUrl(article.url);
+                if ((article.status === 'forbidden' && !short) || article.status === '404' || article.status === 'discard' || (!article.content && article.usedAt)) continue;
                 if (this.articles.isPdf(article.url) || this.crawler.isBlocked(article.url,blocked)) {
                     await vault.process(log,text => {
                         const current = this.articles.parseData(text);
@@ -484,7 +532,7 @@ export default class TextMachine extends Plugin {
                     });
                     continue;
                 }
-                if (article.content) continue;
+                if (article.content && !short) continue;
                 progress?.(t('crawlingArticle', {url:article.url}));
                 const before = JSON.stringify(blocked);
                 const result = await this.crawler.crawl(article, blocked, this.crawlController.signal, this.loadPage);
@@ -502,24 +550,28 @@ export default class TextMachine extends Plugin {
                     const current = this.articles.parseData(text);
                     const saved = current.articles.find((item: {url:string}) => item.url === article.url);
                     if (saved) {
+                        if (result.url!==article.url) {saved.url=result.url;saved.title=result.title;}
                         for (const key of ['publish', 'content', 'image'] as const) saved[key] ||= result[key];
                         if (!saved.authors?.length && result.authors?.length) saved.authors=[...result.authors];
                         if (saved.image===result.image && !saved.imageCaption) saved.imageCaption = result.imageCaption;
                         if (result.status === 'forbidden' || result.status === '404') saved.status = result.status;
                     }
-                    return JSON.stringify(current, null, 2) + '\n';
+                    return this.articles.mergeArticles(JSON.stringify(current),[]).text;
                 });
             }
-        } finally { this.crawlController = null; }
+        } finally {signal?.removeEventListener('abort',abort);this.crawlController = null;}
     }
 
-    async importFeeds(progress?: Progress) {
+    async importFeeds(progress?: Progress, signal?: AbortSignal) {
         const feeds = this.newsletter.feedUrls(this.settings.includeFeeds).filter(url=>!this.newsletter.isAuthorSource(url,this.settings.authorFeeds));
         if (!feeds.length) return 0;
         if (!this.dataReady) throw new Error(t('createFolderFirst'));
         const log = this.dataFile;
         const blocked = await this.readBlocked();
+        if (signal?.aborted) throw new Error(t('newsletterCancelled'));
         const controller = this.crawlController = new AbortController();
+        const abort=()=>controller.abort();
+        signal?.addEventListener('abort',abort,{once:true});
         let added = 0, succeeded = 0, failed = 0, ignored = 0, duplicates = 0;
         const urls = new Map<string,Omit<Article,'id'>>(), titles = new Map<string,Omit<Article,'id'>>();
         const remember = (article: Omit<Article,'id'>) => {
@@ -611,10 +663,11 @@ export default class TextMachine extends Plugin {
             }
             progress?.(t('includeFeedsSummary',{succeeded,failed,added,ignored,duplicates}));
             return added;
-        } finally {if (this.crawlController===controller) this.crawlController=null;}
+        } finally {signal?.removeEventListener('abort',abort);if (this.crawlController===controller) this.crawlController=null;}
     }
 
-    async importUnread(progress?: Progress) {
+    async importUnread(progress?: Progress, signal?: AbortSignal) {
+        if (signal?.aborted) throw new Error(t('newsletterCancelled'));
         if (!this.dataReady) throw new Error(t('createFolderFirst'));
         const configured = !!(this.account?.email && this.settings.labelId);
         const reconnect = configured && !this.isConnected;
@@ -623,17 +676,23 @@ export default class TextMachine extends Plugin {
             await this.connect();
             if (this.disposed) throw new Error(t('pluginDisabled'));
         }
-        try { return await this.collectUnread(progress); }
+        try { return await this.collectUnread(progress,signal); }
         catch (caught) {
-            if (!configured || reconnect || this.disposed || errorOf(caught).code !== 'AUTH_REQUIRED') throw caught;
+            if (!configured || reconnect || this.disposed || signal?.aborted || errorOf(caught).code !== 'AUTH_REQUIRED') throw caught;
             progress?.(t('finishInBrowser'));
             await this.connect();
             if (this.disposed) throw new Error(t('pluginDisabled'));
-            return this.collectUnread(progress);
+            return this.collectUnread(progress,signal);
         }
     }
 
-    private async collectUnread(progress?: Progress) {
+    private async collectUnread(progress?: Progress, signal?: AbortSignal) {
+        const check=()=>{
+            if (this.disposed) throw new Error(t('pluginDisabled'));
+            if (signal?.aborted) throw new Error(t('newsletterCancelled'));
+        };
+        check();
+        if (this.isConnected && !this.settings.labelId) throw new Error(t('gmailLabelRequired'));
         const client=this.isConnected && this.settings.labelId ? this.client : null;
         if (!client && !this.settings.includeFeeds.trim()) throw new Error(this.isConnected ? t('connectAndChooseLabel') : t('connectToRun'));
         const log = this.dataFile;
@@ -644,26 +703,33 @@ export default class TextMachine extends Plugin {
         let added = 0, links = 0, skipped = 0, feedLinks = 0;
         let feedSummary = '';
         try {
-            if (client) for await (const id of client.unreadMessages(labelId)) {
-                if (this.disposed) throw new Error(t('pluginDisabled'));
+            check();
+            if (client) for await (const id of client.unreadMessages(labelId,signal)) {
+                check();
                 const message = await client.message(id);
+                check();
                 if (!message.labelIds.includes('UNREAD') || !message.labelIds.includes(labelId)) continue;
                 const entry = this.articles.messageArticles(message)
                     .filter(article => !this.articles.isExcluded(article, this.settings.excludedSources) && !this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds))
                     .map(article=>this.crawler.isBlocked(article.url,blocked) ? {...article,status:'forbidden'} : article);
-                if (this.disposed) throw new Error(t('pluginDisabled'));
+                check();
                 let result!: ReturnType<typeof articles.mergeArticles>;
                 await this.app.vault.process(log, current => {
+                    check();
                     result = this.articles.mergeArticles(current, entry);
                     return result.text;
                 });
                 if (result.added) { added++; links += result.count; } else skipped++;
-                if (this.disposed) throw new Error(t('pluginDisabled'));
+                check();
                 if (!debug) await client.markRead(id);
+                check();
                 progress?.(t('importProgress', { added, links }));
             }
-            feedLinks = await this.importFeeds(message=>{feedSummary=message;progress?.(message);});
-            await this.crawlArticles(progress);
+            check();
+            feedLinks = await this.importFeeds(message=>{feedSummary=message;progress?.(message);},signal);
+            check();
+            await this.crawlArticles(progress,signal);
+            check();
         } catch (caught) {
             const error = errorOf(caught);
             if (error.code === 'AUTH_REQUIRED') this.authorizationRequired = true;
@@ -700,6 +766,7 @@ export default class TextMachine extends Plugin {
         if (!text.trim()) throw new Error(file==='newsletter.md' ? t('newsletterTemplateInvalid') : t('newsletterPromptEmpty',{file}));
         const language=this.settings.newsletterLanguage;
         switch (file) {
+            case 'titres.md': this.newsletter.titleRequest(text,[],language); break;
             case 'sélection.md': this.newsletter.selectionRequest(text,[],language,'',[],[],this.settings.commentedArticles); break;
             case 'writer.md': this.newsletter.writerRequest(text,[],[],[],language,'',this.settings.commentedArticles); break;
             case 'publisher.md': this.newsletter.publisherRequest(text,[],language); break;
@@ -816,6 +883,11 @@ export default class TextMachine extends Plugin {
             if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
             if (!debug && pending.length<commentedArticles)
                 throw new Error(t('newsletterNotEnoughSources',{count:pending.length,minimum:commentedArticles}));
+            const rejected=await this.filterTitles(pending,controller.signal,progress);
+            pending=pending.filter(article=>!rejected.has(article.id));
+            check();
+            if (!debug && pending.length<commentedArticles)
+                throw new Error(t('newsletterNotEnoughRelevantSources',{count:pending.length,minimum:commentedArticles}));
             if (pending.length) {
                 const prompt=await readPrompt('writer.md');
                 const selectionTemplate=await readPrompt('sélection.md');
@@ -839,14 +911,16 @@ export default class TextMachine extends Plugin {
                 result.discard=selection.discard.map((id: number)=>pending.find(article=>article.id===id)!.url);
                 brief.push(...selection.brief);
                 if (selection.selected.length) {
+                    if (!debug && selection.selected.length<commentedArticles)
+                        throw new Error(t('newsletterNotEnoughRelevantSources',{count:selection.selected.length,minimum:commentedArticles}));
                     progress?.(t('newsletterWriting'));
                     const request=this.newsletter.writerRequest(prompt,selection.selected,previous,authorPosts || [],language,this.settings.referenceSources,commentedArticles);
                     let editorial;
-                    try {editorial=this.newsletter.parseWriter(await respond(request,progress),selection.selected);}
+                    try {editorial=this.newsletter.parseWriter(await respond(request,progress),selection.selected,debug ? 2 : commentedArticles);}
                     catch (caught) {
                         if (errorOf(caught).code!=='RP_TOO_FEW_SOURCES') throw caught;
                         progress?.(t('newsletterExpandingReview'));
-                        editorial=this.newsletter.parseWriter(await respond({...request,system:request.system+'\n\n'+t('writerMultiplePublications')},progress),selection.selected);
+                        editorial=this.newsletter.parseWriter(await respond({...request,system:request.system+'\n\n'+t('writerMultiplePublications')},progress),selection.selected,debug ? 2 : commentedArticles);
                     }
                     result.paragraphs=editorial.paragraphs;
                     result.used=editorial.used.map(article=>article.url);
@@ -867,10 +941,9 @@ export default class TextMachine extends Plugin {
             if (brief.length) {
                 progress?.(t('newsletterTranslatingBrief'));
                 const prompt = await this.readPrompt('bref.md');
-                const confirmed=brief.filter(article=>article.status!=='forbidden');
-                const request = this.newsletter.briefRequest(prompt,brief,language,confirmed);
+                const request = this.newsletter.briefRequest(prompt,brief,language);
                 const response = await respond(request);
-                translatedBrief = this.newsletter.parseBrief(response,brief,confirmed);
+                translatedBrief = this.newsletter.parseBrief(response,brief);
             }
             if (!result.used.length && !translatedBrief.length) {
                 if (!debug) await vault.process(log,current=>this.newsletter.applyStatuses(current,pending,result,day));
@@ -928,7 +1001,7 @@ export default class TextMachine extends Plugin {
                             check();
                             const image=page.status>=200 && page.status<300 && page.html
                                 ? this.crawler.extractSocialImage(page.html,page.url) : null;
-                            if (image) result.paragraphImages.push({paragraph,url:image.image,source:article.url,caption:image.imageCaption || article.title});
+                            if (image?.imageCaption.trim()) result.paragraphImages.push({paragraph,url:image.image,source:this.articles.articleUrl(page.url) || article.url,caption:image.imageCaption});
                             else progress?.(t('newsletterSourceImageMissing',{title:article.title}));
                         } catch {
                             check();
@@ -997,6 +1070,8 @@ class TextMachineRun extends Modal {
     folderPath: string;
     closed = false;
     working = false;
+    controller: AbortController | null = null;
+    finished: Promise<void> = Promise.resolve();
     error = '';
     result = '';
     statusEl?: HTMLElement;
@@ -1022,8 +1097,8 @@ class TextMachineRun extends Modal {
     onClose() {
         this.closed = true;
         this.stopClock();
-        if (this.working) {this.plugin.auth?.abort();this.plugin.aiController?.abort();this.plugin.crawlController?.abort();}
-        this.plugin.runDialog = null;
+        if (this.working) {this.controller?.abort();this.plugin.auth?.abort();this.plugin.aiController?.abort();this.plugin.crawlController?.abort();}
+        else if (this.plugin.runDialog===this) this.plugin.runDialog = null;
     }
 
     async perform(action: Action, resume = true) {
@@ -1031,13 +1106,15 @@ class TextMachineRun extends Modal {
         if (p.busy || this.closed) return;
         p.busy = true;
         this.working = true;
+        this.controller = new AbortController();
+        let finish!: ()=>void;
+        this.finished = new Promise(resolve=>{finish=resolve;});
         this.aiText = '';
         this.modelText = '';
         this.outputEl = undefined;
         this.error = '';
-        this.render();
         let success = false;
-        try { await action(); success = true; }
+        try { this.render(); await action(); success = true; }
         catch (caught) {
             const error = errorOf(caught);
             if (error.code === 'AUTH_REQUIRED') p.authorizationRequired = true;
@@ -1046,6 +1123,9 @@ class TextMachineRun extends Modal {
             this.stopClock();
             p.busy = false;
             this.working = false;
+            this.controller = null;
+            if (this.closed && p.runDialog===this) p.runDialog=null;
+            finish();
             if (!this.closed) {
                 if (success && resume) await this.advance();
                 else this.render();
@@ -1058,14 +1138,14 @@ class TextMachineRun extends Modal {
         if (this.closed || p.disposed) return;
         this.render();
         if (!p.dataReady || (!p.isConnected && !p.settings.includeFeeds.trim() && !(p.account?.email && p.settings.labelId))) return;
-        if (p.isConnected && !p.settings.labelId && !p.settings.includeFeeds.trim()) {
+        if (p.isConnected && !p.settings.labelId) {
             if (!p.loaded) await this.perform(() => p.refreshLabels(), false);
             return;
         }
         await this.perform(async () => {
             const progress: Progress = (message,stream,reset,model) => this.showProgress(message,stream,reset,model);
             this.startClock();
-            const collected = await p.importUnread(progress);
+            const collected = await p.importUnread(progress,this.controller!.signal);
             if (this.closed || p.disposed) return;
             const note = await p.writeNewsletter(progress);
             this.result = collected;
@@ -1167,12 +1247,14 @@ class TextMachineRun extends Modal {
             }));
             return;
         }
-        if (p.isConnected && !p.settings.labelId && !p.settings.includeFeeds.trim()) {
-            new Setting(el).setName(t('gmailLabel')).addDropdown(dropdown => {
+        if (p.isConnected && !p.settings.labelId) {
+            new Setting(el).setName(t('gmailLabel')).setDesc(t('gmailLabelRequired')).addDropdown(dropdown => {
                 dropdown.selectEl.setAttribute('aria-label', t('gmailLabel'));
                 dropdown.addOption('',t('chooseLabel'));
+                dropdown.addOption('__disconnect__',t('noGmailLabel'));
                 for (const label of p.labels) dropdown.addOption(label.id,label.name);
                 dropdown.onChange(id => this.perform(async () => {
+                    if (id==='__disconnect__') {await p.disconnect();return;}
                     if (!p.labels.some((label: Label) => label.id === id)) throw new Error(t('unknownLabel'));
                     p.settings.labelId = id;
                     await p.saveData(p.settings);
@@ -1483,9 +1565,11 @@ export class GmailSettings extends PluginSettingTab {
                 dropdown.selectEl.id='text-machine-label';
                 dropdown.selectEl.setAttribute('aria-label',t('gmailLabel'));
                 dropdown.addOption('',t('chooseLabel'));
+                dropdown.addOption('__disconnect__',t('noGmailLabel'));
                 for (const label of p.labels) dropdown.addOption(label.id,label.name);
-                dropdown.setValue(p.settings.labelId).setDisabled(!connected || p.busy || !p.labels.length)
-                    .onChange(id=>this.run(t('savingLabel'),async()=>{
+                dropdown.setValue(p.settings.labelId).setDisabled(!connected || p.busy)
+                    .onChange(id=>this.run(id==='__disconnect__' ? t('disconnecting') : t('savingLabel'),async()=>{
+                        if (id==='__disconnect__') {await p.disconnect();return;}
                         if (id && !p.labels.some(label=>label.id===id)) throw new Error(t('unknownLabel'));
                         p.settings.labelId=id;
                         await p.saveData(p.settings);
@@ -1715,6 +1799,7 @@ export class GmailSettings extends PluginSettingTab {
         }});
         newsletterSettings.items.push({name:t('newsletterSourcesHeading'),render:setting=>{setting.setHeading();}},...newsletterSources);
         const promptDefinitions: PromptDefinition[] = [
+            {file:'titres.md',name:t('promptTitles'),desc:t('promptTitlesDescription'),variables:'{{language}}, {{articles}}'},
             {file:'sélection.md',name:t('promptSelection'),desc:t('promptSelectionDescription'),variables:'{{language}}, {{commentedArticles}}, {{articles}}, {{now}}, {{previousNewsletters}}, {{AuthorFeed}}'},
             {file:'writer.md',name:t('promptWriter'),desc:t('promptWriterDescription'),variables:'{{language}}, {{commentedArticles}}, {{articles}}, {{previousNewsletters}}, {{AuthorFeed}}'},
             {file:'bref.md',name:t('promptBrief'),desc:t('promptBriefDescription'),variables:'{{language}}'},

@@ -6,6 +6,18 @@ const {isPdf} = require('../../plugin/articles');
 const {publicAddress, publicUrl} = require('../../plugin/browser');
 const article = {url:'https://example.com/article', title:'Article', date:'', source:'User', status:'', publish:'', content:'', image:''};
 
+test('redirect destinations replace short links even when the publisher requires a subscription',async()=>{
+    const blocked=[];
+    const result=await crawl({...article,url:'https://flip.it/MtZqB9'},blocked,undefined,async()=>({
+        url:'https://www.theatlantic.com/books/2026/11/ai-literary-scams-amazon/689391/?utm_source=flipboard',status:403,html:''}));
+    assert.equal(result.url,'https://www.theatlantic.com/books/2026/11/ai-literary-scams-amazon/689391/');
+    assert.equal(result.status,'forbidden');
+    assert.deepEqual(blocked,['theatlantic.com'],'An intermediary must not be blocked because its destination is paywalled');
+    const titled=await crawl({...article,url:'https://flip.it/MtZqB9',title:'A novelist confronts invented versions of her books'},[],undefined,
+        async()=>({url:result.url,status:403,html:''}));
+    assert.equal(titled.title,'A novelist confronts invented versions of her books','Keep a meaningful mail title when the publisher metadata cannot be read');
+});
+
 test('site refusals are persisted and suppress future pages on that host', async () => {
     const data = [];
     let calls = 0;

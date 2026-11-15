@@ -1,6 +1,7 @@
 import {t} from './i18n';
-import {parseData, isExcluded, isPdf, articleUrl, articleTitle, isEditorialSource} from './articles';
+import {parseData, isExcluded, isPdf, isShortUrl, articleUrl, articleTitle, articleKeys, extractLinks, isEditorialSource} from './articles';
 import selectionSchema from '../models/selection.json';
+import titlesSchema from '../models/titres.json';
 import writerSchema from '../models/writer.json';
 import publisherSchema from '../models/publisher.json';
 import briefSchema from '../models/bref.json';
@@ -42,29 +43,28 @@ function availableForEdition(article: Article, date: string, lastEdition: string
 }
 
 function availableArticles(text: string, exclusions = '', date = day(), todayNotes: string[] = [], lastEdition = date) {
-    return parseData(text).articles.filter(article => article.content.trim() && !isPdf(article.url) && !isExcluded(article,exclusions)
+    return parseData(text).articles.filter(article => article.content.trim() && articleUrl(article.url,article.title) && !isPdf(article.url) && !isShortUrl(article.url) && !isExcluded(article,exclusions)
         && article.status === '' && (availableForEdition(article,date,lastEdition)
             || (article.usedAt==='unknown' && todayNotes.some(note=>note.includes(']('+article.url+')') || note.includes(']('+article.url+' ')))));
 }
 
 function briefArticles(text: string, exclusions = '', date = day(), lastEdition = date) {
     return parseData(text).articles.filter(article=>article.status === 'forbidden' && availableForEdition(article,date,lastEdition)
-        && !isExcluded(article,exclusions));
+        && articleUrl(article.url,article.title) && !isShortUrl(article.url) && !isExcluded(article,exclusions));
 }
 
-function briefRequest(prompt: string, articles: Article[], language: string, selected: Article[] = []) {
+function briefRequest(prompt: string, articles: Article[], language: string) {
     if (!prompt.trim()) throw new Error(t('newsletterBriefPromptEmpty'));
     const schema = structuredClone(briefSchema);
     const titles = schema.properties.titles;
     Object.assign(titles,{minItems:articles.length,maxItems:articles.length});
     Object.assign(titles.items.properties.id,{enum:articles.map(article=>article.id)});
-    const required=selected.length ? '\n\n'+t('briefSelectedContract',{ids:selected.map(article=>article.id).join(', ')}) : '';
-    return {system:renderPrompt(prompt,{language})+required+'\n\n'+JSON.stringify({jsonSchema:schema}),
+    return {system:renderPrompt(prompt,{language})+'\n\n'+JSON.stringify({jsonSchema:schema}),
         input:JSON.stringify(articles.map(({id,title,url,status,content})=>({id,title:articleTitle({url,title}),
             ...(status==='' && content.trim() ? {context:content.slice(0,2000)} : {})}))),schema};
 }
 
-function parseBrief(text: string, articles: Article[], selected: Article[] = []): (Article & {category:string})[] {
+function parseBrief(text: string, articles: Article[]): (Article & {category:string})[] {
     const invalid = () => {throw new Error(t('newsletterBriefInvalid'));};
     let result: Record<string,unknown>;
     try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {return invalid();}
@@ -79,7 +79,6 @@ function parseBrief(text: string, articles: Article[], selected: Article[] = [])
             || (row.title===null)!==(row.category===null)) return invalid();
         titles.set(row.id,row.title===null ? null : {title:(row.title as string).trim(),category:(row.category as string).trim()});
     }
-    if (selected.some(article=>!titles.get(article.id))) return invalid();
     return [...titles].flatMap(([id,translated])=>translated ? [{...known.get(id)!,...translated}] : []);
 }
 
@@ -89,6 +88,15 @@ function renderPrompt(prompt: string, values: Record<string,string>) {
         if (!Object.hasOwn(values,name)) throw new Error(t('promptUnknownVariable',{variable:'{{'+name+'}}'}));
         return values[name];
     });
+}
+
+function titleRequest(prompt: string, articles: Article[], language: string) {
+    if (!prompt.trim()) throw new Error(t('newsletterPromptEmpty',{file:'titres.md'}));
+    if (!/\{\{\s*articles\s*\}\}/.test(prompt)) throw new Error(t('titleFilterArticlesMissing',{variable:'{{articles}}'}));
+    const schema=structuredClone(titlesSchema);
+    for (const key of ['selected','brief','discard'] as const) Object.assign(schema.properties[key].items,{enum:articles.map(article=>article.id)});
+    return {system:t('titleFilterContract')+'\n\n'+JSON.stringify({jsonSchema:schema}),schema,
+        input:renderPrompt(prompt,{language,articles:JSON.stringify(articles.map(article=>({id:article.id,title:articleTitle(article).slice(0,500),url:article.url.slice(0,2048)})))})};
 }
 
 function selectionRequest(prompt: string, articles: Article[], language: string, referenceSources = '', previous: {name: string; content: string}[] = [], feed: FeedEntry[] = [], commentedArticles = 3) {
@@ -152,14 +160,14 @@ function assertNoAuthorSources(paragraphs: string[], feeds: string, posts: FeedE
 function parseSelection(text: string, articles: Article[]) {
     let result: Record<string,unknown>;
     try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {throw new Error(t('newsletterSelectionInvalid'));}
-    const known=new Set(articles.map(article=>article.id));
+    const known=new Map(articles.map(article=>[article.id,article]));
     const classified=[...array(result.selected),...array(result.brief),...array(result.discard)];
     if (!result || Object.keys(result).length!==3 || !Array.isArray(result.selected) || !Array.isArray(result.brief) || !Array.isArray(result.discard)
         || classified.length!==known.size
         || new Set(classified).size!==known.size
         || classified.some(id=>typeof id!=='number' || !known.has(id))) throw new Error(t('newsletterSelectionInvalid'));
     const selected=result.selected as number[];
-    return {selected:articles.filter(article=>selected.includes(article.id)),brief:articles.filter(article=>(result.brief as number[]).includes(article.id)),discard:result.discard as number[]};
+    return {selected:selected.map(id=>known.get(id)!),brief:articles.filter(article=>(result.brief as number[]).includes(article.id)),discard:result.discard as number[]};
 }
 
 function parseEditorial(text: string): Pick<Editorial,'paragraphs'> {
@@ -174,7 +182,7 @@ function publicationCount(articles: Article[]) {
     return new Set(articles.flatMap(article=>{try {return [domainOf(article.url)];} catch {return [];}})).size;
 }
 
-function parseWriter(text: string, articles: Article[]) {
+function parseWriter(text: string, articles: Article[], minimum = 2) {
     let result: Record<string,unknown>;
     try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {throw new Error(t('newsletterInvalid'));}
     const ids=new Set(articles.map(article=>article.id));
@@ -191,6 +199,9 @@ function parseWriter(text: string, articles: Article[]) {
     }));
     if (publicationCount(used)<2 || publicationCount(used.filter(article=>cited.has(domainOf(article.url))))<2)
         throw Object.assign(new Error(t('newsletterMultiplePublications')),{code:'RP_TOO_FEW_SOURCES'});
+    const linked=new Set(extractLinks({payload:{},labelIds:[],bodies:[{type:'text/plain',text:editorial.paragraphs.join('\n\n')}]}).map(link=>articleKeys(link).urlKey));
+    const commented=used.filter(article=>linked.has(articleKeys(article).urlKey));
+    if (commented.length<minimum) throw new Error(t('newsletterNotEnoughRelevantSources',{count:commented.length,minimum}));
     return {...editorial,used};
 }
 
@@ -237,7 +248,7 @@ function articleInput(prompt: string, articles: Article[], language: string, val
     if (!/\{\{\s*articles\s*\}\}/.test(prompt)) throw new Error(t('writerArticlesMissing',{variable:'{{articles}}'}));
     return renderPrompt(prompt,{...values,
         language:language.trim() || 'français',
-        articles:JSON.stringify(articles.map(article=>({id:article.id,title:articleTitle(article),url:article.url,source:article.source,authors:article.authors || [],
+        articles:JSON.stringify(articles.map(article=>({id:article.id,title:articleTitle(article),url:article.url,publication:new URL(article.url).hostname.replace(/^www\./,''),source:article.source,authors:article.authors || [],
             publish:article.publish,content:article.content}))),
     });
 }
@@ -258,13 +269,13 @@ function writerRequest(prompt: string, articles: Article[], previous: {name: str
     };
 }
 
-function renderNewsletter(template: string, result: Newsletter, brief: (Pick<Article,'title' | 'url'> & {category?:string})[] = []) {
+function renderNewsletter(template: string, result: Newsletter, brief: (Pick<Article,'title' | 'url'> & {category?:string;content?:string;status?:string})[] = []) {
     if (!template.trim()) throw new Error(t('newsletterTemplateInvalid'));
     const escape = (value: string) => value.replace(/[\r\n]+/g,' ').replace(/[\\`*_[\]<>]/g,'\\$&');
     const link = (url: string) => new URL(url).href.replace(/[()]/g,char=>char === '(' ? '%28' : '%29');
     const image = result.image?.verified === true && result.image.caption.trim() ? result.image : null;
     const paragraphs=result.paragraphs.map((text,index)=>[text,...(result.paragraphImages || [])
-        .filter(image=>image.paragraph===index)
+        .filter(image=>image.paragraph===index && image.caption.trim())
         .map(image=>`[![${escape(image.caption)}](${link(image.url)})](${link(image.source)})`)].join('\n\n'));
     interface Context {[key: string]: string | Context[]}
     const values: Context = {
@@ -278,10 +289,13 @@ function renderNewsletter(template: string, result: Newsletter, brief: (Pick<Art
         if ((url.hostname==='arxiv.org' || url.hostname.endsWith('.arxiv.org')) && url.pathname.startsWith('/pdf/')) {
             url.pathname=url.pathname.replace(/^\/pdf\//,'/abs/').replace(/\.pdf$/i,'');
         }
-        const domain=domainOf(url.href);
-        return {title:escape(articleTitle(article)),url:link(url.href),source:escape(domain),source_url:link(url.protocol+'//'+domain+'/'),category:escape(article.category?.trim() || '')};
+        const domain=url.hostname.replace(/^www\./,'');
+        return {title:escape(articleTitle(article)),url:link(url.href),source:escape(domain),source_url:link(url.protocol+'//'+domain+'/'),category:escape(article.category?.trim() || ''),
+            full_text:article.status==='' && article.content?.trim() ? '⊞' : ''};
     });
     const groups=new Map<string,typeof briefRows>();
+    const frenchCorner=t('newsletterFrenchCorner');
+    if (briefRows.some(row=>row.category===frenchCorner)) groups.set(frenchCorner,[]);
     for (const row of briefRows) {
         if (!groups.has(row.category)) groups.set(row.category,[]);
         groups.get(row.category)!.push(row);
@@ -300,7 +314,10 @@ function renderNewsletter(template: string, result: Newsletter, brief: (Pick<Art
                 throw new Error(t('newsletterTemplateInvalid'));
             }
             const value=context[section || key];
-            return Array.isArray(value) ? value.map(item=>render(block,item)).join('\n\n') : value;
+            return Array.isArray(value) ? value.map(item=>{
+                const rendered=render(block,item);
+                return section==='articles' && item.full_text==='⊞' ? rendered.trimEnd()+' ⊞\n' : rendered;
+            }).join('\n\n') : value;
         });
     };
     let markdown = render(template,values).replace(/\n{3,}/g,'\n\n').trim();
@@ -400,4 +417,4 @@ function readFeed(xml: string, limit = 5, base = '', accept?: (entry: Pick<FeedE
     });
 }
 
-export {day, availableArticles, briefArticles, briefRequest, parseBrief, selectionRequest, selectArticles, parseSelection, isAuthorSource, assertNoAuthorSources, parseEditorial, parseWriter, publicationCount, publisherRequest, parsePublisher, verificationRequest, parseVerification, renderPrompt, writerRequest, renderNewsletter, applyStatuses, feedUrl, feedUrls, readFeed, preview};
+export {day, availableArticles, briefArticles, briefRequest, parseBrief, titleRequest, selectionRequest, selectArticles, parseSelection, isAuthorSource, assertNoAuthorSources, parseEditorial, parseWriter, publicationCount, publisherRequest, parsePublisher, verificationRequest, parseVerification, renderPrompt, writerRequest, renderNewsletter, applyStatuses, feedUrl, feedUrls, readFeed, preview};

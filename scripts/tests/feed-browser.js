@@ -1,5 +1,5 @@
 import {readFeed} from '../../plugin/newsletter';
-import {extractPage} from '../../plugin/crawler';
+import {extractPage, extractSocialImage, crawl} from '../../plugin/crawler';
 
 // Obsidian's DOM helper for the standalone browser fixture.
 Element.prototype.createEl ||= function(tag,options={}) {
@@ -36,4 +36,43 @@ export function runFeedChecks() {
     check(extractPage(restricted.html,restricted.url).blocked,'Paywall text must not become a complete article');
     check(!extractPage('<p>A tiny excerpt.</p>','https://example.com/short').content,'Short excerpt must be crawled');
     return {passed:checks};
+}
+
+export async function runSourceChecks() {
+    const url='https://www.theatlantic.com/books/2026/11/ai-literary-scams-amazon/689391/';
+    const prose='<p>'+('A novelist describes how fabricated versions of her books mislead readers. ').repeat(12)+'</p>';
+    const html='<title>Real article title</title><meta property="og:title" content="Real article title">'
+        +'<meta property="og:image" content="/photo.jpg"><article><h1>Real article title</h1>'+prose
+        +'<figure><img src="/photo.jpg"><figcaption>Original photograph. Credit: Author / Agency.</figcaption></figure></article>';
+    const original={id:1,url:'https://flip.it/MtZqB9',title:'MtZqB9',date:'',source:'User',authors:[],status:'',usedAt:'',publish:'',content:'',image:''};
+    for (const content of ['', 'Previously collected full article.']) {
+        const result=await crawl({...original,content},[],undefined,async()=>({url,status:200,html}));
+        if (result.url!==url || result.title!=='Real article title' || !result.content
+            || (content && result.content!==content)) throw new Error('Resolve redirects while preserving cached text and recovering the title');
+    }
+    const image=extractSocialImage(html,url);
+    if (image?.image!=='https://www.theatlantic.com/photo.jpg' || image.imageCaption!=='Original photograph. Credit: Author / Agency.')
+        throw new Error('Preserve the complete original image credit');
+    return {passed:3};
+}
+
+export function runImageCaptionChecks() {
+    let passed=0;
+    const check=(condition,message)=>{if(!condition) throw new Error(message);passed++;};
+    const url='https://scroll.in/article/1096984/the-algorithms-autograph-can-artificial-intelligence-ever-become-an-author';
+    const social='https://sc0.blr1.cdn.digitaloceanspaces.com/book/192343-ygpzvdjuap-1689746514.jpg';
+    const original=social.replace('/book/','/article/');
+    const html='<meta property="og:image" content="'+social+'"><article><figure><picture><img src="'+original+'"></picture><figcaption>CC BY 4.0</figcaption></figure><p>'
+        +'An author describes the practical consequences of automated writing. '.repeat(20)+'</p></article>';
+    const image=extractSocialImage(html,url);
+    check(image?.image===social && image.imageCaption==='CC BY 4.0','The Scroll social rendition must keep the original figure credit');
+    check(extractPage(html,url).imageCaption==='CC BY 4.0','Article crawling must recover the same caption');
+    check(extractSocialImage(html.replace('CC BY 4.0',' \n '),url)===null,'An empty figure caption must not produce an image');
+    const unrelated=html.replace(original,'https://other.example/'+original.split('/').pop());
+    check(extractSocialImage(unrelated,url)===null,'Matching filenames from other hosts must not borrow captions');
+    const missing='<meta property="og:image" content="https://images.example/uncaptioned.jpg">';
+    check(extractSocialImage(missing,url)===null,'A social thumbnail alone has no original caption');
+    const fallback=missing+'<meta name="twitter:image" content="'+original+'"><figure><img src="'+original+'"><figcaption>Original caption. Photo: Author / Agency.</figcaption></figure>';
+    check(extractSocialImage(fallback,url)?.imageCaption==='Original caption. Photo: Author / Agency.','Try the next social thumbnail if the first has no caption');
+    return {passed};
 }

@@ -1,5 +1,5 @@
 import { t } from './i18n';
-import {isPdf} from './articles';
+import {isPdf, isShortUrl, articleUrl, articleTitle} from './articles';
 
 import {domainOf} from './domains';
 import {Article, record} from './types';
@@ -84,6 +84,7 @@ function imageKey(value: unknown, base: string) {
         const embedded = path.match(/https?:\/\/.+$/)?.[0];
         if (embedded) url = new URL(embedded);
         if (!['http:','https:'].includes(url.protocol) || url.username || url.password) return '';
+        if (url.hostname==='sc0.blr1.cdn.digitaloceanspaces.com') url.pathname=url.pathname.replace(/^\/book\//,'/article/');
         for (const key of ['w','width','h','height','q','quality','fit','auto']) url.searchParams.delete(key);
         url.searchParams.sort();
         url.hash = '';
@@ -143,14 +144,15 @@ function extractSocialImage(html: string, url: string) {
             try {
                 const image=new URL(value,url);
                 if (!['http:','https:'].includes(image.protocol) || image.username || image.password) continue;
-                return {image:image.href,imageCaption:extractImageCaption(html,url,image.href)};
+                const imageCaption=extractImageCaption(html,url,image.href);
+                if (imageCaption.trim()) return {image:image.href,imageCaption};
             } catch { continue; }
         }
     }
     return null;
 }
 
-function extractPage(html: string, url: string): {blocked?: boolean; content?: string; publish?: string; authors?: string[]; image?: string; imageCaption?: string} {
+function extractPage(html: string, url: string): {blocked?: boolean; title?: string; content?: string; publish?: string; authors?: string[]; image?: string; imageCaption?: string} {
     const doc = pageDocument(html,url);
     const meta = (name: string) => doc.querySelector(`meta[property="${name}"], meta[name="${name}"]`)?.getAttribute('content') || '';
     const title = doc.querySelector('title')?.textContent || '';
@@ -226,6 +228,7 @@ function extractPage(html: string, url: string): {blocked?: boolean; content?: s
     } catch { image = ''; }
     for (const node of content.querySelectorAll('p, h1, h2, h3, h4, li, blockquote, br')) node.append('\n\n');
     return {
+        title:typeof structured?.headline==='string' ? structured.headline : meta('og:title') || title,
         content:(content.textContent || '').replace(/[ \t]+/g, ' ').replace(/\n\s*\n(?:\s*\n)+/g, '\n\n').trim(),
         publish:published || publicationDate(article.publishedTime),
         authors:authorNames(authors),
@@ -236,17 +239,22 @@ function extractPage(html: string, url: string): {blocked?: boolean; content?: s
 
 async function crawl(article: Article, blocked: string[], signal: AbortSignal | undefined, load: PageLoader): Promise<Article> {
     if (article.status === '404') return article;
-    if (article.status === 'forbidden' || isPdf(article.url)) return {...article,status:'forbidden'};
+    if ((article.status === 'forbidden' && !isShortUrl(article.url)) || isPdf(article.url)) return {...article,status:'forbidden'};
     if (isBlocked(article.url, blocked)) return {...article, status:'forbidden'};
     const page = await load(article.url, signal, url => isBlocked(url, blocked));
     if (signal?.aborted) throw new Error(t('pluginDisabled'));
+    const url=articleUrl(page.url) || article.url;
+    if (url!==article.url) {
+        const fallback=article.title===article.url || article.title===articleTitle({url:article.url,title:article.url});
+        article={...article,url,title:fallback ? articleTitle({url,title:url}) : article.title};
+    }
     if (page.status === 404 && !page.failure) return {...article,status:'404'};
     if (isPdf(page.url,page.contentType) || page.html?.trimStart().startsWith('%PDF-')) return {...article,status:'forbidden'};
     const extracted = page.status >= 200 && page.status < 300 && page.html ? extractPage(page.html, page.url) : null;
+    if (article.content) return {...article,title:extracted?.title || article.title};
     if (extracted?.content) return {...article, ...extracted};
     if (!page.failure && (extracted?.blocked || [401,402,403,451].includes(page.status))) {
         block(blocked, article.url);
-        if (page.url !== article.url) block(blocked, page.url);
     }
     return {...article, status:'forbidden'};
 }

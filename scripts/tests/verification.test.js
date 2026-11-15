@@ -17,7 +17,7 @@ test('verification receives the complete editorial and source text without image
     const input=JSON.parse(request.input);
     assert.deepEqual(input.newsletter,original);
     assert.equal(input.language,'English');
-    assert.deepEqual(input.articles,[{id:41,title:source.title,url:source.url,source:source.source,authors:source.authors,publish:source.publish,content:source.content}]);
+    assert.deepEqual(input.articles,[{id:41,title:source.title,url:source.url,publication:'example.com',source:source.source,authors:source.authors,publish:source.publish,content:source.content}]);
     assert.deepEqual(request.schema,require('../../models/verifier.json'));
     assert.deepEqual(JSON.parse(request.system.split('\n\n').at(-1)).jsonSchema,request.schema);
     for (const template of ['Only {{articles}}','Only {{newsletter}}','{{newsletter}} {{articles}} {{unknown}}',' '])

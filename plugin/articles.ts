@@ -42,6 +42,11 @@ function isPdf(value: string, contentType = '', disposition = '') {
     } catch {return false;}
 }
 
+function isShortUrl(value: string) {
+    try {return ['flip.it','bit.ly','t.co','tinyurl.com','goo.gl','ow.ly','buff.ly','trib.al'].includes(new URL(value).hostname.replace(/^www\./,''));}
+    catch {return false;}
+}
+
 function articleUrl(value: string, title = '') {
     let url;
     try {
@@ -62,7 +67,7 @@ function articleUrl(value: string, title = '') {
         || /\/(?:unsubscribe|optout|preferences|settings|login|signin|signup|register|subscribe|contact|about|privacy|terms|search|tags?|category|categories|apps?|sharer|share|intent\/tweet)(?:[/.?]|$)/i.test(url.pathname)
         || /\.(?:png|jpe?g|gif|svg|webp|ico|css|js)$/i.test(url.pathname)
         || /^\/(?:[a-z]{2}\/?)?$/i.test(url.pathname)
-        || /^\/(?:news|articles|culture|science|politics|technology|latest|home)\/?$/i.test(url.pathname)) return null;
+        || /^\/(?:news|articles|culture|science|politics|technology|latest|home|forums?)\/?$/i.test(url.pathname)) return null;
     url.hash = '';
     for (const key of [...url.searchParams.keys()]) {
         if (/^utm_|^(?:gclid|fbclid)$/i.test(key)) url.searchParams.delete(key);
@@ -257,6 +262,7 @@ function mergeArticles(text: string, incoming: Omit<Article,'id'>[]) {
         if (existing !== undefined) {
             const kept = articles[existing];
             if (isEditorialSource(article.source)) kept.source=article.source;
+            if (article.usedAt && (!kept.usedAt || article.usedAt>kept.usedAt)) kept.usedAt=article.usedAt;
             for (const [key, value] of Object.entries(record(article))) {
                 if (key!=='imageCaption' && !Object.hasOwn(kept, key)) Object.assign(kept,{[key]:value});
             }
@@ -277,4 +283,4 @@ function mergeArticles(text: string, incoming: Omit<Article,'id'>[]) {
     return { text: JSON.stringify(assignIds({ ...data, articles }), null, 2) + '\n', count, added: count > 0 };
 }
 
-export { articleTitle, isEditorialSource, articleKeys, isPdf, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, feedArticles, parseData, withIds, mergeArticles };
+export { articleTitle, isEditorialSource, articleKeys, isPdf, isShortUrl, articleUrl, sourceOf, extractLinks, isExcluded, messageArticles, feedArticles, parseData, withIds, mergeArticles };
