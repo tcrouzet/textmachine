@@ -177,7 +177,7 @@ export default class TextMachine extends Plugin {
         this.registerEvent(this.app.workspace.on('window-open', (_workspace, win) => this.observeFolderIcons(win.document)));
         this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
             if (!(file instanceof TFolder) || (!this.newsletters.some(profile=>profile.outputFolder===file.path) && this.dataReady)) return;
-            menu.addItem(item => item.setTitle('Text Machine').setIcon('text-machine').setDisabled(this.busy)
+            menu.addItem(item => item.setTitle('Text Machine').setIcon('text-machine').setDisabled(this.busy && this.runDialog?.folderPath!==file.path)
                 .onClick(() => {void this.openTextMachine(file.path).catch(caught=>new Notice(errorOf(caught).message));}));
         }));
     }
@@ -263,7 +263,15 @@ export default class TextMachine extends Plugin {
     }
 
     async openTextMachine(folderPath: string) {
-        if (this.runDialog?.closed) await this.runDialog.finished;
+        if (this.disposed || (this.busy && this.runDialog?.folderPath!==folderPath)) return;
+        if (this.runDialog?.closed) {
+            if (this.runDialog.working && !this.runDialog.controller?.signal.aborted) {
+                this.runDialog.closed=false;
+                this.runDialog.open();
+                return;
+            }
+            await this.runDialog.finished;
+        }
         if (this.busy || this.runDialog) return;
         const profile=this.newsletters.find(item=>item.outputFolder===folderPath);
         if (profile && profile.id!==this.settings.activeNewsletter) await this.selectNewsletter(profile.id);
@@ -1060,7 +1068,7 @@ export default class TextMachine extends Plugin {
         this.disposed = true;
         this.aiController?.abort();
         this.crawlController?.abort();
-        this.runDialog?.close();
+        this.runDialog?.cancel();
         this.auth?.abort();
     }
 };
@@ -1092,13 +1100,27 @@ class TextMachineRun extends Modal {
         this.folderPath = folderPath;
     }
 
-    onOpen() { this.titleEl.setText(this.plugin.newsletters.find(profile=>profile.id===this.plugin.settings.activeNewsletter)!.name); void this.advance(); }
+    onOpen() {
+        this.titleEl.setText(this.plugin.newsletters.find(profile=>profile.id===this.plugin.settings.activeNewsletter)!.name);
+        if (this.working) this.render();
+        else void this.advance();
+    }
 
     onClose() {
         this.closed = true;
+        if (!this.working) {
+            this.stopClock();
+            if (this.plugin.runDialog===this) this.plugin.runDialog = null;
+        }
+    }
+
+    cancel() {
+        this.controller?.abort();
+        this.plugin.auth?.abort();
+        this.plugin.aiController?.abort();
+        this.plugin.crawlController?.abort();
         this.stopClock();
-        if (this.working) {this.controller?.abort();this.plugin.auth?.abort();this.plugin.aiController?.abort();this.plugin.crawlController?.abort();}
-        else if (this.plugin.runDialog===this) this.plugin.runDialog = null;
+        this.close();
     }
 
     async perform(action: Action, resume = true) {
@@ -1146,7 +1168,7 @@ class TextMachineRun extends Modal {
             const progress: Progress = (message,stream,reset,model) => this.showProgress(message,stream,reset,model);
             this.startClock();
             const collected = await p.importUnread(progress,this.controller!.signal);
-            if (this.closed || p.disposed) return;
+            if (p.disposed || this.controller!.signal.aborted) return;
             const note = await p.writeNewsletter(progress);
             this.result = collected;
             this.notePath = note?.path || '';
@@ -1216,6 +1238,7 @@ class TextMachineRun extends Modal {
             setIcon(spinner,'loader-circle');
             this.statusEl = activity.createSpan({text:p.isConnected && p.settings.labelId ? t('readingUnread') : p.settings.includeFeeds.trim() ? t('readingFeeds') : t('finishInBrowser'),attr:{role:'status'}});
             this.logEl = el.createDiv({cls:'text-machine-run-log',attr:{role:'log','aria-label':t('activityLog'),'aria-live':'off',tabindex:'0'}});
+            new Setting(el).addButton(button=>button.setButtonText(t('cancel')).onClick(()=>this.cancel()));
             return;
         }
         if (this.result) {

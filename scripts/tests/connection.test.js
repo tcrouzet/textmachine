@@ -19,7 +19,7 @@ async function fixture(initialSecrets = {}) {
         register() {}
     }
     let secret = JSON.stringify({email:'reader@example.com',clientId:'123-test.apps.googleusercontent.com',refreshToken:'old',scope:'https://www.googleapis.com/auth/gmail.readonly'});
-    const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},setIcon:()=>{},Plugin,PluginSettingTab:class {},Modal:class {open() {}},Notice:class {},getLanguage:()=> 'en',requireApiVersion:()=>false};
+    const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},setIcon:()=>{},Plugin,PluginSettingTab:class {},Modal:class {open() {} close() {this.onClose();}},Notice:class {},getLanguage:()=> 'en',requireApiVersion:()=>false};
     const context = {module:{exports:{}},AbortController,URL,URLSearchParams,Date,performance,setTimeout,clearTimeout,structuredClone,window:{setTimeout,clearTimeout,setInterval,clearInterval},
         MutationObserver:class {observe() {} disconnect() {}},
         document:{body:{},querySelectorAll:()=>[]},CSS:{escape:value=>value},
@@ -1623,7 +1623,75 @@ test('AuthorFeed works in both prompts and author content is fetched only once',
     }
 });
 
-test('closing during Gmail collection cancels late work and a menu relaunch restarts collection',async()=>{
+test('hiding the run during collection or generation preserves work and the folder menu restores the same run',async()=>{
+    for (const phase of ['collection','generation']) for (const reopen of [false,true]) {
+        const {p,contents,entries,events,obsidian,seen}=await newsletterFixture();
+        p.account.scope=p.gmail.SCOPE;
+        let entered,release,marked=0;
+        const started=new Promise(resolve=>{entered=resolve;}),pending=new Promise(resolve=>{release=resolve;});
+        const message={payload:{headers:[]},labelIds:['UNREAD','Label_1'],bodies:[{type:'text/plain',text:entries[0].url}]};
+        p.client={unreadMessages:async function*(){yield 'message';},message:async()=>{
+            if (phase==='collection') {entered();await pending;}
+            return message;
+        },markRead:async()=>{marked++;}};
+        if (phase==='generation') {
+            const generate=p.generate;
+            let first=true;
+            p.generate=async(...args)=>{if (first) {first=false;entered();await pending;}return generate(...args);};
+        }
+        await p.openTextMachine('Data');
+        const dialog=p.runDialog;dialog.render=()=>{};
+        const running=dialog.advance();await started;
+        const controller=dialog.controller,ai=p.aiController;
+        try {
+            dialog.onClose();
+            assert.equal(controller.signal.aborted,false,'Navigating away must not cancel collection');
+            if (ai) assert.equal(ai.signal.aborted,false,'Navigating away must not cancel the model');
+            assert.equal(p.disposed,false);
+            let disabled;
+            const folder=Object.assign(new obsidian.TFolder(),{path:'Data'});
+            events.get('file-menu')({addItem:callback=>callback({setTitle(){return this;},setIcon(){return this;},
+                setDisabled(value){disabled=value;return this;},onClick(){return this;}})},folder);
+            assert.equal(disabled,false,'The running newsletter must remain available from its folder');
+            await p.openTextMachine('Other');
+            assert.equal(dialog.closed,true,'Another newsletter must not replace or reopen the current run');
+            if (reopen) {
+                await p.openTextMachine('Data');
+                assert.equal(p.runDialog,dialog);
+                assert.equal(dialog.closed,false);
+                assert.equal(dialog.controller,controller);
+            }
+        } finally {release();await running;}
+        assert.equal(dialog.error,'');assert.equal(marked,1);assert.equal(seen.length,1);
+        assert.ok(contents.get(dialog.notePath)?.includes('First paragraph.'));
+        dialog.onClose();
+        assert.equal(p.runDialog,null);
+    }
+});
+
+test('unloading the plugin cancels a hidden run and prevents late mail or newsletter writes',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.account.scope=p.gmail.SCOPE;
+    let entered,release;
+    const started=new Promise(resolve=>{entered=resolve;}),pending=new Promise(resolve=>{release=resolve;});
+    const message={payload:{headers:[]},labelIds:['UNREAD','Label_1'],bodies:[{type:'text/plain',text:entries[0].url}]};
+    p.client={unreadMessages:async function*(){yield 'late';},message:async()=>{entered();return pending;},
+        markRead:()=>assert.fail('An unloaded plugin must not mark mail read')};
+    await p.openTextMachine('Data');
+    const dialog=p.runDialog;dialog.render=()=>{};
+    const running=dialog.advance();await started;
+    const before=contents.get(p.dataPath),controller=dialog.controller;
+    try {
+        dialog.onClose();p.onunload();
+        assert.equal(controller.signal.aborted,true);
+        assert.equal(p.disposed,true);
+    } finally {release(message);await running;}
+    assert.equal(contents.get(p.dataPath),before);
+    assert.equal(dialog.notePath,'');assert.equal(dialog.error,p.i18n.t('importFailed',{error:p.i18n.t('pluginDisabled'),added:0}));
+    assert.equal(p.runDialog,null);assert.equal(p.busy,false);
+});
+
+test('explicit cancellation during Gmail collection stops late work and a menu relaunch restarts collection',async()=>{
     const {p,contents,entries}=await newsletterFixture();
     p.account.scope=p.gmail.SCOPE;
     let entered,release;
@@ -1636,7 +1704,7 @@ test('closing during Gmail collection cancels late work and a menu relaunch rest
     const old=p.runDialog;old.render=()=>{};
     const running=old.advance();await started;
     const before=contents.get(p.dataPath);
-    old.onClose();
+    old.cancel();
     const reopening=p.openTextMachine('Data');
     release(message);
     await running;await reopening;
@@ -1665,7 +1733,7 @@ test('a fresh launch after stopping an RSS-only run collects Gmail connected in 
     const old=p.runDialog;old.render=()=>{};
     const running=old.advance();await started;
     const before=contents.get(p.dataPath);
-    old.onClose();release('{}');await running;
+    old.cancel();release('{}');await running;
     assert.equal(contents.get(p.dataPath),before);
     assert.equal(old.notePath,'');
     await p.connect();p.settings.labelId='Label_1';
@@ -3051,7 +3119,7 @@ test('feed failure does not stop later feeds but disk failure does',async()=>{
 });
 
 
-test('execution timer spans collection and AI, freezes on completion and cleans up on close or error',async()=>{
+test('execution timer spans collection and AI, continues while hidden and freezes on completion or error',async()=>{
     for (const outcome of ['success','error','close']) {
         const {p,context}=await fixture();
         let now=0, tick, cleared=0;
@@ -3074,7 +3142,12 @@ test('execution timer spans collection and AI, freezes on completion and cleans 
         assert.equal(dialog.clockEl.text,'Elapsed time: 01:05');
         now=3661000;tick();
         assert.equal(dialog.clockEl.text,'Elapsed time: 01:01:01');
-        if(outcome==='close') dialog.onClose();
+        if(outcome==='close') {
+            dialog.onClose();
+            assert.equal(cleared,0);
+            now+=1000;tick();
+            assert.equal(dialog.clockEl.text,'Elapsed time: 01:01:02');
+        }
         finish();await work;
         assert.equal(cleared,1);
         const frozen=dialog.clockEl.text;

@@ -76,14 +76,14 @@ async function fetchPage(url: string, signal?: AbortSignal, isBlocked: (url: str
     const failed = (failure: string): Page=>({status:404,url:current,html:'',failure});
     try {
         for (let redirects=0;redirects<=5;redirects++) {
-            if (signal?.aborted) throw new Error(t('pluginDisabled'));
+            if (signal?.aborted) throw new Error(t('newsletterCancelled'));
             if (isPdf(current)) return {status:415,url:current,html:'',contentType:'application/pdf'};
             if (visited.has(current)) return failed('redirect-loop');
             if (isBlocked(current)) return failed('blocked-domain');
             if (Date.now()>=deadline) return failed('ETIMEDOUT');
             visited.add(current);
             const target=await publicTarget(current);
-            if (!target || signal?.aborted) {if (signal?.aborted) throw new Error(t('pluginDisabled'));return failed('invalid-or-unreachable-address');}
+            if (!target || signal?.aborted) {if (signal?.aborted) throw new Error(t('newsletterCancelled'));return failed('invalid-or-unreachable-address');}
             const response=await new Promise<Page & {location?: string}>((resolve,reject)=>{
                 const request=transport(target.url,{
                     hostname:target.address,
@@ -129,14 +129,14 @@ async function fetchPage(url: string, signal?: AbortSignal, isBlocked: (url: str
             current=new URL(response.location,current).href;
         }
     } catch (caught) {
-        if (signal?.aborted) throw new Error(t('pluginDisabled'));
+        if (signal?.aborted) throw new Error(t('newsletterCancelled'));
         return failed(failureCode(caught));
     }
     return failed('too-many-redirects');
 }
 
 async function retrievePage(url: string, signal: AbortSignal | undefined, isBlocked: (url: string)=>boolean, BrowserWindow: BrowserWindowConstructor, directFetch: PageLoader=fetchPage, observe?: PageObserver): Promise<Page> {
-    if (signal?.aborted) throw new Error(t('pluginDisabled'));
+    if (signal?.aborted) throw new Error(t('newsletterCancelled'));
     if (isPdf(url)) return {status:415,url,html:'',contentType:'application/pdf'};
     if (isBlocked(url)) return {status:404,url,html:''};
     const start=Date.now();
@@ -150,11 +150,11 @@ async function retrievePage(url: string, signal: AbortSignal | undefined, isBloc
 }
 
 async function loadPage(url: string, signal: AbortSignal | undefined, isBlocked: (url: string)=>boolean, BrowserWindow: BrowserWindowConstructor): Promise<Page> {
-    if (signal?.aborted) throw new Error(t('pluginDisabled'));
+    if (signal?.aborted) throw new Error(t('newsletterCancelled'));
     const pdfPage = (target: string) => ({status:415,url:target,html:'',contentType:'application/pdf'});
     if (isPdf(url)) return pdfPage(url);
     if (!await publicUrl(url)) return {status:404, url, html:'',failure:'invalid-or-unreachable-address'};
-    if (signal?.aborted) throw new Error(t('pluginDisabled'));
+    if (signal?.aborted) throw new Error(t('newsletterCancelled'));
     const win = new BrowserWindow({show:false, webPreferences:{
         partition:'text-machine-' + randomUUID(), sandbox:true, contextIsolation:true,
         nodeIntegration:false, webSecurity:true, backgroundThrottling:false,
@@ -206,7 +206,7 @@ async function loadPage(url: string, signal: AbortSignal | undefined, isBlocked:
         if (typeof html!=='string') throw new Error(t('invalidMessageContent'));
         return {status, url:web.getURL(), html,contentType};
     } catch (caught) {
-        if (signal?.aborted) throw new Error(t('pluginDisabled'));
+        if (signal?.aborted) throw new Error(t('newsletterCancelled'));
         return pdfUrl ? pdfPage(pdfUrl) : {status:status >= 400 ? status : 404, url:web.isDestroyed() ? url : web.getURL() || url, html:'',contentType,
             failure:timedOut ? 'ETIMEDOUT' : failureCode(caught)};
     } finally {

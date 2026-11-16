@@ -78,7 +78,7 @@ test('HTTP cancellation closes a pending request and propagates cancellation',as
     const request=fetchPage('http://8.8.8.8/article',controller.signal,()=>false,transport);
     await started;
     controller.abort();
-    await assert.rejects(request,/disabled/);
+    await assert.rejects(request,/Writing cancelled\./);
 });
 
 test('blocked URLs and PDF results do not open a browser window',async()=>{
