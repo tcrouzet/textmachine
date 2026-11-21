@@ -16,7 +16,7 @@
     "chapeau": {
       "type": "string",
       "minLength": 1,
-      "description": "20 à 35 mots. Situe le même sujet que le titre et le premier paragraphe ; prépare la lecture sans raconter deux fois la même scène."
+      "description": "20 à 35 mots. Situe le même sujet que le titre et le premier paragraphe ; prépare la lecture sans raconter deux fois la même scène. Ne cite ni ne lie le média source, dont l’attribution reste dans le corps."
     }
   }
 }

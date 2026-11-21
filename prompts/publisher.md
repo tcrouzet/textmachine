@@ -1,5 +1,7 @@
 Écris en {{language}} un titre court et un chapeau de 20 à 35 mots pour cette revue de presse. Le chapeau est une phrase simple : nomme la personne ou le groupe concerné et ce qui lui arrive. Aucun pronom sans référent, aucune formule vague comme « un malentendu » ou « une version erronée » sans dire lequel. Pars du premier paragraphe : le titre annonce son sujet, le chapeau le situe, puis le premier paragraphe développe les faits. Lis les trois à la suite : ils doivent se comprendre dès la première lecture, sans raconter deux fois la même scène. Réserve les détails au corps.
 
+Ne cite pas les médias sources dans le chapeau, ni par leur nom ni par un lien. Présente directement les faits et les personnes concernées ; l’attribution des sources reste dans le corps.
+
 Le lecteur découvre le sujet. Un sigle ou un nom de site peu connu ne doit pas porter le titre : dis ce qui arrive et à qui, avec des mots courants. Reste fidèle aux faits, sans morale ni dramatisation. Évite « IA » dans le titre : c’est déjà le sujet de la newsletter.
 
 # Exemples de France Inter

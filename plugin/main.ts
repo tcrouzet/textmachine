@@ -889,12 +889,12 @@ export default class TextMachine extends Plugin {
             pending=pending.filter(article=>!this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds,authorPosts));
             brief=brief.filter(article=>!this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds,authorPosts));
             if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
-            if (!debug && pending.length<commentedArticles)
+            if (pending.length<commentedArticles)
                 throw new Error(t('newsletterNotEnoughSources',{count:pending.length,minimum:commentedArticles}));
             const rejected=await this.filterTitles(pending,controller.signal,progress);
             pending=pending.filter(article=>!rejected.has(article.id));
             check();
-            if (!debug && pending.length<commentedArticles)
+            if (pending.length<commentedArticles)
                 throw new Error(t('newsletterNotEnoughRelevantSources',{count:pending.length,minimum:commentedArticles}));
             if (pending.length) {
                 const prompt=await readPrompt('writer.md');
@@ -916,19 +916,19 @@ export default class TextMachine extends Plugin {
                     selection=await select(t('selectionMultiplePublications'));
                     if (selection.selected.length && this.newsletter.publicationCount(selection.selected)<2) throw new Error(t('newsletterMultiplePublications'));
                 }
+                if (selection.selected.length<commentedArticles)
+                    throw new Error(t('newsletterNotEnoughRelevantSources',{count:selection.selected.length,minimum:commentedArticles}));
                 result.discard=selection.discard.map((id: number)=>pending.find(article=>article.id===id)!.url);
                 brief.push(...selection.brief);
                 if (selection.selected.length) {
-                    if (!debug && selection.selected.length<commentedArticles)
-                        throw new Error(t('newsletterNotEnoughRelevantSources',{count:selection.selected.length,minimum:commentedArticles}));
                     progress?.(t('newsletterWriting'));
                     const request=this.newsletter.writerRequest(prompt,selection.selected,previous,authorPosts || [],language,this.settings.referenceSources,commentedArticles);
                     let editorial;
-                    try {editorial=this.newsletter.parseWriter(await respond(request,progress),selection.selected,debug ? 2 : commentedArticles);}
+                    try {editorial=this.newsletter.parseWriter(await respond(request,progress),selection.selected,commentedArticles);}
                     catch (caught) {
                         if (errorOf(caught).code!=='RP_TOO_FEW_SOURCES') throw caught;
                         progress?.(t('newsletterExpandingReview'));
-                        editorial=this.newsletter.parseWriter(await respond({...request,system:request.system+'\n\n'+t('writerMultiplePublications')},progress),selection.selected,debug ? 2 : commentedArticles);
+                        editorial=this.newsletter.parseWriter(await respond({...request,system:request.system+'\n\n'+t('writerMultiplePublications')},progress),selection.selected,commentedArticles);
                     }
                     result.paragraphs=editorial.paragraphs;
                     result.used=editorial.used.map(article=>article.url);
@@ -939,12 +939,9 @@ export default class TextMachine extends Plugin {
                     }
                     this.newsletter.assertNoAuthorSources(result.paragraphs,this.settings.authorFeeds,authorPosts);
                 }
-                if (!result.used.length && !brief.length) {
-                    if (!debug) await vault.process(log,current=>this.newsletter.applyStatuses(current,pending.filter(article=>!article.usedAt),result,day));
-                    new Notice(t('newsletterNoArticles'));
-                    return null;
-                }
             }
+            if (!result.used.length)
+                throw new Error(t('newsletterNotEnoughRelevantSources',{count:0,minimum:commentedArticles}));
             let translatedBrief = brief;
             if (brief.length) {
                 progress?.(t('newsletterTranslatingBrief'));
@@ -952,11 +949,6 @@ export default class TextMachine extends Plugin {
                 const request = this.newsletter.briefRequest(prompt,brief,language);
                 const response = await respond(request);
                 translatedBrief = this.newsletter.parseBrief(response,brief);
-            }
-            if (!result.used.length && !translatedBrief.length) {
-                if (!debug) await vault.process(log,current=>this.newsletter.applyStatuses(current,pending,result,day));
-                new Notice(t('newsletterNoArticles'));
-                return null;
             }
             if (result.used.length && connection) {
                 const original = result.paragraphs.join('\n\n');

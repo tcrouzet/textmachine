@@ -1125,34 +1125,68 @@ test('the brief includes blocked sources, secondary selections and every selecte
     assert.equal(saved.find(row=>row.id===15).status,'forbidden');
 });
 
-test('secondary-only editions are saved without forcing a main article or losing a source declined by the writer',async()=>{
-    for (const decline of [false,true]) {
+test('empty selections and empty writer responses cannot create or replace an edition or consume its articles',async()=>{
+    for (const decline of [false,true]) for (const debug of [false,true]) for (const existing of [false,true]) {
         const {p,contents}=await newsletterFixture();
-        p.settings.imageMode='none';
+        p.settings.imageMode='none';p.settings.debug=debug;
+        const path='Data/'+(debug ? 'test-' : '')+'text-machine-'+p.newsletter.day()+'.md';
+        if (existing) await p.app.vault.create(path,'# Existing edition');
+        const before=new Map(contents);
         const generate=p.generate;
         let writing=0;
         p.generate=async(connection,system,input,...rest)=>{
             let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
             if (context?.instructions==='Runtime selection') return JSON.stringify({selected:decline ? [1,2] : [],brief:decline ? [] : [1,2],discard:[]});
             if (context?.instructions==='My runtime prompt') {writing++;return JSON.stringify({paragraphs:[],used:[]});}
-            if (input.startsWith('Runtime publisher') || context?.instructions==='Runtime verifier') assert.fail('No main article to publish or verify');
+            if (system.startsWith('Runtime brief') || system.startsWith('Runtime rewriter') || input.startsWith('Runtime publisher'))
+                assert.fail('Stop before preparing the brief or publishing an edition without an article');
             return generate(connection,system,input,...rest);
         };
-        const note=await p.writeNewsletter(),text=contents.get(note.path);
+        p.generateIllustration=()=>assert.fail('Do not illustrate an edition without an article');
+        await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t('newsletterNotEnoughRelevantSources',{count:0,minimum:2}));
         assert.equal(writing,decline ? 1 : 0);
-        assert.ok(text.includes('[used](https://example.com/used)'));
-        assert.ok(!text.includes('First paragraph.'));
-        assert.equal(JSON.parse(contents.get(p.dataPath)).articles[0].usedAt,p.newsletter.day());
+        assert.deepEqual(contents,before);
+        assert.equal(p.aiController,null);
+    }
+});
+
+test('the configured minimum blocks short collections, selections and actual citations in normal and debug modes',async()=>{
+    for (const debug of [false,true]) for (const stage of ['collection','selection','writer']) {
+        const {p,contents,entries}=await newsletterFixture();
+        p.settings.debug=debug;p.settings.commentedArticles=3;p.settings.imageMode='none';
+        if (stage!=='collection') {
+            const data=JSON.parse(contents.get(p.dataPath));
+            data.articles.push({...entries[0],id:4,title:'Third source',url:'https://third.example/article'});
+            data.nextId=5;contents.set(p.dataPath,JSON.stringify(data));
+        }
+        const path='Data/'+(debug ? 'test-' : '')+'text-machine-'+p.newsletter.day()+'.md';
+        await p.app.vault.create(path,'# Existing edition');
+        const before=new Map(contents),generate=p.generate;
+        p.generate=async(connection,system,input,...rest)=>{
+            let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+            if (stage==='collection') assert.fail('Do not call AI below the configured minimum');
+            if (stage==='selection' && context?.instructions==='Runtime selection')
+                return JSON.stringify({selected:[1,2],brief:[4],discard:[]});
+            if (stage==='writer' && context?.instructions==='My runtime prompt')
+                return JSON.stringify({paragraphs:['First [source]('+entries[0].url+').','Second [source]('+entries[1].url+').'],used:[1,2,4]});
+            return generate(connection,system,input,...rest);
+        };
+        p.generateIllustration=()=>assert.fail('Do not illustrate an edition below the minimum');
+        await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t(stage==='collection' ? 'newsletterNotEnoughSources' : 'newsletterNotEnoughRelevantSources',{count:2,minimum:3}));
+        assert.deepEqual(contents,before);
+        assert.equal(p.aiController,null);
     }
 });
 
 test('brief filtering must classify every supplied article even when rejecting off-topic sources',async()=>{
-    const {p,contents}=await newsletterFixture();
+    const {p,contents,entries}=await newsletterFixture();
+    const data=JSON.parse(contents.get(p.dataPath));
+    data.nextId=6;
+    data.articles.push(...[4,5].map(id=>({...entries[0],id,title:'Blocked source '+id,url:'https://blocked.example/story-'+id,content:'',status:'forbidden'})));
+    contents.set(p.dataPath,JSON.stringify(data));
     const before=contents.get(p.dataPath),generate=p.generate;
     p.generate=async(connection,system,input,...rest)=>{
-        let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
-        if (context?.instructions==='Runtime selection') return JSON.stringify({selected:[],brief:[1,2],discard:[]});
-        if (system.startsWith('Runtime brief')) return JSON.stringify({titles:[{id:1,title:'A title',category:'Écriture'}]});
+        if (system.startsWith('Runtime brief')) return JSON.stringify({titles:[{id:4,title:'A title',category:'Écriture'}]});
         return generate(connection,system,input,...rest);
     };
     p.generateIllustration=()=>assert.fail('Do not generate an image after a missing brief title');
@@ -2162,12 +2196,12 @@ test('closing the run during generation prevents a late note and status changes'
     assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,0);
 });
 
-test('irrelevant articles are discarded without creating a note',async()=>{
+test('an empty full-text selection stops without consuming articles or creating a note',async()=>{
     const {p,contents} = await newsletterFixture();
+    const before=contents.get(p.dataPath);
     p.generate = async()=>JSON.stringify({brief:[], selected:[],discard:[1,2]});
-    assert.equal(await p.writeNewsletter(),null);
-    assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.status),['discard','discard','']);
-    assert.deepEqual(JSON.parse(contents.get(p.dataPath)).articles.map(article=>article.usedAt),['','','unknown']);
+    await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t('newsletterNotEnoughRelevantSources',{count:0,minimum:2}));
+    assert.equal(contents.get(p.dataPath),before);
     assert.equal([...contents.keys()].filter(path=>/\/text-machine-\d{4}-\d{2}-\d{2}\.md$/.test(path)).length,0);
 });
 
@@ -2678,7 +2712,7 @@ test('an empty regeneration keeps the saved edition and used articles while disc
     data.articles.push({...entries[0],id:4,url:'https://example.com/irrelevant-new',title:'irrelevant-new'});
     contents.set(p.dataPath,JSON.stringify(data));
     p.generate = async(_connection,_system,input)=>JSON.stringify({brief:[], selected:[],discard:JSON.parse(input).articles.map(article=>article.id)});
-    assert.equal(await p.writeNewsletter(),null);
+    await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t('newsletterNotEnoughRelevantSources',{count:0,minimum:2}));
     assert.equal(contents.get(note.path),before);
     const saved = JSON.parse(contents.get(p.dataPath));
     assert.equal(saved.articles[0].status,'');
@@ -2704,23 +2738,30 @@ test('forbidden articles cannot satisfy the threshold and debug sends only their
     const {p,contents,entries} = await newsletterFixture();
     p.settings.authorFeeds='';
     p.settings.newsletterLanguage='français';
-    const original={...entries[0],title:'How AI changes writing',status:'forbidden',content:'Unverified content must never be sent to AI'};
+    const original={...entries[0],id:4,title:'How AI changes writing',url:'https://blocked.example/story',status:'forbidden',content:'Unverified content must never be sent to AI'};
     contents.set(p.dataPath,JSON.stringify({version:1,articles:[original]}));
     p.settings.imageMode='none';
-    p.generate=async(_connection,system,input)=>{
-        assert.ok(system.startsWith('Runtime brief'));
-        assert.deepEqual(JSON.parse(input),[{id:original.id,title:original.title}]);
-        return JSON.stringify({titles:[{id:original.id,title:'L’IA transforme l’écriture',category:'Écriture'}]});
+    const generate=p.generate;
+    p.generate=async(connection,system,input,...rest)=>{
+        assert.ok(!input.includes(original.content));
+        if (system.startsWith('Runtime brief')) {
+            assert.deepEqual(JSON.parse(input),[{id:original.id,title:original.title}]);
+            return JSON.stringify({titles:[{id:original.id,title:'L’IA transforme l’écriture',category:'Écriture'}]});
+        }
+        return generate(connection,system,input,...rest);
     };
     p.request = async()=>{throw new Error('No feed needed');};
     p.loadPage = async()=>{throw new Error('Forbidden sources must not be loaded');};
     await assert.rejects(p.writeNewsletter(),/0.*2/);
     assert.equal(contents.size,1);
     p.settings.debug=true;
+    await assert.rejects(p.writeNewsletter(),/0.*2/);
+    assert.equal(contents.size,1);
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:5,articles:[entries[0],entries[1],original]}));
     const note=await p.writeNewsletter();
     assert.ok(contents.get(note.path).includes('L’IA transforme l’écriture'));
     assert.ok(!contents.get(note.path).includes('Unverified content'));
-    const saved = JSON.parse(contents.get(p.dataPath)).articles[0];
+    const saved = JSON.parse(contents.get(p.dataPath)).articles.find(article=>article.id===original.id);
     assert.equal(saved.title,original.title);
     assert.equal(saved.content,original.content);
     assert.equal(saved.status,'forbidden');
@@ -2779,29 +2820,44 @@ test('brief translation failures and cancellation preserve the saved edition and
     }
 });
 
-test('debug uses a separate Codex schema for brief titles without calling the writer',async()=>{
+test('debug uses a separate Codex schema for brief titles alongside a complete main article',async()=>{
     const {p,contents,entries}=await newsletterFixture();
     p.settings.debug=true;
-    contents.set(p.dataPath,JSON.stringify({version:1,articles:[{...entries[0],status:'forbidden'},entries[1]]}));
+    p.settings.imageMode='none';
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:5,articles:[...entries,{...entries[0],id:4,title:'Blocked source',url:'https://blocked.example/story',status:'forbidden',content:''}]}));
     p.settings.newsletterLanguage='English';
     p.getAIConnection=()=>({provider:'codex',model:'fixture'});
-    let calls=0;
+    let calls=0,briefs=0;
+    const generate=p.generate;
     p.codex={...p.codex,findCodex:async()=>'/test/codex',generate:async(executable,system,input,model,signal,_progress,schema)=>{
         calls++;
         assert.equal(executable,'/test/codex');
         assert.equal(model,'fixture');
         assert.ok(!signal.aborted);
-        if (input.includes('Runtime selection')) return JSON.stringify({brief:[], selected:[],discard:[2]});
-        assert.ok(system.includes('Runtime brief English'));
-        assert.deepEqual(JSON.parse(input),[{id:1,title:'used'}]);
-        assert.ok(schema.properties.titles);
-        assert.equal(schema.additionalProperties,false);
-        return JSON.stringify({titles:[{id:1,title:'Translated title',category:'Writing'}]});
+        if (system.includes('Runtime brief English')) {
+            briefs++;
+            assert.deepEqual(JSON.parse(input),[{id:4,title:'Blocked source'}]);
+            assert.ok(schema.properties.titles);
+            assert.equal(schema.additionalProperties,false);
+            return JSON.stringify({titles:[{id:4,title:'Translated title',category:'Writing'}]});
+        }
+        return generate({provider:'codex',model},system,input);
     }};
     p.generate=withStages(p, async()=>{throw new Error('Cloud API must not be called');});
     const note=await p.writeNewsletter();
-    assert.equal(calls,2);
-    assert.ok(contents.get(note.path).includes('* [Translated title](https://example.com/used)'));
+    assert.equal(calls,5);assert.equal(briefs,1);
+    assert.ok(contents.get(note.path).includes('First paragraph.'));
+    assert.ok(contents.get(note.path).includes('* [Translated title](https://blocked.example/story)'));
+});
+
+test('debug cannot create a brief-only edition from inaccessible sources without article text',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.settings.debug=true;
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:2,articles:[{...entries[0],status:'forbidden',content:''}]}));
+    const before=new Map(contents);
+    p.generate=()=>assert.fail('No writing or brief generation without readable sources');
+    await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t('newsletterNotEnoughSources',{count:0,minimum:2}));
+    assert.deepEqual(contents,before);
 });
 
 test('disabled illustrations skip generation, keys, prompts and cached images',async()=>{
@@ -3276,7 +3332,7 @@ test('debug collection leaves mail unread, deduplicates repeated runs and normal
     assert.equal(JSON.parse(contents.get(p.dataPath)).articles.length,4);
 });
 
-test('debug newsletters preserve real editions, images and article usage while keeping the writing target',async()=>{
+test('debug newsletters enforce the minimum and preserve real editions, images and article usage',async()=>{
     const {p,contents,seen}=await newsletterFixture();
     p.settings.commentedArticles=10;
     p.settings.debug=true;
@@ -3285,6 +3341,10 @@ test('debug newsletters preserve real editions, images and article usage while k
     await p.app.vault.create(real,'# Real newsletter');
     await p.app.vault.create(realImage,'Real illustration');
     const before=contents.get(p.dataPath);
+    await assert.rejects(p.writeNewsletter(),/2.*10/);
+    assert.equal(contents.get(p.dataPath),before);
+    assert.ok(!contents.has('Data/test-text-machine-'+day+'.md'));
+    p.settings.commentedArticles=2;
     const note=await p.writeNewsletter();
     assert.equal(note.path,'Data/test-text-machine-'+day+'.md');
     assert.ok(contents.get(note.path).includes('Attachments/test-text-machine-'+day+'.png'));
@@ -3294,6 +3354,7 @@ test('debug newsletters preserve real editions, images and article usage while k
     await p.writeNewsletter();
     assert.equal(contents.get(p.dataPath),before);
     assert.ok(seen.every(context=>context.previousNewsletters.every(note=>!note.name.startsWith('test-'))));
+    p.settings.commentedArticles=10;
     p.settings.debug=false;
     await assert.rejects(p.writeNewsletter(),/2.*10/);
     assert.equal(contents.get(p.dataPath),before);
@@ -3306,12 +3367,11 @@ test('debug newsletters preserve real editions, images and article usage while k
 test('debug selection discards remain repeatable without recording statuses',async()=>{
     const {p,contents}=await newsletterFixture();
     p.settings.debug=true;
-    p.settings.commentedArticles=10;
     const before=contents.get(p.dataPath);
     p.generate=async(_connection,_system,input)=>JSON.stringify({brief:[], selected:[],discard:JSON.parse(input).articles.map(article=>article.id)});
-    assert.equal(await p.writeNewsletter(),null);
+    await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t('newsletterNotEnoughRelevantSources',{count:0,minimum:2}));
     assert.equal(contents.get(p.dataPath),before);
-    assert.equal(await p.writeNewsletter(),null);
+    await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t('newsletterNotEnoughRelevantSources',{count:0,minimum:2}));
     assert.equal(contents.get(p.dataPath),before);
 });
 
@@ -3356,6 +3416,7 @@ test('debug includes today’s real edition in both AI histories and excludes it
 test('brief titles explicitly rejected as off-topic never appear in test newsletters or consume articles',async()=>{
     const {p,contents,entries}=await newsletterFixture();
     p.settings.debug=true;
+    p.settings.imageMode='none';
     const unrelated='Midterms 2026: Wall Street celebrates the vote';
     const relevant='Novelists disclose their AI writing practices';
     const data=JSON.parse(contents.get(p.dataPath));
@@ -3371,12 +3432,14 @@ test('brief titles explicitly rejected as off-topic never appear in test newslet
     assert.ok(!contents.get(note.path).includes('Midterms'));
     assert.ok(contents.get(note.path).includes('https://example.com/novelists'));
     assert.equal(contents.get(p.dataPath),before);
-    data.articles=data.articles.slice(3);
-    contents.set(p.dataPath,JSON.stringify(data));
-    p.generateIllustration=async()=>{throw new Error('An empty edition must not generate an image');};
-    p.generate=async()=>JSON.stringify({titles:[{id:4,title:null,category:null},{id:5,title:null,category:null}]});
-    assert.equal(await p.writeNewsletter(),null);
-    assert.equal(contents.get(p.dataPath),JSON.stringify(data));
+    p.generate=async(connection,system,input,...rest)=>system.startsWith('Runtime brief')
+        ? JSON.stringify({titles:[{id:4,title:null,category:null},{id:5,title:null,category:null}]})
+        : generate(connection,system,input,...rest);
+    const updated=await p.writeNewsletter();
+    assert.ok(contents.get(updated.path).includes('First paragraph.'));
+    assert.ok(!contents.get(updated.path).includes('https://example.com/wall-street'));
+    assert.ok(!contents.get(updated.path).includes('https://example.com/novelists'));
+    assert.equal(contents.get(p.dataPath),before);
 });
 
 test('RSS URL fingerprints survive reopening and retain rejected URLs and syndicated aliases',async()=>{

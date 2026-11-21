@@ -64,7 +64,6 @@ async function authorize(credentials: Credentials, request: HttpRequest, openBro
         const finish = (error: Error | null, value = '') => {
             if (finished) return;
             finished = true;
-            window.clearTimeout(timer);
             signal?.removeEventListener('abort', abort);
             server.close();
             if (error) reject(error); else resolve(value);
@@ -89,7 +88,6 @@ async function authorize(credentials: Credentials, request: HttpRequest, openBro
             res.end(t('authorizationReceived'));
             finish(null, url.searchParams.get('code') || '');
         });
-        const timer = window.setTimeout(() => finish(new Error(t('connectionExpired'))), 180_000);
         server.on('error', () => finish(new Error(t('callbackUnavailable'))));
         signal?.addEventListener('abort', abort, { once: true });
         if (signal?.aborted) { abort(); return; }

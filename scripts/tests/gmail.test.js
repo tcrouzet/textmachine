@@ -54,6 +54,42 @@ test('OAuth binds to loopback, validates state and exchanges a PKCE code', async
     await assert.rejects(fetch(callback));
 });
 
+test('OAuth keeps its local callback available while the user completes consent beyond three minutes', async t => {
+    t.mock.timers.enable({apis:['setTimeout']});
+    const controller=new AbortController();
+    let open, outcome='pending', result;
+    const opened=new Promise(resolve=>{open=resolve;});
+    const pending=authorize(credentials,async()=>ok(tokens),address=>open(new URL(address)),controller.signal)
+        .then(value=>{outcome='connected';result=value;},error=>{outcome=error.message;});
+    let callback;
+    try {
+        const authorization=await opened;
+        callback=new URL(authorization.searchParams.get('redirect_uri'));
+        t.mock.timers.tick(180001);
+        await Promise.resolve();
+        assert.equal(outcome,'pending','The callback must remain available until consent or explicit cancellation');
+        callback.search=new URLSearchParams({code:'test-code',state:authorization.searchParams.get('state')});
+        assert.equal((await fetch(callback)).status,200);
+        await pending;
+        assert.equal(outcome,'connected');
+        assert.equal(result.refresh_token,'test-refresh');
+    } finally {controller.abort();await pending;}
+    await assert.rejects(fetch(callback));
+});
+
+test('cancelling a pending OAuth login closes the callback without exchanging a code', async () => {
+    const controller=new AbortController();
+    let open;
+    const opened=new Promise(resolve=>{open=resolve;});
+    const pending=authorize(credentials,()=>assert.fail('No token exchange after cancellation'),address=>open(new URL(address)),controller.signal);
+    const rejected=assert.rejects(pending,/annulée/);
+    const authorization=await opened;
+    const callback=new URL(authorization.searchParams.get('redirect_uri'));
+    controller.abort();
+    await rejected;
+    await assert.rejects(fetch(callback));
+});
+
 test('refusal, cancellation and browser failure never exchange a code', async () => {
     const request = async () => assert.fail('No token request expected');
     await assert.rejects(authorize(credentials, request, async address => {
