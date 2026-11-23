@@ -1,3 +1,5 @@
+import {FolderPicker as SharedFolderPicker} from './obsidian-toolbox/src/ui/folder-picker';
+import {validFolderName} from './obsidian-toolbox/src/ui/folder-name';
 import { App, Plugin, PluginSettingTab, Setting, SettingGroup, ButtonComponent, Notice, addIcon, setIcon, requestUrl, requireApiVersion, Modal, TFolder, TFile, getLanguage } from 'obsidian';
 import { shell } from 'electron';
 import { BrowserWindow } from '@electron/remote';
@@ -980,9 +982,11 @@ export default class TextMachine extends Plugin {
             if (result.used.length) {
                 progress?.(t('newsletterPublishing'));
                 const request=this.newsletter.publisherRequest(await readPrompt('publisher.md'),result.paragraphs,language);
-                const published=await publication(request,this.newsletter.parsePublisher);
-                this.newsletter.assertNoAuthorSources([published.title,published.chapeau],this.settings.authorFeeds,authorPosts);
-                Object.assign(result,published);
+                const published=await publication(request,text=>this.newsletter.parsePublisher(text,result.paragraphs[0]));
+                this.newsletter.assertNoAuthorSources([published.title,published.chapeau,published.firstParagraph],this.settings.authorFeeds,authorPosts);
+                result.title=published.title;
+                result.chapeau=published.chapeau;
+                result.paragraphs[0]=published.firstParagraph;
             }
             const illustrationName=editionName+'.png';
             if (imageMode==='extracted') {
@@ -997,11 +1001,21 @@ export default class TextMachine extends Plugin {
                         inserted.add(article.url);
                         progress?.(t('newsletterExtractingImage',{title:article.title}));
                         try {
-                            const page=await this.loadPage(article.url,controller.signal,()=>false);
-                            check();
-                            const image=page.status>=200 && page.status<300 && page.html
-                                ? this.crawler.extractSocialImage(page.html,page.url) : null;
-                            if (image?.imageCaption.trim()) result.paragraphImages.push({paragraph,url:image.image,source:this.articles.articleUrl(page.url) || article.url,caption:image.imageCaption});
+                            let source=article.url;
+                            let image=article.image && article.imageCaption?.trim()
+                                ? {image:article.image,imageCaption:article.imageCaption} : null;
+                            if (!image) {
+                                const page=await this.loadPage(article.url,controller.signal,()=>false);
+                                check();
+                                source=this.articles.articleUrl(page.url) || article.url;
+                                image=page.status>=200 && page.status<300 && page.html
+                                    ? this.crawler.extractArticleImage(page.html,page.url) : null;
+                            }
+                            if (image?.imageCaption.trim()) {
+                                const target=new URL(image.image);
+                                if (!['http:','https:'].includes(target.protocol) || target.username || target.password) throw new Error();
+                                result.paragraphImages.push({paragraph,url:target.href,source,caption:image.imageCaption});
+                            }
                             else progress?.(t('newsletterSourceImageMissing',{title:article.title}));
                         } catch {
                             check();
@@ -1281,96 +1295,21 @@ class TextMachineRun extends Modal {
     }
 }
 
-class FolderPicker extends Modal {
-    choose: (folder: string) => Promise<void>;
-    folder: TFolder;
-    newName = 'TextMachine';
-    working = false;
-    error = '';
-
-    constructor(app: App, startPath: string, choose: (folder: string) => Promise<void>, private moving = false) {
-        super(app);
-        this.choose = choose;
-        const folder = app.vault.getAbstractFileByPath(startPath);
-        this.folder = folder instanceof TFolder ? folder : app.vault.getRoot();
-        this.newName = 'TextMachine';
-    }
-
-    onOpen() { this.render(); }
-
-    async select(create = false) {
-        if (this.working) return;
-        this.working = true;
-        this.error = '';
-        this.render();
-        try {
-            let destination = this.folder.isRoot() ? '' : this.folder.path;
-            if (create) {
-                const name = this.newName.trim();
-                if (!name || name === '.' || name === '..' || /[\\/:]/.test(name) || [...name].some(character => character.charCodeAt(0) < 32)) {
-                    throw new Error(t('invalidFolderName'));
-                }
-                destination = (destination ? destination + '/' : '') + name;
-                if (this.app.vault.getAbstractFileByPath(destination)) throw new Error(t('folderNameExists'));
-            }
-            await this.choose(destination);
-            this.close();
-        } catch (caught) {
-            const error = errorOf(caught);
-            this.error = error.message;
-        } finally {
-            this.working = false;
-            this.render();
-        }
-    }
-
-    render() {
-        const el = this.contentEl;
-        el.empty();
-        el.createEl('h2', { text: this.moving ? t('moveFolder') : t('journalFolder') });
-        el.createEl('p', { text: this.folder.isRoot() ? t('vaultRoot') : this.folder.path });
-        const list = el.createDiv('text-machine-folders');
-        const root = list.createEl('button', { text: t('vaultRoot') });
-        root.disabled = this.working;
-        root.classList.toggle('is-selected', this.folder.isRoot());
-        root.addEventListener('click', () => { this.folder = this.app.vault.getRoot(); this.error = ''; this.render(); });
-        if (!this.folder.isRoot() && !this.folder.parent!.isRoot()) {
-            const parent = list.createEl('button', { text: '.. / ' + this.folder.parent!.path, attr: { 'aria-label': t('parentFolder') } });
-            parent.disabled = this.working;
-            parent.addEventListener('click', () => { this.folder = this.folder.parent!; this.error = ''; this.render(); });
-        }
-        if (!this.folder.isRoot()) {
-            const current = list.createEl('button', { text: this.folder.name, cls: 'is-selected', attr: { 'aria-current': 'location' } });
-            current.disabled = this.working;
-        } else root.setAttribute('aria-current', 'location');
-        const folders = this.folder.children.filter(child => child instanceof TFolder).sort((a, b) => a.name.localeCompare(b.name));
-        for (const folder of folders) {
-            const button = list.createEl('button', { text: folder.name, attr: { 'aria-label': t('openFolder', { name: folder.name }) } });
-            button.disabled = this.working;
-            button.addEventListener('click', () => { this.folder = folder; this.error = ''; this.render(); });
-        }
-        if (!folders.length) list.createEl('p', { text: t('noSubfolders') });
-        const rows = [...list.querySelectorAll('button')];
-        for (const row of rows) {
-            row.classList.add('tree-item-self');
-            row.addEventListener('keydown', event => {
-                if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
-                event.preventDefault();
-                const index = rows.indexOf(row) + (event.key === 'ArrowDown' ? 1 : -1);
-                rows[Math.max(0, Math.min(rows.length - 1, index))].focus();
-            });
-        }
-
-        if (!this.moving) new Setting(el).setName(t('newFolderName'))
-            .addText(text => {
-                text.inputEl.setAttribute('aria-label', t('newFolderInput'));
-                text.setValue(this.newName).setDisabled(this.working).onChange(value => { this.newName = value; });
-            })
-            .addButton(button => button.setButtonText(t('createHere')).setCta().setDisabled(this.working).onClick(() => this.select(true)));
-        new Setting(el).setDesc(this.moving ? t('moveFolderDescription') : t('folderPickerDescription'))
-            .addButton(button => button.setButtonText(this.moving ? t('moveHere') : t('chooseFolder')).setDisabled(this.working || (!this.moving && (this.folder.isRoot() || this.folder.children.length > 0))).onClick(() => this.select()))
-            .addButton(button => button.setButtonText(t('cancel')).setDisabled(this.working).onClick(() => this.close()));
-        if (this.error) el.createEl('p', { text: this.error, attr: { role: 'alert' } });
+class FolderPicker extends SharedFolderPicker {
+    constructor(app: App, startPath: string, choose: (folder: string) => Promise<void>, moving = false) {
+        const initial=app.vault.getAbstractFileByPath(startPath);
+        super(app,initial instanceof TFolder?initial.path:'',async(name,parent)=>{
+            if(name===null){await choose(parent);return;}
+            if(!validFolderName(name))throw new Error(t('invalidFolderName'));
+            const folder=parent?app.vault.getAbstractFileByPath(parent):app.vault.getRoot();
+            if(!(folder instanceof TFolder))throw new Error(t('parentMoved'));
+            const destination=(parent?parent+'/':'')+name;
+            if(app.vault.getAbstractFileByPath(destination))throw new Error(t('folderNameExists'));
+            await choose(destination);
+        },{defaultName:'TextMachine',allowCreate:!moving,canUse:folder=>moving || (!folder.isRoot() && folder.children.length===0),description:moving?t('moveFolderDescription'):t('folderPickerDescription'),labels:{
+            title:moving?t('moveFolder'):t('journalFolder'),current:t('currentFolder'),use:moving?t('moveHere'):t('chooseFolder'),createNew:t('createNewFolder'),openExisting:t('openExistingFolder'),
+            browse:t('browse'),root:t('vaultRoot'),chooseLocation:t('chooseFolderLocation'),location:t('folderLocation'),name:t('newFolderName'),placeholder:'TextMachine',back:t('back'),create:t('createFolder'),cancel:t('cancel')
+        }});
     }
 }
 

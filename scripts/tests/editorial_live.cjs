@@ -59,7 +59,8 @@ async function main() {
     try {result.paragraphs=parseRewrite(writer.paragraphs.join('\n\n'),await respond('rewriter',rewriteRequest(renderPrompt(read('rewriter.md'),{language,AuthorFeed:'[]',recentPosts:'[]'}),writer.paragraphs.join('\n\n'))));}
     catch(error) {report.revisionError=error.message;}
     report.stages.rewriter=result.paragraphs;save();
-    Object.assign(result,await publication('publisher',publisherRequest(read('publisher.md'),result.paragraphs,language),parsePublisher));
+    const published=await publication('publisher',publisherRequest(read('publisher.md'),result.paragraphs,language),text=>parsePublisher(text,result.paragraphs[0]));
+    result.title=published.title;result.chapeau=published.chapeau;result.paragraphs[0]=published.firstParagraph;
     report.stages.publisher={title:result.title,chapeau:result.chapeau};save();
     report.final={title:result.title,chapeau:result.chapeau,paragraphs:result.paragraphs};
     const brief=[...selection.brief,...selection.selected.filter(article=>!result.used.includes(article.url))];

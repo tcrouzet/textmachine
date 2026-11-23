@@ -10,6 +10,8 @@ REPO=$(jq -er '.nameWithOwner' <<< "$REPOSITORY")
 BRANCH=$(jq -er '.defaultBranchRef.name' <<< "$REPOSITORY")
 [ "$(git branch --show-current)" = "$BRANCH" ] || { echo "Lance release.sh depuis la branche par défaut : $BRANCH" >&2; exit 1; }
 
+node scripts/toolbox.cjs
+
 RESOURCE_ASSETS_DIR=$(mktemp -d "${TMPDIR:-/tmp}/textmachine-resources.XXXXXX")
 trap 'rm -rf -- "$RESOURCE_ASSETS_DIR"' EXIT
 npm run resources -- "$RESOURCE_ASSETS_DIR"

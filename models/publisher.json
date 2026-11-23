@@ -1,11 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Titre et chapeau de la revue de presse",
+  "title": "Ouverture de la revue de presse",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "title",
-    "chapeau"
+    "chapeau",
+    "firstParagraph"
   ],
   "properties": {
     "title": {
@@ -17,6 +18,11 @@
       "type": "string",
       "minLength": 1,
       "description": "20 à 35 mots. Situe le même sujet que le titre et le premier paragraphe ; prépare la lecture sans raconter deux fois la même scène. Ne cite ni ne lie le média source, dont l’attribution reste dans le corps."
+    },
+    "firstParagraph": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Premier paragraphe finalisé sans répéter les faits ni les présentations du titre et du chapeau. Conserver ses faits, citations, noms des médias et liens vers les sources."
     }
   }
 }

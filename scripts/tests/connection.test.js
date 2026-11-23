@@ -19,7 +19,7 @@ async function fixture(initialSecrets = {}) {
         register() {}
     }
     let secret = JSON.stringify({email:'reader@example.com',clientId:'123-test.apps.googleusercontent.com',refreshToken:'old',scope:'https://www.googleapis.com/auth/gmail.readonly'});
-    const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},setIcon:()=>{},Plugin,PluginSettingTab:class {},Modal:class {open() {} close() {this.onClose();}},Notice:class {},getLanguage:()=> 'en',requireApiVersion:()=>false};
+    const obsidian = {TFile:class {},TFolder:class {},addIcon:()=>{},setIcon:()=>{},Plugin,PluginSettingTab:class {},FuzzySuggestModal:class {},Modal:class {open() {} close() {this.onClose();}},Notice:class {},getLanguage:()=> 'en',requireApiVersion:()=>false};
     const context = {module:{exports:{}},AbortController,URL,URLSearchParams,Date,performance,setTimeout,clearTimeout,structuredClone,window:{setTimeout,clearTimeout,setInterval,clearInterval},
         MutationObserver:class {observe() {} disconnect() {}},
         document:{body:{},querySelectorAll:()=>[]},CSS:{escape:value=>value},
@@ -316,7 +316,7 @@ async function newsletterFixture() {
     p.getAIConnection = ()=>({provider:'openai',model:'fixture',apiKey:'fixture'});
     const seen = [],publisher={title:'A new newsletter',chapeau:'Books meet AI.'};
     p.generate = async (_connection,system,input)=>{
-        if (input.startsWith('Runtime publisher')) return JSON.stringify(publisher);
+        if (input.startsWith('Runtime publisher')) return JSON.stringify({...publisher,firstParagraph:input.slice(input.indexOf('\n')+1).split('\n\n')[0]});
         if (system.startsWith('Runtime rewriter')) return rewriteResponse(input);
         if (system.startsWith('Runtime brief')) return JSON.stringify({titles:JSON.parse(input).map(({id,title})=>({id,title,category:'Écriture'}))});
         const context = JSON.parse(input);
@@ -879,7 +879,7 @@ test('failed, invalid or cancelled writing cannot save a partial edition or cons
     }
 });
 
-test('publisher titles the revised body before image generation and cannot change the article',async()=>{
+test('publisher finalizes the opening before image generation while preserving subsequent paragraphs',async()=>{
     const {p,contents}=await newsletterFixture();
     const generate=p.generate,before=contents.get(p.dataPath),stages=[];
     p.generate=async(connection,system,input,...rest)=>{
@@ -894,7 +894,7 @@ test('publisher titles the revised body before image generation and cannot chang
             assert.ok(!input.includes('Article summary.'));
             assert.ok(!input.includes('A new newsletter'));
             assert.deepEqual(JSON.parse(system.split('\n\n').at(-1)).jsonSchema,require('../../models/publisher.json'));
-            return JSON.stringify({title:'Title from the finished article',chapeau:'An introduction written afterwards.'});
+            return JSON.stringify({title:'Title from the finished article',chapeau:'An introduction written afterwards.',firstParagraph:'The opening moves straight to the facts.'});
         }
         return generate(connection,system,input,...rest);
     };
@@ -902,7 +902,9 @@ test('publisher titles the revised body before image generation and cannot chang
     assert.deepEqual(stages,['revision','publisher']);
     assert.ok(text.startsWith('# Title from the finished article'));
     assert.ok(text.includes('*An introduction written afterwards.*'));
-    assert.ok(text.includes('Revised first paragraph.'));
+    assert.ok(text.includes('The opening moves straight to the facts.'));
+    assert.ok(text.includes('Second paragraph.'));
+    assert.ok(!text.includes('Revised first paragraph.'));
 });
 test('debug off still revises the newsletter without creating or overwriting comparison files',async()=>{
     const {p,contents}=await newsletterFixture();
@@ -999,7 +1001,7 @@ test('publisher errors, invalid output and cancellation preserve the saved note 
             if (!input.startsWith('Runtime publisher')) return generate(connection,system,input,...rest);
             if (failure==='error') throw new Error('Publisher unavailable');
             if (failure==='cancel') p.aiController.abort();
-            return JSON.stringify({title:'Too late',chapeau:'An intro',...(failure==='extra-body' ? {paragraphs:['Changed body']} : failure==='invalid' ? {chapeau:''} : {})});
+            return JSON.stringify({title:'Too late',chapeau:'An intro',firstParagraph:input.slice(input.indexOf('\n')+1).split('\n\n')[0],...(failure==='extra-body' ? {paragraphs:['Changed body']} : failure==='invalid' ? {chapeau:''} : {})});
         };
         await assert.rejects(p.writeNewsletter(),/publisher.md.*empty|Publisher unavailable|Invalid AI response|cancelled/);
         assert.equal(contents.get(path),'# Existing edition');
@@ -1207,7 +1209,7 @@ test('overlong introductions are retried only at publication and the retired ver
             if (phase==='publisher' ? input.startsWith('Runtime publisher') : context?.instructions==='Runtime verifier') {
                 calls++;
                 if (calls===2) assert.ok(system.includes(p.i18n.t('publicationShorten')));
-                return JSON.stringify(phase==='publisher' ? {title:'A concrete change',chapeau:calls===1 ? long : short}
+                return JSON.stringify(phase==='publisher' ? {title:'A concrete change',chapeau:calls===1 ? long : short,firstParagraph:input.slice(input.indexOf('\n')+1).split('\n\n')[0]}
                     : {...context.newsletter,chapeau:calls===1 ? long : short,issues:[]});
             }
             return generate(connection,system,input,...rest);
@@ -1240,7 +1242,7 @@ test('a repeatedly overlong introduction preserves the saved edition and article
             if (phase==='publisher' ? input.startsWith('Runtime publisher') : context?.instructions==='Runtime verifier') {
                 calls++;
                 const chapeau=Array.from({length:36},()=> 'word').join(' ');
-                return JSON.stringify(phase==='publisher' ? {title:'Title',chapeau} : {...context.newsletter,chapeau,issues:[]});
+                return JSON.stringify(phase==='publisher' ? {title:'Title',chapeau,firstParagraph:input.slice(input.indexOf('\n')+1).split('\n\n')[0]} : {...context.newsletter,chapeau,issues:[]});
             }
             return generate(connection,system,input,...rest);
         };
@@ -1579,7 +1581,7 @@ test('a writer or publisher reusing an author-feed link cannot replace the saved
         await p.app.vault.create(path,'# Existing edition');
         const own='https://example.substack.com/p/own-post';
         p.generate=async(connection,system,input,...rest)=>{
-            if (stage==='publisher' && input.startsWith('Runtime publisher')) return JSON.stringify({title:'My post',chapeau:'See '+own});
+            if (stage==='publisher' && input.startsWith('Runtime publisher')) return JSON.stringify({title:'My post',chapeau:'See '+own,firstParagraph:input.slice(input.indexOf('\n')+1).split('\n\n')[0]});
             let context;try {context=JSON.parse(input);} catch { /* Prose in later stages. */ }
             if (stage==='writer' && context?.instructions==='My runtime prompt') return writerResponse(['A reference [My post]('+own+').','Second paragraph.'],context.articles);
             return generate(connection,system,input,...rest);
@@ -2885,13 +2887,28 @@ test('extracted illustrations require an original caption and link to the final 
         p.settings.imageMode='extracted';
         p.generateIllustration=()=>assert.fail('Extracted illustrations must not be generated');
         p.loadPage=async()=>({status:200,url:'https://www.theatlantic.com/books/source/',html:'social metadata'});
-        p.crawler={...p.crawler,extractSocialImage:()=>({image:'https://images.example/social.jpg',imageCaption:caption})};
+        p.crawler={...p.crawler,extractArticleImage:()=>({image:'https://images.example/social.jpg',imageCaption:caption})};
         const note=await p.writeNewsletter(),text=contents.get(note.path);
         if (caption.trim()) assert.ok(text.includes('[!['+caption+'](https://images.example/social.jpg)](https://www.theatlantic.com/books/source/)'));
         else assert.ok(!text.includes('!['));
         assert.ok(!text.includes('[theatlantic.com](https://www.theatlantic.com/books/source/)'));
         assert.ok(!text.includes('![used]'));assert.ok(!text.includes('![another]'));
     }
+});
+
+test('captioned article images already collected are inserted without reopening their sources',async()=>{
+    const {p,contents}=await newsletterFixture();
+    p.settings.imageMode='extracted';
+    const data=JSON.parse(contents.get(p.dataPath));
+    for (const article of data.articles.slice(0,2)) {
+        article.image='https://images.example/'+article.id+'.jpg';
+        article.imageCaption='Original caption '+article.id+'. Photo: Author / Agency.';
+    }
+    contents.set(p.dataPath,JSON.stringify(data));
+    p.loadPage=()=>assert.fail('Reuse captioned images instead of reopening collected articles');
+    const note=await p.writeNewsletter(),markdown=contents.get(note.path);
+    for (const article of data.articles.slice(0,2))
+        assert.ok(markdown.includes('[!['+article.imageCaption+']('+article.image+')]('+article.url+')'));
 });
 
 test('the image selector offers three modes, persists them and enables its prompt only for generation',async()=>{

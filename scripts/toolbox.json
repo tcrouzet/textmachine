@@ -1,0 +1,23 @@
+{
+  "files": {
+    "LICENSE": "c1470897e226ad82595355fa93966d409105bb7da68b8aed69ef8a622d7e3ef4",
+    "src/ai/codex-generation.ts": "c1ffbd09d1dbd99064017359980b19dd42a74ed2b961baa5fc37ad4a846cee1c",
+    "src/ai/codex-native.ts": "2721ad42ccc76455d80f436d287ead2e293f16e16b2976ba5fdcc11dc296587a",
+    "src/ai/contracts.ts": "44550dea40eea2a119ad361c2be6d2e1294d0c38c37a0319171fa6ec2d164aed",
+    "src/ai/stream-generation.ts": "ed4d7c758f22ff22e9792be4e0441afd6a0d2ccc3fabcb33721371760f4c1fbc",
+    "src/ai/stream.ts": "2ea2a1888d94c2692dff7c2d8337c28dc63f474a3a0bb6072bdb7115892463c4",
+    "src/common.ts": "7ed7515cd32c9c4803601eb4b6ea8870bfd9b837d01c3f58a630f3681a1595db",
+    "src/ui/folder-name.ts": "50811bf50cfd61da9da943cfa4461457bf530783f6a9c4f49fe0cd3e0d482edb",
+    "src/ui/folder-picker.ts": "b7e30ee90162725513c3c938e3115892e1f2e4809a5b3d952d68c5be83d557f4",
+    "src/vendor/readability/LICENSE-2.0.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "src/vendor/readability/LICENSE.md": "a5b1e8181751ce05b85b7bfaa832b785e87086250a5148e679d17ca9bdcfa958",
+    "src/vendor/readability/package.json": "8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a",
+    "src/vendor/readability/Readability.d.ts": "6d63544dcfc9a9028b0f39828f361d1250c06edbd28de5503ab7133d16be2390",
+    "src/vendor/readability/Readability.js": "34dcab3d0832d0019f02990eed6b6124e029e8c32b9f0c6f2550544ff8dff174",
+    "src/web/article.ts": "38f822690e7bf76835eb3a0c2a39a0e83e04fcc1d5c3e633b24641484af45cb3",
+    "src/web/authors.ts": "a2965a6dcbadddf7732aba3555c8a6f4fd1588f903f585f3f96aada9d4092019",
+    "src/web/browser.ts": "3b606685a3c7cbd45ff5f7684cf45cec4e2544dc09d99387175700be6709b050",
+    "src/web/html.ts": "135d3011463bb7197eff7a16b52764e5acd6993b3d40d8cc1091e8ad78f31f9f",
+    "src/web/urls.ts": "5faf0db46d015479875446a7622df9ac43b445c6a815d642581c3fe8b4beb7d0"
+  }
+}

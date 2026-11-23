@@ -68,7 +68,7 @@ try:
             p.getAIConnection=()=>({provider:'openai',model:'fixture',apiKey:'fixture'});
             p.generate=async(_connection,system,input)=>{
                 inputs.push(input);
-                if(input.startsWith('Runtime publisher'))return JSON.stringify({title:'Review',chapeau:'Introduction'});
+                if(input.startsWith('Runtime publisher'))return JSON.stringify({title:'Review',chapeau:'Introduction',firstParagraph:input.slice(input.indexOf('\n')+1).split('\n\n')[0]});
                 if(system.startsWith('Runtime revision'))return JSON.stringify({paragraphs:input.split('\n\n')});
                 if(system.startsWith('Runtime brief'))return JSON.stringify({titles:JSON.parse(input).map(({id,title})=>({id,title,category:'Writing'}))});
                 const context=JSON.parse(input);

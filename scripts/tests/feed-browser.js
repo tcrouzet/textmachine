@@ -1,5 +1,5 @@
 import {readFeed} from '../../plugin/newsletter';
-import {extractPage, extractSocialImage, crawl} from '../../plugin/crawler';
+import {extractPage, extractSocialImage, extractArticleImage, crawl} from '../../plugin/crawler';
 
 // Obsidian's DOM helper for the standalone browser fixture.
 Element.prototype.createEl ||= function(tag,options={}) {
@@ -74,5 +74,8 @@ export function runImageCaptionChecks() {
     check(extractSocialImage(missing,url)===null,'A social thumbnail alone has no original caption');
     const fallback=missing+'<meta name="twitter:image" content="'+original+'"><figure><img src="'+original+'"><figcaption>Original caption. Photo: Author / Agency.</figcaption></figure>';
     check(extractSocialImage(fallback,url)?.imageCaption==='Original caption. Photo: Author / Agency.','Try the next social thumbnail if the first has no caption');
+    const captioned='<article><figure><img data-src="/photo.jpg"><figcaption>Original photograph. Photo: Author / Agency.</figcaption></figure></article>';
+    check(extractArticleImage(missing+captioned,url)?.imageCaption==='Original photograph. Photo: Author / Agency.','Recover the captioned article photograph when its social thumbnail has no caption');
+    check(extractArticleImage(captioned,url)?.image==='https://scroll.in/photo.jpg','A captioned article photograph remains usable without social metadata');
     return {passed};
 }

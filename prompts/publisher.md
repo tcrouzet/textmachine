@@ -1,4 +1,4 @@
-Écris en {{language}} un titre court et un chapeau de 20 à 35 mots pour cette revue de presse. Le chapeau est une phrase simple : nomme la personne ou le groupe concerné et ce qui lui arrive. Aucun pronom sans référent, aucune formule vague comme « un malentendu » ou « une version erronée » sans dire lequel. Pars du premier paragraphe : le titre annonce son sujet, le chapeau le situe, puis le premier paragraphe développe les faits. Lis les trois à la suite : ils doivent se comprendre dès la première lecture, sans raconter deux fois la même scène. Réserve les détails au corps.
+Finalise ensemble, en {{language}}, le titre court, le chapeau de 20 à 35 mots et le premier paragraphe de cette revue de presse. Fais progresser l’information de l’un à l’autre, sans réintroduire les mêmes faits ni les mêmes personnes. Retouche uniquement le premier paragraphe pour retirer ces répétitions, en conservant ses faits, citations et liens vers les sources. Le reste du texte reste inchangé.
 
 Ne cite pas les médias sources dans le chapeau, ni par leur nom ni par un lien. Présente directement les faits et les personnes concernées ; l’attribution des sources reste dans le corps.
 

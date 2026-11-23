@@ -21,6 +21,10 @@ test('English and French catalogs cover every used key with matching placeholder
             used.add(match[1]);
         }
     }
+    for (const module of ['ai/codex-generation','ai/stream-generation','ai/stream']) {
+        const source=fs.readFileSync(path.join(__dirname,'../../plugin/obsidian-toolbox/src',module+'.ts'),'utf8');
+        for(const match of source.matchAll(/\bt\('([^']+)'/g)){assert.ok(Object.hasOwn(en,match[1]),module+': '+match[1]);used.add(match[1]);}
+    }
     assert.deepEqual([...used].sort(), Object.keys(en).sort());
 });
 

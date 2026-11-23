@@ -339,29 +339,13 @@ try:
             catch (error) { return error.message.includes('Créez le dossier'); }
         }""")
         page.get_by_role('button', name='Créer le dossier', exact=True).click()
-        folder_rows = page.locator('.text-machine-folders')
-        assert folder_rows.locator('button.is-selected').inner_text() == 'Racine du coffre'
-        research = folder_rows.get_by_role('button', name='Ouvrir le dossier Research', exact=True)
-        assert folder_rows.locator('button.is-selected').evaluate(r"""el => {
-            const reference = document.createElement('div');
-            reference.className = 'tree-item-self is-selected';
-            el.parentElement.append(reference);
-            const actual = getComputedStyle(el), native = getComputedStyle(reference);
-            const matches = actual.backgroundColor === native.backgroundColor && actual.color === native.color;
-            reference.remove();
-            return matches;
-        }""")
-        research.hover()
-        assert folder_rows.locator('button.is-selected').inner_text() == 'Racine du coffre'
-        root_row = folder_rows.get_by_role('button', name='Racine du coffre', exact=True)
-        root_row.focus()
-        assert folder_rows.locator('button.is-selected').inner_text() == 'Racine du coffre'
-        root_row.press('ArrowDown')
-        assert folder_rows.locator('button.is-selected').inner_text() == 'Racine du coffre'
-
-        page.get_by_role('button', name='Ouvrir le dossier Research', exact=True).click()
-        assert folder_rows.locator('button.is-selected').inner_text() == 'Research'
-        page.get_by_role('button', name='Choisir ce dossier', exact=True).click()
+        picker = page.locator('.modal').last
+        expect(picker.get_by_role('button', name='Choisir ce dossier', exact=True)).to_be_disabled()
+        picker.get_by_role('button', name='Parcourir…', exact=True).click()
+        page.locator('.prompt-input').fill('Research')
+        page.locator('.prompt-input').press('ArrowDown')
+        assert not (vault / 'Research/textmachine.json').exists()
+        page.locator('.suggestion-item').filter(has_text='Research').first.click()
         page.get_by_text('Fichier prêt : Research/textmachine.json.', exact=True).wait_for()
         assert (vault / 'Research/textmachine.json').exists()
         expect(page.get_by_role('textbox', name='Sites bloqués', exact=True)).to_have_value('')
@@ -372,15 +356,17 @@ try:
         # Exercise initial creation again with a configured path that does not yet exist.
         page.evaluate('() => { app.plugins.plugins["text-machine"].settings.outputFolder = "Research/Veille"; app.setting.openTabById("text-machine"); }')
         page.get_by_role('button', name='Créer le dossier', exact=True).click()
-        page.get_by_role('button', name='Ouvrir le dossier Research', exact=True).click()
-        assert page.get_by_role('button', name='Nouveau dossier', exact=True).count() == 0
+        page.locator('.modal').last.get_by_role('button', name='Créer le dossier', exact=True).click()
+        page.locator('.modal').last.get_by_role('button', name='Parcourir…', exact=True).click()
+        page.locator('.prompt-input').fill('Research')
+        page.locator('.suggestion-item').filter(has_text='Research').first.click()
         assert page.get_by_role('textbox', name='Nom du nouveau dossier', exact=True).input_value() == 'TextMachine'
         page.get_by_role('textbox', name='Nom du nouveau dossier', exact=True).fill('../invalid')
-        page.get_by_role('button', name='Créer ici', exact=True).click()
+        page.locator('.modal').last.get_by_role('button', name='Créer le dossier', exact=True).click()
         page.get_by_role('alert').filter(has_text='Saisissez un nom').wait_for()
         assert page.evaluate('app.plugins.plugins["text-machine"].settings.outputFolder') == 'Research/Veille'
         page.get_by_role('textbox', name='Nom du nouveau dossier', exact=True).fill('Veille')
-        page.get_by_role('button', name='Créer ici', exact=True).click()
+        page.locator('.modal').last.get_by_role('button', name='Créer le dossier', exact=True).click()
         page.get_by_text('Fichier prêt : Research/Veille/textmachine.json.', exact=True).wait_for()
         page.evaluate(r"""async () => {
             const p = app.plugins.plugins['text-machine'];
@@ -535,18 +521,22 @@ try:
         }""")
         assert (vault / 'Research/Veille/textmachine.json').read_text() == log
         page.get_by_role('button', name='Déplacer…', exact=True).click()
-        page.locator('.text-machine-folders').get_by_role('button', name='Racine du coffre', exact=True).click()
+        page.locator('.modal').last.get_by_role('button', name='Parcourir…', exact=True).click()
+        page.locator('.prompt-input').fill('Racine du coffre')
+        page.locator('.prompt-input').press('Escape')
         page.get_by_role('button', name='Annuler', exact=True).click()
         assert page.evaluate('app.plugins.plugins["text-machine"].settings.outputFolder') == 'Research/Veille'
         page.get_by_role('button', name='Déplacer…', exact=True).click()
-        page.locator('.text-machine-folders').get_by_role('button', name='Racine du coffre', exact=True).click()
-        page.get_by_role('button', name='Déplacer ici', exact=True).click()
+        page.locator('.modal').last.get_by_role('button', name='Parcourir…', exact=True).click()
+        page.locator('.prompt-input').fill('Racine du coffre')
+        page.locator('.suggestion-item').filter(has_text='Racine du coffre').click()
         page.wait_for_function('app.plugins.plugins["text-machine"].settings.outputFolder === "Veille"')
         assert (vault / 'Veille/textmachine.json').read_text() == log
         assert not (vault / 'Research/Veille').exists()
         page.get_by_role('button', name='Déplacer…', exact=True).click()
-        page.get_by_role('button', name='Ouvrir le dossier Research', exact=True).click()
-        page.get_by_role('button', name='Déplacer ici', exact=True).click()
+        page.locator('.modal').last.get_by_role('button', name='Parcourir…', exact=True).click()
+        page.locator('.prompt-input').fill('Research')
+        page.locator('.suggestion-item').filter(has_text='Research').first.click()
         page.wait_for_function('app.plugins.plugins["text-machine"].settings.outputFolder === "Research/Veille"')
         assert not (vault / 'textmachine.json').exists()
         assert (vault / 'Research/Veille/textmachine.json').read_text() == log
@@ -599,8 +589,9 @@ try:
         assert page.get_by_role('button', name='Extraire les liens', exact=True).count() == 0
         context_menu('Research')
         page.get_by_role('button', name='Créer le dossier', exact=True).click()
+        page.locator('.modal').last.get_by_role('button', name='Créer le dossier', exact=True).click()
         page.get_by_role('textbox', name='Nom du nouveau dossier', exact=True).fill('CommandData')
-        page.get_by_role('button', name='Créer ici', exact=True).click()
+        page.get_by_role('button', name='Créer le dossier', exact=True).click()
         page.get_by_role('status').filter(has_text='Research/CommandData/textmachine.json').wait_for()
         assert json.loads((vault / 'Research/CommandData/textmachine.json').read_text()) == {'version':1,'articles':[]}
         settings()
@@ -620,6 +611,7 @@ try:
         editor.get_by_role('button', name='Cancel', exact=True).click()
         page.get_by_role('button', name='Create folder', exact=True).click()
         page.get_by_role('heading', name='Data folder', exact=True).wait_for()
+        page.locator('.modal').last.get_by_role('button', name='Create folder', exact=True).click()
         assert page.get_by_role('textbox', name='New folder name', exact=True).input_value() == 'TextMachine'
         page.get_by_role('button', name='Cancel', exact=True).click()
         assert page.evaluate(r"""() => {

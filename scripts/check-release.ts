@@ -50,6 +50,8 @@ try {
 		mkdirSync(scripts, { recursive: true });
 		const script = path.join(repository, "release.sh");
 		copyFileSync(new URL("../release.sh", import.meta.url), script);
+		mkdirSync(path.join(repository,"scripts"),{recursive:true});
+		writeFileSync(path.join(repository,"scripts/toolbox.cjs"),"// Shared-source prerequisite supplied by this release fixture.\n");
         copyFileSync(new URL("./reset-github.sh", import.meta.url), path.join(scripts,"reset-github.sh"));
 		writeFileSync(path.join(repository, "manifest.json"), JSON.stringify({ id: "test", version: initialVersion, minAppVersion: "1.4.0", description: "Test." }));
 		writeFileSync(path.join(repository, "package.json"), JSON.stringify({ name: "release-fixture", version: initialVersion, scripts: { lint: scenario === "lint-failure" ? "node -e 'process.exit(1)'" : "node -e 'process.exit(0)'", typecheck: scenario === "typecheck-failure" ? "node -e 'process.exit(1)'" : "node -e 'process.exit(0)'", build: scenario === "build-failure" ? "node -e 'process.exit(1)'" : "node build.cjs", resources: scenario === "resource-failure" ? "node -e 'process.exit(1)'" : "node package-resources.cjs" } }));

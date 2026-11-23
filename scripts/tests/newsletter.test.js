@@ -608,18 +608,20 @@ test('editorial parsing rejects summaries, classifications and illustration fiel
     }
     for (const extra of [{title:'Premature title'},{chapeau:'Premature introduction'},{groups:[]},{discard:[]},{image:null},{lead:1}]) assert.throws(()=>parseEditorial(JSON.stringify({...article,...extra})),/Invalid AI response/);
 });
-test('publisher receives only the final body and returns a separate title and introduction',()=>{
+test('publisher receives the final body and returns the title, introduction and opening paragraph',()=>{
     const paragraphs=['A concrete result. {{language}}','Another finding. [Source](https://example.com/article)'];
     const request=publisherRequest('Présente en {{language}} :\n{{article}}',paragraphs,'français');
     assert.equal(request.input,'Présente en français :\n'+paragraphs.join('\n\n'));
     assert.deepEqual(request.schema,require('../../models/publisher.json'));
-    assert.deepEqual(request.schema.required,['title','chapeau']);
-    assert.deepEqual(Object.keys(request.schema.properties),['title','chapeau']);
+    assert.deepEqual(request.schema.required,['title','chapeau','firstParagraph']);
+    assert.deepEqual(Object.keys(request.schema.properties),['title','chapeau','firstParagraph']);
     assert.equal(request.schema.additionalProperties,false);
     assert.ok(!request.system.includes(paragraphs[1]));
-    const publication={title:'A concrete title',chapeau:'A short introduction.'};
+    const publication={title:'A concrete title',chapeau:'A short introduction.',firstParagraph:'A concrete result.'};
     assert.deepEqual(parsePublisher(JSON.stringify(publication)),publication);
     assert.equal(parsePublisher(JSON.stringify({...publication,title:'IA : Correcteurs et bulletins scolaires'})).title,'Correcteurs et bulletins scolaires');
+    assert.throws(()=>parsePublisher(JSON.stringify({...publication,firstParagraph:''})),/Invalid AI response/);
+    assert.throws(()=>parsePublisher(JSON.stringify(publication),'A [source](https://example.com/article).'),/Invalid AI response/);
     for (const invalid of ['{broken','null','[]',JSON.stringify({...publication,paragraphs}),JSON.stringify({title:'',chapeau:'Intro'}),JSON.stringify({title:'Title'})]) {
         assert.throws(()=>parsePublisher(invalid),/Invalid AI response/);
     }
@@ -666,10 +668,10 @@ test('brief filtering can reject readable and blocked off-topic articles but mus
 
 test('the introduction has a mandatory 35-word maximum, including French nonbreaking spaces',()=>{
     const chapeau=Array.from({length:35},(_,index)=>'mot'+index).join('\u00a0');
-    assert.equal(parsePublisher(JSON.stringify({title:'Titre',chapeau})).chapeau,chapeau);
-    assert.throws(()=>parsePublisher(JSON.stringify({title:'Titre',chapeau:chapeau+' mot36'})),
+    assert.equal(parsePublisher(JSON.stringify({title:'Titre',chapeau,firstParagraph:'Premier paragraphe.'})).chapeau,chapeau);
+    assert.throws(()=>parsePublisher(JSON.stringify({title:'Titre',chapeau:chapeau+' mot36',firstParagraph:'Premier paragraphe.'})),
         error=>error.code==='CHAPEAU_TOO_LONG' && error.message.includes('36'));
-    assert.throws(()=>parsePublisher(JSON.stringify({title:'Titre',chapeau:chapeau+':mot36'})),
+    assert.throws(()=>parsePublisher(JSON.stringify({title:'Titre',chapeau:chapeau+':mot36',firstParagraph:'Premier paragraphe.'})),
         error=>error.code==='CHAPEAU_TOO_LONG' && error.message.includes('36'));
 });
 test('author feeds identify their publications without excluding other publications on the same platform',()=>{

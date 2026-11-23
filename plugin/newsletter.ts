@@ -11,6 +11,7 @@ import {parseHTML} from './html';
 import {authorNames} from './authors';
 import {publicationDate} from './crawler';
 import {domainOf} from './domains';
+import {markdownLinks} from './punctuation/markdown-links';
 
 interface Editorial {title: string; chapeau: string; paragraphs: string[]}
 export interface Newsletter extends Editorial {
@@ -213,17 +214,25 @@ function publisherRequest(prompt: string, paragraphs: string[], language: string
         input:renderPrompt(prompt,{language:language.trim() || 'français',article:paragraphs.join('\n\n')})};
 }
 
-function parsePublisher(text: string): Pick<Editorial,'title' | 'chapeau'> {
+function parsePublisher(text: string, originalFirstParagraph?: string): Pick<Editorial,'title' | 'chapeau'> & {firstParagraph: string} {
     let result: Record<string,unknown>;
     try {result=record(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')));} catch {throw new Error(t('newsletterInvalid'));}
-    if (Object.keys(result).length!==2 || typeof result.title!=='string' || !result.title.trim()
-        || typeof result.chapeau!=='string' || !result.chapeau.trim()) throw new Error(t('newsletterInvalid'));
+    if (Object.keys(result).length!==3 || typeof result.title!=='string' || !result.title.trim()
+        || typeof result.chapeau!=='string' || !result.chapeau.trim()
+        || typeof result.firstParagraph!=='string' || !result.firstParagraph.trim()
+        || /!\[|<img\b|^\s*#|\r?\n\s*\r?\n/i.test(result.firstParagraph)) throw new Error(t('newsletterInvalid'));
+    const firstParagraph=result.firstParagraph.trim();
+    if (originalFirstParagraph!==undefined) {
+        const links=(value: string)=>markdownLinks(value).map(({from,to,label})=>label
+            ? value.slice(from,label[0])+value.slice(label[1],to) : value.slice(from,to));
+        if (JSON.stringify(links(firstParagraph))!==JSON.stringify(links(originalFirstParagraph))) throw new Error(t('newsletterInvalid'));
+    }
     const title=result.title.trim().replace(/^(?:IA|AI|intelligence artificielle)\s*[:：]\s*/i,'');
     if (!title.trim()) throw new Error(t('newsletterInvalid'));
     const chapeau=result.chapeau.trim();
     const count=(chapeau.match(/[\p{L}\p{N}]+(?:[’'‐‑-][\p{L}\p{N}]+)*/gu) || []).length;
     if (count>35) throw Object.assign(new Error(t('newsletterChapeauTooLong',{count})),{code:'CHAPEAU_TOO_LONG'});
-    return {title,chapeau};
+    return {title,chapeau,firstParagraph};
 }
 
 function verificationRequest(prompt: string, newsletter: Editorial, articles: Article[], language: string) {

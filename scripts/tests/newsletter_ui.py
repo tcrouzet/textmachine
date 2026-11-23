@@ -106,7 +106,7 @@ try:
                 if(!input.startsWith('Runtime publisher'))return null;
                 if(input.includes('illustrations/') || input.includes('Previous blog idea'))throw new Error('Publisher must receive the article body only');
                 window.pipelineStages.push('publisher');
-                return JSON.stringify(window.publication);
+                return JSON.stringify({...window.publication,firstParagraph:input.slice(input.indexOf('\n')+1).split('\n\n')[0]});
             };
             window.answerStages=input=>{
                 let context;try{context=JSON.parse(input);}catch{return null;}
