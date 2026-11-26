@@ -137,6 +137,12 @@
     to { transform: rotate(360deg); }
 }
 
+.modal-content.text-machine-run,
+.modal-content.text-machine-run * {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
 .text-machine-run-log {
     max-height: 40vh;
     overflow-y: auto;

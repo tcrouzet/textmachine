@@ -7,11 +7,17 @@ import {Article, record} from './types';
 import type {PageLoader} from './browser';
 import {parseHTML} from './html';
 
-function extractArticleImage(html: string, url: string) {
+function imageSourceCaption(title: string, url: string) {
+    return t('newsletterImageSourceCaption',{title:articleTitle({title,url}),source:new URL(url).hostname.replace(/^www\./,'')});
+}
+
+function extractArticleImage(html: string, url: string, title = '') {
     const social=extractSocialImage(html,url);
     if (social) return social;
     const doc=parseHTML(html);
     const article=doc.querySelector('article') || doc.querySelector('main, [role="main"]') || doc;
+    const fallbackCaption=imageSourceCaption(title || doc.querySelector('h1')?.textContent || doc.title,url);
+    let fallback: {image: string; imageCaption: string} | null=null;
     for (const img of article.querySelectorAll('img')) {
         if (img.closest('aside, nav, footer')) continue;
         const values=['data-src','data-original','data-lazy-src','src'].map(name=>img.getAttribute(name)?.trim());
@@ -23,6 +29,20 @@ function extractArticleImage(html: string, url: string) {
                 if (!['http:','https:'].includes(image.protocol) || image.username || image.password) continue;
                 const imageCaption=extractImageCaption(html,url,image.href);
                 if (imageCaption.trim()) return {image:image.href,imageCaption};
+                if (!fallback && img.closest('figure, [itemprop="image"], .article-image, .featured-image'))
+                    fallback={image:image.href,imageCaption:fallbackCaption};
+            } catch { continue; }
+        }
+    }
+    if (fallback) return fallback;
+    for (const name of ['og:image:secure_url','og:image','twitter:image','twitter:image:src']) {
+        for (const node of doc.querySelectorAll(`meta[property="${name}"], meta[name="${name}"]`)) {
+            const value=node.getAttribute('content')?.trim();
+            if (!value) continue;
+            try {
+                const image=new URL(value,url);
+                if (['http:','https:'].includes(image.protocol) && !image.username && !image.password)
+                    return {image:image.href,imageCaption:fallbackCaption};
             } catch { continue; }
         }
     }
@@ -48,6 +68,20 @@ function block(data: string[], url: string) {
     if (!data.includes(domain)) data.push(domain);
 }
 
+function hasPaywall(html: string) {
+    if (!html) return false;
+    const doc=parseHTML(html);
+    for (const node of doc.querySelectorAll('script[type="application/ld+json"]')) {
+        try {
+            const metadata=JSON.stringify(JSON.parse(node.textContent || ''));
+            if (/"isAccessibleForFree"\s*:\s*(?:false|"false")\s*[,}]/i.test(metadata)) return true;
+        } catch { /* Ignore malformed publisher metadata. */ }
+    }
+    doc.querySelectorAll('script, style, nav, aside, footer').forEach(node=>node.remove());
+    const text=(doc.querySelector('article, main, [role="main"]') || doc.body).textContent || '';
+    return /the rest is for subscribers|subscribe to (?:continue reading|read (?:the )?(?:full|rest of))|(?:article|contenu) (?:est )?réservé aux abonnés|pour (?:lire la suite|continuer (?:la lecture|à lire))[^.]{0,80}abonn/i.test(text.replace(/\s+/g,' '));
+}
+
 async function crawl(article: Article, blocked: string[], signal: AbortSignal | undefined, load: PageLoader): Promise<Article> {
     if (article.status === '404') return article;
     if ((article.status === 'forbidden' && !isShortUrl(article.url)) || isPdf(article.url)) return {...article,status:'forbidden'};
@@ -64,10 +98,10 @@ async function crawl(article: Article, blocked: string[], signal: AbortSignal | 
     const extracted = page.status >= 200 && page.status < 300 && page.html ? extractPage(page.html, page.url) : null;
     if (article.content) return {...article,title:extracted?.title || article.title};
     if (extracted?.content) return {...article, ...extracted};
-    if (!page.failure && (extracted?.blocked || [401,402,403,451].includes(page.status))) {
+    if (!page.failure && (page.status===402 || hasPaywall(page.html))) {
         block(blocked, article.url);
     }
     return {...article, status:'forbidden'};
 }
 
-export {publicationDate, parseBlocked, isBlocked, block, extractPage, extractImageCaption, extractSocialImage, extractArticleImage, crawl};
+export {publicationDate, parseBlocked, isBlocked, block, extractPage, extractImageCaption, extractSocialImage, extractArticleImage, imageSourceCaption, crawl};

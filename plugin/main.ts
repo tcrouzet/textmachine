@@ -450,7 +450,7 @@ export default class TextMachine extends Plugin {
                     progress?.(t('blockedTestProgress',{current,total,url:target.url}));
                     target.outcome='running';
                     try {
-                        await this.browser.retrievePage(url,controller.signal,()=>false,BrowserWindow,this.browser.fetchPage,(method,page,elapsedMs)=>{
+                        const page=await this.browser.retrievePage(url,controller.signal,()=>false,BrowserWindow,this.browser.fetchPage,(method,page,elapsedMs)=>{
                             const pdf=this.articles.isPdf(page.url,page.contentType) || page.status===415 || page.html.trimStart().startsWith('%PDF-');
                             const extracted=!pdf && !page.failure && page.status>=200 && page.status<300 && page.html ? this.crawler.extractPage(page.html,page.url) : null;
                             const outcome=pdf ? 'pdf' : page.failure ? 'network-error' : page.status<200 || page.status>=300 ? 'http-error'
@@ -460,6 +460,7 @@ export default class TextMachine extends Plugin {
                             target.outcome=outcome;
                             progress?.(t('blockedTestProgress',{current,total,url:target.url})+' · '+method);
                         });
+                        if (page.failure) {target.outcome='network-error';target.failure=page.failure;}
                     } catch (caught) {
                         target.outcome=controller.signal.aborted ? 'cancelled' : 'error';
                         if (!controller.signal.aborted) target.failure=this.browser.failureCode(caught);
@@ -823,27 +824,71 @@ export default class TextMachine extends Plugin {
         const notes = folder.children.filter((file): file is TFile => file instanceof TFile && /^text-machine-\d{4}-\d{2}-\d{2}(?:-\d+)?\.md$/.test(file.name));
         const lastEdition=notes.map(file=>file.name.slice('text-machine-'.length,'text-machine-'.length+10)).filter(date=>date<day).sort().pop() || '';
         const todayNotes = await Promise.all(notes.filter(file=>file.name.startsWith('text-machine-'+day)).map(file=>vault.read(file)));
-        const historyNotes=notes.filter(file=>debug || !file.name.startsWith('text-machine-'+day))
-            .sort((a,b)=>debug ? b.name.localeCompare(a.name) : b.stat.mtime-a.stat.mtime).slice(0,5);
-        const testHistory=debug ? await Promise.all(historyNotes.map(async file=>({name:file.name,content:await vault.read(file)}))) : [];
-
-        await vault.process(log,text=>this.articles.withIds(text));
+        const historyNotes=notes.filter(file=>{
+            const date=file.name.slice('text-machine-'.length,'text-machine-'.length+10);
+            return date<day || (debug && date===day);
+        })
+            .sort((a,b)=>debug ? b.name.localeCompare(a.name) : b.stat.mtime-a.stat.mtime);
+        const publicationHistory=await Promise.all(historyNotes.map(async file=>({name:file.name,content:await vault.read(file)})));
+        const links=this.articles.extractLinks({payload:{},labelIds:[],bodies:[{type:'text/plain',text:publicationHistory.map(note=>note.content).join('\n')}]});
+        const citationKey=(url: string)=>this.articles.articleKeys({url:this.newsletter.citationUrl(url),title:''}).urlKey;
+        const published=new Set(links.map(link=>citationKey(link.url)));
+        const selectionPath=this.settings.outputFolder+'/selection-'+editionName+'.json';
+        const savedSelection=vault.getAbstractFileByPath(selectionPath);
+        const saved=savedSelection instanceof TFile ? record(JSON.parse(await vault.read(savedSelection))) : {};
+        const earlierCorrections=await Promise.all(folder.children.filter((file): file is TFile=>file instanceof TFile
+            && /^selection-text-machine-\d{4}-\d{2}-\d{2}\.json$/.test(file.name) && file.path!==selectionPath)
+            .map(async file=>record(JSON.parse(await vault.read(file))).excluded));
+        const current=vault.getAbstractFileByPath(path);
+        const corrections=[...todayNotes,...(debug && current instanceof TFile ? [await vault.read(current)] : [])];
+        const excludedUrls=[...new Set([...this.newsletter.struckArticles(corrections),
+            ...[saved.excluded,...earlierCorrections].flatMap(urls=>Array.isArray(urls)
+                ? urls.filter((url): url is string=>typeof url==='string' && !!this.articles.articleUrl(url)) : [])])];
+        const excluded=new Set(excludedUrls.map(citationKey));
+        await vault.process(log,text=>{
+            const normalized=this.articles.withIds(text);
+            if (!excluded.size || debug) return normalized;
+            const data=this.articles.parseData(normalized);
+            for (const article of data.articles) if (excluded.has(citationKey(article.url)) && !article.usedAt) article.usedAt=day;
+            return JSON.stringify(data,null,2)+'\n';
+        });
         const data = await vault.read(log);
-        let pending: Article[] = this.newsletter.availableArticles(data,this.settings.excludedSources,day,todayNotes,lastEdition);
-        let brief: Article[] = this.newsletter.briefArticles(data,this.settings.excludedSources,day,lastEdition);
-        if (debug) {
-            const links=this.articles.extractLinks({payload:{},labelIds:[],bodies:[{type:'text/plain',text:testHistory.map(note=>note.content).join('\n')}]});
-            const published=new Set(links.map(link=>this.articles.articleKeys({url:link.url,title:''}).urlKey));
-            const unpublished=(article: Article)=>!published.has(this.articles.articleKeys(article).urlKey);
-            pending=pending.filter(unpublished);
-            brief=brief.filter(unpublished);
-        }
+        let pending: Article[] = this.newsletter.availableArticles(data,this.settings.excludedSources,day,todayNotes,lastEdition,published);
+        let brief: Article[] = this.newsletter.briefArticles(data,this.settings.excludedSources,day,lastEdition,published);
+        pending=pending.filter(article=>!excluded.has(citationKey(article.url)));
+        brief=brief.filter(article=>!excluded.has(citationKey(article.url)));
 
         if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
         const template = await this.readPrompt('newsletter.md');
         if (!template.trim()) throw new Error(t('newsletterTemplateInvalid'));
         const controller = this.aiController = new AbortController();
         const check = () => {if (this.disposed || controller.signal.aborted) throw new Error(t('newsletterCancelled'));};
+        let draftSources: Article[]=[];
+        let draftStage=t('newsletterDraftAvailable');
+        let draftSummary='';
+        const minimumError=(message: string)=>Object.assign(new Error(message),{code:'RP_ARTICLE_MINIMUM'});
+        const saveSourceDraft=async(reason: string)=>{
+            check();
+            const draftPath=this.settings.outputFolder+'/brouillon-sources-'+day+'.md';
+            const list=(sources: Article[])=>[...new Map(sources.map(article=>[article.id,article])).values()].map(article=>{
+                const title=this.articles.articleTitle(article).replace(/\s+/g,' ').replace(/[\\[\]|]/g,'\\$&');
+                const url=article.url.replace(/[<>\s]/g,character=>encodeURIComponent(character));
+                const status=article.status==='' && article.content.trim() ? t('newsletterSourceFullText') : t('newsletterSourcePartialText');
+                return `- [${title}](<${url}>) — ${status}`;
+            }).join('\n');
+            const sections=[`> ${draftStage} : ${reason}`,...(draftSummary ? ['> '+draftSummary] : []),`## ${t('newsletterDraftMainSources')}`,list(draftSources) || t('newsletterNoArticles')];
+            const markdown=sections.join('\n\n');
+            let draft: TFile;
+            try {
+                const existing=vault.getAbstractFileByPath(draftPath);
+                if (existing instanceof TFile) {await vault.modify(existing,markdown+'\n');draft=existing;}
+                else if (!existing) draft=await vault.create(draftPath,markdown+'\n');
+                else throw new Error();
+            } catch {throw new Error(t('newsletterSourcesDraftFailed',{path:draftPath}));}
+            check();
+            try {await this.app.workspace.getLeaf(false).openFile(draft);this.runDialog?.close();}
+            catch {new Notice(t('newsletterSourcesDraftSaved',{path:draftPath}));}
+        };
         const saveSnapshot = async (name: string, text: string) => {
             check();
             if (!debug) return;
@@ -890,39 +935,63 @@ export default class TextMachine extends Plugin {
             const authorPosts=await this.readAuthorFeeds(controller.signal);
             pending=pending.filter(article=>!this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds,authorPosts));
             brief=brief.filter(article=>!this.newsletter.isAuthorSource(article.url,this.settings.authorFeeds,authorPosts));
+            draftSources=[...pending];
             if (!pending.length && !brief.length) {new Notice(t('newsletterNoArticles'));return null;}
+            progress?.(t('newsletterSourcePool',{count:pending.length}));
             if (pending.length<commentedArticles)
-                throw new Error(t('newsletterNotEnoughSources',{count:pending.length,minimum:commentedArticles}));
-            const rejected=await this.filterTitles(pending,controller.signal,progress);
+                throw minimumError(t('newsletterNotEnoughSources',{count:pending.length,minimum:commentedArticles}));
+            const prompt=await readPrompt('writer.md');
+            const selectionTemplate=await readPrompt('sélection.md');
+            const titleTemplate=await readPrompt('titres.md');
+            const previous=[prompt,selectionTemplate].some(text=>/\{\{\s*previousNewsletters\s*\}\}/.test(text))
+                ? publicationHistory : [];
+            const selectionKey=()=>createHash('sha256').update(JSON.stringify([
+                'editorial-corrections',day,language,commentedArticles,selectionTemplate,titleTemplate,this.settings.referenceSources,previous,authorPosts,excludedUrls,
+                [...pending,...brief].map(({id,url,title,status,content,publish,authors,source})=>({id,url,title,status,content,publish,authors,source})).sort((a,b)=>a.id-b.id),
+            ])).digest('hex');
+            let selection: ReturnType<typeof newsletter.parseSelection> | undefined;
+            if (savedSelection instanceof TFile) {
+                if (saved.key===selectionKey()) selection=this.newsletter.parseSelection(JSON.stringify(saved.selection),pending);
+            }
+            draftStage=t('promptTitles');
+            draftSummary=t('newsletterSourcePool',{count:pending.length});
+            const rejected=selection ? new Set<number>() : await this.filterTitles([...pending,...brief],controller.signal,progress);
             pending=pending.filter(article=>!rejected.has(article.id));
+            brief=brief.filter(article=>!rejected.has(article.id));
+            draftSources=[...pending];
             check();
             if (pending.length<commentedArticles)
-                throw new Error(t('newsletterNotEnoughRelevantSources',{count:pending.length,minimum:commentedArticles}));
+                throw minimumError(t('newsletterNotEnoughRelevantSources',{count:pending.length,minimum:commentedArticles}));
             if (pending.length) {
-                const prompt=await readPrompt('writer.md');
-                const selectionTemplate=await readPrompt('sélection.md');
-                const previous=[prompt,selectionTemplate].some(text=>/\{\{\s*previousNewsletters\s*\}\}/.test(text))
-                    ? debug ? testHistory : await Promise.all(historyNotes.map(async file=>({name:file.name,content:await vault.read(file)}))) : [];
                 progress?.(t('newsletterReadingContext'));
                 check();
-                progress?.(t('newsletterSelecting'));
-                const select=(correction = '')=>this.newsletter.selectArticles(pending,articles=>{
+                const select=async(correction = '')=>this.newsletter.prioritizeReferences(await this.newsletter.selectArticles(pending,articles=>{
                     const request=this.newsletter.selectionRequest(selectionTemplate,articles,language,this.settings.referenceSources,previous,authorPosts,commentedArticles);
                     if (correction) request.system+='\n\n'+correction;
                     return request;
-                },respond,progress);
-                let selection=await select();
+                },respond,progress),this.settings.referenceSources);
+                draftStage=t('promptSelection');
+                progress?.(selection ? t('newsletterReusingSelection') : t('newsletterSelecting'));
+                selection ||= await select();
+                draftSources=[...selection.selected];
                 if (selection.selected.length && this.newsletter.publicationCount(selection.selected)<2) {
-                    if (this.newsletter.publicationCount(pending)<2) throw new Error(t('newsletterMultiplePublications'));
+                    if (this.newsletter.publicationCount(pending)<2) throw minimumError(t('newsletterMultiplePublications'));
                     progress?.(t('newsletterReselectingSources'));
                     selection=await select(t('selectionMultiplePublications'));
-                    if (selection.selected.length && this.newsletter.publicationCount(selection.selected)<2) throw new Error(t('newsletterMultiplePublications'));
+                    draftSources=[...selection.selected];
+                    if (selection.selected.length && this.newsletter.publicationCount(selection.selected)<2) throw minimumError(t('newsletterMultiplePublications'));
                 }
+                draftSummary=t('newsletterSelectionSummary',{total:pending.length,selected:selection.selected.length,brief:selection.brief.length,discard:selection.discard.length});
+                progress?.(draftSummary);
                 if (selection.selected.length<commentedArticles)
-                    throw new Error(t('newsletterNotEnoughRelevantSources',{count:selection.selected.length,minimum:commentedArticles}));
+                    throw minimumError(t('newsletterNotEnoughRelevantSources',{count:selection.selected.length,minimum:commentedArticles}));
+                const selectionText=JSON.stringify({key:selectionKey(),excluded:excludedUrls,selection:{
+                    selected:selection.selected.map(article=>article.id),brief:selection.brief.map(article=>article.id),discard:selection.discard,
+                }},null,2)+'\n';
                 result.discard=selection.discard.map((id: number)=>pending.find(article=>article.id===id)!.url);
                 brief.push(...selection.brief);
                 if (selection.selected.length) {
+                    draftStage=t('promptWriter');
                     progress?.(t('newsletterWriting'));
                     const request=this.newsletter.writerRequest(prompt,selection.selected,previous,authorPosts || [],language,this.settings.referenceSources,commentedArticles);
                     let editorial;
@@ -934,21 +1003,28 @@ export default class TextMachine extends Plugin {
                     }
                     result.paragraphs=editorial.paragraphs;
                     result.used=editorial.used.map(article=>article.url);
-                    brief.push(...selection.selected.filter(article=>!result.used.includes(article.url)));
                     if (result.used.length) {
                         await saveSnapshot('brouillon',result.paragraphs.join('\n\n'));
                         await saveSnapshot('revision','> '+t('newsletterRevisionPending'));
                     }
                     this.newsletter.assertNoAuthorSources(result.paragraphs,this.settings.authorFeeds,authorPosts);
+                    if (result.used.length) {
+                        check();
+                        if (savedSelection instanceof TFile) {
+                            if (await vault.read(savedSelection)!==selectionText) await vault.modify(savedSelection,selectionText);
+                        } else if (!savedSelection) await vault.create(selectionPath,selectionText);
+                        else throw new Error(t('invalidDataFile'));
+                        check();
+                    }
                 }
             }
             if (!result.used.length)
-                throw new Error(t('newsletterNotEnoughRelevantSources',{count:0,minimum:commentedArticles}));
+                throw minimumError(t('newsletterNotEnoughRelevantSources',{count:0,minimum:commentedArticles}));
             let translatedBrief = brief;
             if (brief.length) {
                 progress?.(t('newsletterTranslatingBrief'));
                 const prompt = await this.readPrompt('bref.md');
-                const request = this.newsletter.briefRequest(prompt,brief,language);
+                const request = this.newsletter.briefRequest(prompt,brief,language,publicationHistory);
                 const response = await respond(request);
                 translatedBrief = this.newsletter.parseBrief(response,brief);
             }
@@ -1002,19 +1078,21 @@ export default class TextMachine extends Plugin {
                         progress?.(t('newsletterExtractingImage',{title:article.title}));
                         try {
                             let source=article.url;
-                            let image=article.image && article.imageCaption?.trim()
-                                ? {image:article.image,imageCaption:article.imageCaption} : null;
-                            if (!image) {
-                                const page=await this.loadPage(article.url,controller.signal,()=>false);
-                                check();
-                                source=this.articles.articleUrl(page.url) || article.url;
-                                image=page.status>=200 && page.status<300 && page.html
-                                    ? this.crawler.extractArticleImage(page.html,page.url) : null;
+                            let image=article.image ? {image:article.image,imageCaption:article.imageCaption || ''} : null;
+                            if (!image?.imageCaption.trim()) {
+                                try {
+                                    const page=await this.loadPage(article.url,controller.signal,()=>false);
+                                    check();
+                                    if (page.status>=200 && page.status<300 && page.html) {
+                                        const extracted=this.crawler.extractArticleImage(page.html,page.url,article.title);
+                                        if (extracted) {image=extracted;source=this.articles.articleUrl(page.url) || article.url;}
+                                    }
+                                } catch {check();}
                             }
-                            if (image?.imageCaption.trim()) {
+                            if (image) {
                                 const target=new URL(image.image);
                                 if (!['http:','https:'].includes(target.protocol) || target.username || target.password) throw new Error();
-                                result.paragraphImages.push({paragraph,url:target.href,source,caption:image.imageCaption});
+                                result.paragraphImages.push({paragraph,url:target.href,source,caption:image.imageCaption.trim() || this.crawler.imageSourceCaption(article.title,source)});
                             }
                             else progress?.(t('newsletterSourceImageMissing',{title:article.title}));
                         } catch {
@@ -1057,16 +1135,22 @@ export default class TextMachine extends Plugin {
                     markdown:'!'+this.app.fileManager.generateMarkdownLink(imageFile,path,undefined,caption)};
             }
             const markdown = correctNewsletterPunctuation(this.newsletter.renderNewsletter(template,result,translatedBrief),language);
+            const sources=[...pending,...brief];
+            const written=new Set(this.articles.extractLinks({payload:{},labelIds:[],bodies:[{type:'text/plain',text:markdown}]}).map(link=>citationKey(link.url)));
+            const used=sources.filter(article=>written.has(citationKey(article.url))).map(article=>article.url);
             const existing=vault.getAbstractFileByPath(path);
             check();
             let note: TFile;
             if (existing instanceof TFile) {await vault.modify(existing,markdown);note = existing;}
             else note = await vault.create(path,markdown);
-            try {if (!debug) await vault.process(log,current=>this.newsletter.applyStatuses(current,pending,result,day,brief));}
+            try {if (!debug) await vault.process(log,current=>this.newsletter.applyStatuses(current,sources,{used,discard:result.discard},day));}
             catch {throw new Error(t('newsletterStatusFailed',{path}));}
             try {await this.app.workspace.getLeaf(false).openFile(note);}
             catch {new Notice(t('newsletterCreated',{path}));}
             return note;
+        } catch (caught) {
+            if (['RP_ARTICLE_MINIMUM','RP_TOO_FEW_SOURCES'].includes(errorOf(caught).code || '')) await saveSourceDraft(errorOf(caught).message);
+            throw caught;
         } finally {if (this.aiController === controller) this.aiController = null;}
     }
 
@@ -1231,6 +1315,7 @@ class TextMachineRun extends Modal {
 
     render() {
         const p = this.plugin, el = this.contentEl;
+        el.addClass('text-machine-run');
         el.empty();
         this.modelEl = el.createEl('p',{cls:'text-machine-run-model',text:this.modelText});
         this.modelEl.hidden = !this.modelText;

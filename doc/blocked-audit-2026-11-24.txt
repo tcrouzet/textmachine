@@ -1,0 +1,315 @@
+Contrôle des sites bloqués — 24 novembre 2026
+62 domaines testés par HTTP ; 44 également au navigateur.
+Une page par domaine. Texte reçu ne signifie pas extraction intégrale validée dans le plugin.
+Les erreurs techniques ne prouvent ni un paywall ni un accès libre.
+JSON des articles et liste active non modifiés.
+
+Paywalls confirmés :
+lemonde.fr, la-croix.com, thetimes.com, telerama.fr, lecanardenchaine.fr, lanouvellerepublique.fr, lefigaro.fr, repubblica.it
+
+Détail complet :
+
+cureus.com — Échec technique — paywall non établi
+https://www.cureus.com/articles/550144-artificial-intelligence-for-cardiovascular-disease-prevention-in-resource-limited-settings-a-review-of-the-literature
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+lemonde.fr — Paywall confirmé
+https://www.lemonde.fr/en/culture/article/2026/11/10/uk-writer-m-john-harrison-wins-booker-for-ai-tinged-apocalyptic-novel_6776828_30.html
+HTTP : 402 ; navigateur : non
+
+la-croix.com — Paywall confirmé
+https://www.la-croix.com/culture/litterature-et-ia-aux-etats-unis-l-heure-du-soupcon-et-des-paradoxes-20261102
+HTTP : 200 ; navigateur : non
+Mention : article est réservé aux abonnés
+Métadonnées éditeur : accès non gratuit.
+
+journaldemontreal.com — Échec technique — paywall non établi
+https://www.journaldemontreal.com/2026/11/02/pour-en-finir-avec-lintelligence-artificielle-en-politique
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+insead.edu — Échec technique — paywall non établi
+https://knowledge.insead.edu/technology-innovation/how-meta-skills-can-help-you-ai-age
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+thetimes.com — Paywall confirmé
+https://www.thetimes.com/money/saving-investing/article/sudden-wealth-syndrome-g2jn7lnxd
+HTTP : 200 ; navigateur : non
+Métadonnées éditeur : accès non gratuit.
+
+scmp.com — Échec technique — paywall non établi
+https://www.scmp.com/tech/article/3372884/deepseek-unveils-ai-super-agent-coding-race-openai-anthropic
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+bloomberg.com — Échec technique — paywall non établi
+https://www.bloomberg.com/news/articles/2026-11-02/macquarie-executive-sees-ai-fast-tracking-junior-analyst-careers
+HTTP : 403 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+geelongcity.vic.gov.au — Échec technique — paywall non établi
+https://www.geelongcity.vic.gov.au/whats-happening/events/how-to-write-and-publish-novel-conversation
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+jpalfrey.blog — Texte reçu
+https://jpalfrey.blog/2026/11/02/academic-writing-and-ai-what-rules-make-the-most-sense/
+HTTP : 200 ; navigateur : non
+
+nptel.ac.in — Résultat indéterminé
+https://elearn.nptel.ac.in/product-page/scientific-writing-role-of-ai-and-journal-publications-batch-3
+HTTP : 200 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+proofsandprompts.com — Texte reçu
+https://proofsandprompts.com/2026/10/31/ai-reviews-are-the-new-normal/
+HTTP : 200 ; navigateur : non
+
+thomascherickal.com — Résultat indéterminé
+https://thomascherickal.com/writing-3/
+HTTP : 200 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+iainkediri.ac.id — Texte reçu
+https://jurnalfaktarbiyah.iainkediri.ac.id/index.php/ireel/article/view/9560
+HTTP : 200 ; navigateur : non
+
+arxiv.org — Résumé public reçu
+https://arxiv.org/abs/2611.14664
+HTTP : 200 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+sciencedirect.com — Échec technique — paywall non établi
+https://www.sciencedirect.com/science/article/pii/S0346251X26002393
+HTTP : 403 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+iain-palangkaraya.ac.id — Texte reçu
+https://ejournal.iain-palangkaraya.ac.id/jallt/article/view/599
+HTTP : 200 ; navigateur : non
+
+usd.ac.id — Texte reçu
+https://ejournal.usd.ac.id/index.php/llt/article/view/1359
+HTTP : 200 ; navigateur : non
+
+actainnovations.com — Résultat indéterminé
+https://actainnovations.com/index.php/pub/article/view/2770
+HTTP : 200 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+telerama.fr — Paywall confirmé
+https://www.telerama.fr/debats-reportages/les-geeks-de-l-intelligence-artificielle-ont-ils-vu-trop-de-films-de-science-fiction-7033710.php
+HTTP : 200 ; navigateur : non
+Mention : article est réservé aux abonnés
+Métadonnées éditeur : accès non gratuit.
+
+ft.com — Échec technique — paywall non établi
+https://www.ft.com/content/874e3f05-0be3-4a2d-b2a2-7b5823441794?syn-25a6b1a6=1
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+telegraph.co.uk — Texte reçu
+https://www.telegraph.co.uk/business/2026/11/04/accenture-accused-publishing-research-ai-hallucinations/
+HTTP : 200 ; navigateur : non
+Métadonnées éditeur : accès non gratuit.
+
+lepoint.fr — Échec technique — paywall non établi
+https://www.lepoint.fr/video/edito-etienne-gernelle/etienne-gernelle-sur-rtl-quand-lia-veut-tuer-la-litterature-XVRNMOQLNZEMBM3ZWIZYWR7VXE/
+HTTP : 403 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+lematin.ma — Échec technique — paywall non établi
+https://lematin.ma/culture/salon-du-livre-charjah-yaktine-designe-personnalite-culturelle-de-lannee/374367
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+army.mil — Échec technique — paywall non établi
+https://www.armyupress.army.mil/Journals/Military-Review/English-Edition-Archives/September-October-2026/AI-and-Professional-Authorship/
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+piquenewsmagazine.com — Échec technique — paywall non établi
+https://www.piquenewsmagazine.com/local-arts/the-infinite-sadness-of-small-appliances-wades-through-technology-to-find-humanity-12979872
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+carsonhume.com — Texte reçu
+https://carsonhume.com/2026/11/04/ls-delorme/
+HTTP : 403 ; navigateur : oui
+Navigateur : Texte reçu
+
+qlocal.co.uk — Échec technique — paywall non établi
+http://www.qlocal.co.uk/southport/forum
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+g8nation.com — Échec technique — paywall non établi
+http://g8nation.com/forum.php
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+tunisienumerique.com — Texte reçu
+https://www.tunisienumerique.com/tunisie-oman-ouverture-du-forum-du-dialogue-civilisationnel-a-luniversite-zitouna/
+HTTP : 200 ; navigateur : oui
+Navigateur : Texte reçu
+
+gulftoday.ae — Échec technique — paywall non établi
+https://www.gulftoday.ae/news/2026/11/05/sibf-leads-as-worlds-largest-book-fair-for-copyright-trading-for-sixth-consecutive-year
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+itch.io — Texte reçu
+https://sophiawawak.itch.io/did-a-monkey-write-this
+HTTP : 200 ; navigateur : non
+
+computing.net — Texte reçu
+https://computing.net/guides/claude-vs-chatgpt-which-ai-is-better-for-writing-coding-and-research/
+HTTP : 200 ; navigateur : non
+
+neowin.net — Échec technique — paywall non établi
+https://www.neowin.net/deals/price-dropped-browsercopilot-ai-lifetime-basic-plan-now-just-1997/
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+rainmeter.net — Échec technique — paywall non établi
+https://forum.rainmeter.net/index.php
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+egaliteetreconciliation.fr — Échec technique — paywall non établi
+https://egaliteetreconciliation.fr/Un-mois-sur-X-Octobre-2026-81279.html
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+mmo-champion.com — Échec technique — paywall non établi
+http://www.mmo-champion.com/forum.php
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+europesays.com — Texte reçu
+https://www.europesays.com/ch-fr/406348/
+HTTP : 200 ; navigateur : non
+
+tandfonline.com — Échec technique — paywall non établi
+https://www.tandfonline.com/doi/abs/10.1080/10447318.2026.2757341
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+lecanardenchaine.fr — Paywall confirmé
+https://www.lecanardenchaine.fr/environnement/55313-les-techno-prophetes-chasseurs-de-limites-planetaires
+HTTP : 200 ; navigateur : non
+Mention : article est réservé aux abonnés
+Métadonnées éditeur : accès non gratuit.
+
+supplychainbrain.com — Échec technique — paywall non établi
+https://www.supplychainbrain.com/technology/artificial-intelligence/blog/15883273/when-ai-invents-facts-whose-fault-is-it
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+goodmenproject.com — Échec technique — paywall non établi
+https://goodmenproject.com/featured-content/ai-governance-a-practical-view-from-a-writing-classroom/
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+wiley.com — Échec technique — paywall non établi
+https://onlinelibrary.wiley.com/doi/abs/10.1111/issj.70076
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+wjgnet.com — Échec technique — paywall non établi
+https://www.wjgnet.com/1948-5190/figures/v18/i11/126153.htm
+HTTP : 403 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+kvue.com — Échec technique — paywall non établi
+https://www.kvue.com/article/syndication/associatedpress/caine-prize-clears-zimbabwean-author-of-ai-writing-allegations-and-adds-new-rules/616-75ed1ad9-3086-470b-9f52-cffcd3f9ebae
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+7jours.ca — Échec technique — paywall non établi
+https://www.7jours.ca/2026/11/19/voici-12-suggestions-culturelles-du-21-au-27-novembre
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+avis-de-deces.com — Échec technique — paywall non établi
+https://www.avis-de-deces.com/persons/28980958/tehanni-danielle-belin-12-10-2026
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+prdaily.com — Résultat indéterminé
+https://www.prdaily.com/get-started-measuring-geo/
+HTTP : 200 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+lanouvellerepublique.fr — Paywall confirmé
+https://www.lanouvellerepublique.fr/deux-sevres/l-ia-c-est-l-ogm-de-la-litterature-cet-editeur-deux-sevrien-va-desormais-tester-tous-les-manuscrits-qu-il-recoit-1794583788
+HTTP : 200 ; navigateur : non
+Mention : Abonnez-vous pour lire
+
+lefigaro.fr — Paywall confirmé
+https://www.lefigaro.fr/culture/qui-etait-william-shakespeare-l-ia-revele-des-mysteres-sur-certaines-pieces-de-genie-20261113
+HTTP : 200 ; navigateur : non
+Mention : article est réservé aux abonnés
+Métadonnées éditeur : accès non gratuit.
+
+slobodenpecat.mk — Échec technique — paywall non établi
+https://www.slobodenpecat.mk/fr/vi-i-zashtita-na-literaturnite-prevodi-vo-evropa/
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+windowsforum.com — Échec technique — paywall non établi
+https://windowsforum.com/news/4-local-ai-models-for-8gb-gpus-coding-creative-writing-and-vram-tips.452240/
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+ocolly.com — Échec technique — paywall non établi
+https://www.ocolly.com/features/under-threat-osu-english-majors-faculty-grapple-with-the-impact-of-generative-ai/article_a1059b2f-456d-4fc1-8b5e-d3ed82ee3b87.html
+HTTP : 429 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+file770.com — Texte reçu
+https://file770.com/pixel-scroll-11-20-26-the-white-knight-is-filking-backwards/
+HTTP : 200 ; navigateur : non
+
+lesoir.be — Échec technique — paywall non établi
+https://www.lesoir.be/784011/article/2026-11-20/amin-maalouf-je-ne-suis-pas-sur-que-dans-20-ans-les-gens-se-soucieront-encore-si
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+techxplore.com — Échec technique — paywall non établi
+https://techxplore.com/news/2026-11-ai-text-detectors-conditions.html
+HTTP : 403 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+acfas.ca — Échec technique — paywall non établi
+https://www.acfas.ca/prix-concours/prix-acfas/2026/prix-andre-laurendeau/bertrand-gervais
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+theprint.in — Échec technique — paywall non établi
+https://theprint.in/opinion/bodo-language-digital-sahitya-sabha-75-years/3103979/
+HTTP : 200 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+blackhatprotools.info — Échec technique — paywall non établi
+https://www.blackhatprotools.info/forum.php
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+sanctioned-suicide.net — Échec technique — paywall non établi
+https://sanctioned-suicide.net/threads/really-epic-rap-battle-between-the-forum-sanctioned-suicide-and-ofcom-uk.263916/
+HTTP : 403 ; navigateur : oui
+Navigateur : Échec technique — paywall non établi
+
+sweetwaterreporter.com — Échec technique — paywall non établi
+https://www.sweetwaterreporter.com/online_features/press_releases/douglas-r-miller-explores-the-future-of-artificial-intelligence-and-humanitys-place-in-the-universe/article_cd0f4791-6d72-5b1f-a8b2-e156a7cf697e.html
+HTTP : 451 ; navigateur : oui
+Navigateur : Résultat indéterminé
+
+repubblica.it — Paywall confirmé
+https://www.repubblica.it/en/culture/2026/11/23/news/amin_maalouf_in_twenty_years__time_will_people_still_care_whether_a_book_was_written_by_ai-425742462/
+HTTP : 200 ; navigateur : non
+Métadonnées éditeur : accès non gratuit.
+

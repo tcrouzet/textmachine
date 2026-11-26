@@ -26,12 +26,18 @@ test('cached navigation pages cannot qualify as full articles or brief items',()
 test('selection and writing receive the configured article target even in customized prompts',()=>{
     const prompt='{"articles":{{articles}},"count":{{commentedArticles}}}';
     for (const count of [2,3,7]) {
-        for (const request of [selectionRequest(prompt,articles,'English','',[],[],count),
-            writerRequest(prompt,articles,[],[],'English','',count)]) {
+        const selection=selectionRequest(prompt,articles,'English','',[],[],count);
+        const writing=writerRequest(prompt,articles,[],[],'English','',count);
+        for (const request of [selection,writing]) {
             assert.equal(JSON.parse(request.input).count,count);
-            assert.ok(request.system.includes('Aim to discuss '+count+' supplied articles'));
             assert.ok(!request.input.includes('{{commentedArticles}}'));
         }
+        assert.ok(selection.system.includes('select the best '+count+' for the press review'));
+        assert.ok(selection.system.includes('Return fewer only if there are not enough relevant articles'));
+        assert.ok(selection.system.includes('never relax relevance to fill the count'));
+        assert.ok(!selection.system.includes('major sources'));
+        assert.ok(!selection.system.includes('Discuss at least'));
+        assert.ok(writing.system.includes('Discuss at least '+count+' supplied articles'));
     }
 });
 
@@ -155,8 +161,8 @@ test('legacy used articles are recovered only when explicitly linked from todayâ
     assert.deepEqual(availableArticles(text,'','2026-11-03',['[Source](https://example.com/legacy)']).map(article=>article.title),['legacy']);
     assert.deepEqual(availableArticles(text,'','2026-11-03',['[Source](https://example.com/legacy-extra)']),[]);
 });
-test('usedAt consumes the complete available pool while allowing same-day regeneration',()=>{
-    const pending=[...articles,article('third',{id:3})];
+test('usedAt records only published sources and leaves unused sources available the next day',()=>{
+    const pending=[...articles,article('third',{id:3,usedAt:'2026-11-02'})];
     const blocked=article('blocked',{id:4,status:'forbidden',content:''});
     const incoming=article('arrived-during-generation',{id:5});
     const original=JSON.stringify({version:1,articles:[...pending,blocked,incoming]});
@@ -165,10 +171,16 @@ test('usedAt consumes the complete available pool while allowing same-day regene
     assert.ok(rows.every(row=>!Object.hasOwn(row,'used')));
     assert.equal(rows[4].usedAt,'');
     assert.deepEqual(rows.map(row=>row.status),['','','','forbidden','']);
-    assert.deepEqual(rows.slice(0,4).map(row=>row.usedAt),Array(4).fill('2026-11-03'));
+    assert.deepEqual(rows.slice(0,4).map(row=>row.usedAt),['2026-11-03','','','2026-11-03']);
     assert.deepEqual(availableArticles(saved,'','2026-11-03').map(row=>row.id),[1,2,3,5]);
-    assert.deepEqual(availableArticles(saved,'','2026-11-04').map(row=>row.id),[5]);
+    assert.deepEqual(availableArticles(saved,'','2026-11-04').map(row=>row.id),[2,3,5]);
     assert.deepEqual(briefArticles(saved,'','2026-11-04'),[]);
+});
+test('an arXiv source already linked through its abstract is not recovered as unused',()=>{
+    const source=article('Research',{id:1,url:'https://arxiv.org/pdf/2610.37916',status:'forbidden',content:'',usedAt:'2026-11-03'});
+    const text=JSON.stringify({version:1,articles:[source]});
+    const published=new Set(['arxiv.org/abs/2610.37916']);
+    assert.deepEqual(briefArticles(text,'','2026-11-04','2026-11-03',published),[]);
 });
 test('concurrent usage changes are preserved instead of reassigned to the current edition',()=>{
     const changed={...articles[0],usedAt:'2026-11-02'};
@@ -551,6 +563,7 @@ test('the writer identifies supplied sources actually used without returning sta
     assert.equal(request.schema.additionalProperties,false);
     const definition=require('../../models/writer.json');
     const expected=structuredClone(definition);expected.properties.used.items.enum=[1,2];
+    Object.assign(expected.properties.used,{minItems:2,maxItems:2});
     assert.deepEqual(request.schema,expected);
     assert.ok(!Object.hasOwn(definition.properties.used.items,'enum'));
     request.schema.properties.paragraphs.description='Changed request only';
@@ -572,6 +585,16 @@ test('the requested commented-article minimum counts cited articles rather than 
     assert.throws(()=>parseWriter(JSON.stringify({paragraphs,used:[1,2,3]}),sources,3),/2.*3/);
     paragraphs.push('A third finding from [a third publication]('+sources[2].url+').');
     assert.deepEqual(parseWriter(JSON.stringify({paragraphs,used:[1,2,3]}),sources,3).used,sources);
+});
+
+test('writing cannot drop a selected source even when the configured minimum is met',()=>{
+    const sources=[articles[0],{...articles[1],url:'https://second.example/article'},article('third',{id:3,url:'https://third.example/article'})];
+    const paragraphs=['First [source]('+sources[0].url+').','Second [source]('+sources[1].url+').'];
+    for (const used of [[1,2],[1,2,3]])
+        assert.throws(()=>parseWriter(JSON.stringify({paragraphs,used}),sources,2),error=>error.code==='RP_ARTICLE_MINIMUM' && /2.*3/.test(error.message));
+    const request=writerRequest(prompt,sources,[],[],'English','',2);
+    assert.equal(request.schema.properties.used.minItems,3);
+    assert.equal(request.schema.properties.used.maxItems,3);
 });
 
 test('stored article IDs stay the same in the AI input and resolve independently of their position',()=>{
@@ -850,4 +873,31 @@ test('stored opaque URL identifiers are removed from AI inputs and the final bri
     assert.ok(markdown.includes('* ['+clean+']('+source.url+')'));
     assert.ok(!markdown.includes('littÃ©rature '+id+']'));
     assert.equal(JSON.stringify(source),before);
+});
+
+test('struck article paragraphs and brief titles identify their links without rejecting adjacent articles',()=>{
+    const {struckArticles}=require('../../plugin/newsletter');
+    const note='# ~~Rejected title~~\n\n~~A [Source](https://example.com/rejected) sentence.~~\n\nA [Keep](https://example.com/keep) sentence.\n\n* [Keep before](https://example.com/before)\n* [~~Rejected brief~~](https://example.com/brief) - [Site](https://example.com/)\n* [Keep after](https://example.com/after)';
+    assert.deepEqual(struckArticles([note]),['https://example.com/rejected','https://example.com/brief']);
+});
+
+test('a relevant reference source replaces an ordinary selection and preserves publication diversity',()=>{
+    const {prioritizeReferences}=require('../../plugin/newsletter');
+    const a=article('a',{id:1}),b=article('b',{id:2,url:'https://other.example/b'});
+    const fabula=article('Fabula',{id:3,url:'https://www.fabula.org/actualites/new'});
+    const offTopic=article('Off topic',{id:4,url:'https://www.fabula.org/off-topic'});
+    const result=prioritizeReferences({selected:[a,b],brief:[fabula],discard:[offTopic.id]},'fabula.org');
+    assert.deepEqual(result.selected.map(row=>row.id),[3,1]);
+    assert.deepEqual(result.brief.map(row=>row.id),[2]);
+    assert.deepEqual(result.discard,[4]);
+    assert.equal(publicationCount(result.selected),2);
+});
+
+test('brief translation receives publication history to reject repeated interviews under another URL',()=>{
+    const previous=[{name:'text-machine-2026-11-23.md',content:'[An interview](https://original.example/interview)'}];
+    const request=briefRequest('Translate into {{language}}',articles,'English',previous);
+    assert.ok(request.system.includes(JSON.stringify(previous)));
+    assert.ok(request.system.includes('the same interview'));
+    assert.ok(request.system.includes('Return null for both title and category'));
+    assert.deepEqual(JSON.parse(request.input).map(row=>row.id),[1,2]);
 });

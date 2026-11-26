@@ -16,7 +16,7 @@
     "src/vendor/readability/Readability.js": "34dcab3d0832d0019f02990eed6b6124e029e8c32b9f0c6f2550544ff8dff174",
     "src/web/article.ts": "38f822690e7bf76835eb3a0c2a39a0e83e04fcc1d5c3e633b24641484af45cb3",
     "src/web/authors.ts": "a2965a6dcbadddf7732aba3555c8a6f4fd1588f903f585f3f96aada9d4092019",
-    "src/web/browser.ts": "3b606685a3c7cbd45ff5f7684cf45cec4e2544dc09d99387175700be6709b050",
+    "src/web/browser.ts": "a8fbb6ec3bdbb285cda078b80cf307bd8b543ee8e9319324001cdb3990d85a30",
     "src/web/html.ts": "135d3011463bb7197eff7a16b52764e5acd6993b3d40d8cc1091e8ad78f31f9f",
     "src/web/urls.ts": "5faf0db46d015479875446a7622df9ac43b445c6a815d642581c3fe8b4beb7d0"
   }

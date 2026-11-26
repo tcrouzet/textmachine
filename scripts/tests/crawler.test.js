@@ -6,22 +6,22 @@ const {isPdf} = require('../../plugin/articles');
 const {publicAddress, publicUrl} = require('../../plugin/browser');
 const article = {url:'https://example.com/article', title:'Article', date:'', source:'User', status:'', publish:'', content:'', image:''};
 
-test('redirect destinations replace short links even when the publisher requires a subscription',async()=>{
+test('redirect destinations replace short links even when the publisher refuses access',async()=>{
     const blocked=[];
     const result=await crawl({...article,url:'https://flip.it/MtZqB9'},blocked,undefined,async()=>({
         url:'https://www.theatlantic.com/books/2026/11/ai-literary-scams-amazon/689391/?utm_source=flipboard',status:403,html:''}));
     assert.equal(result.url,'https://www.theatlantic.com/books/2026/11/ai-literary-scams-amazon/689391/');
     assert.equal(result.status,'forbidden');
-    assert.deepEqual(blocked,['theatlantic.com'],'An intermediary must not be blocked because its destination is paywalled');
+    assert.deepEqual(blocked,[],'An access refusal proves neither a paywall nor a blocked intermediary');
     const titled=await crawl({...article,url:'https://flip.it/MtZqB9',title:'A novelist confronts invented versions of her books'},[],undefined,
         async()=>({url:result.url,status:403,html:''}));
     assert.equal(titled.title,'A novelist confronts invented versions of her books','Keep a meaningful mail title when the publisher metadata cannot be read');
 });
 
-test('site refusals are persisted and suppress future pages on that host', async () => {
+test('payment requirements are persisted and suppress future pages on that host', async () => {
     const data = [];
     let calls = 0;
-    const load = async url => {calls++; return {url, status:403, html:''};};
+    const load = async url => {calls++; return {url, status:402, html:''};};
     assert.equal((await crawl(article, data, undefined, load)).status, 'forbidden');
     assert.deepEqual(data, ['example.com']);
     assert.equal((await crawl({...article,url:'https://www.example.com/another'}, data, undefined, load)).status, 'forbidden');
@@ -58,11 +58,11 @@ test('page failures preserve missing pages separately from access failures witho
     }
 });
 
-test('explicit access refusals block domains while network failures do not',async()=>{
+test('only payment requirements block domains, not generic access refusals or network failures',async()=>{
     for (const status of [401,402,403,451]) {
         const blocked=[];
         await crawl(article,blocked,undefined,async url=>({url,status,html:''}));
-        assert.deepEqual(blocked,['example.com']);
+        assert.deepEqual(blocked,status===402 ? ['example.com'] : []);
     }
     const blocked=[];
     await crawl(article,blocked,undefined,async url=>({url,status:404,html:'',failure:'ETIMEDOUT'}));

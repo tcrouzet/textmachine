@@ -14,13 +14,13 @@
         "type": "string",
         "minLength": 1
       },
-      "description": "RP à plusieurs voix, fondée sur au moins deux publications distinctes. Vise le nombre d’articles demandé dans les consignes. Sans titre, chapeau, image ni liste de résumés. Au moins deux paragraphes si used n’est pas vide ; liste vide sinon.",
+      "description": "RP utilisant tous les articles sélectionnés, dans l’ordre fourni, avec un paragraphe par source et au moins deux publications distinctes. Sans titre, chapeau, image ni liste de résumés.",
       "minItems": 0
     },
     "used": {
       "type": "array",
       "items": {"type": "integer", "minimum": 1},
-      "description": "IDs des articles réellement exploités dans le corps, issus d’au moins deux publications distinctes. Plusieurs billets du même site ne suffisent pas. Liste vide si aucune RP à plusieurs voix n’est possible. Les sources pertinentes non utilisées seront conservées en bref."
+      "description": "Tous les IDs fournis, chacun exactement une fois. Chaque article doit être exploité et lié dans le corps. La sélection est déjà faite : ne retire ni ne remplace aucune source."
     }
   }
 }

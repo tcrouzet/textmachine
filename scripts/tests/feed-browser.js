@@ -53,7 +53,20 @@ export async function runSourceChecks() {
     const image=extractSocialImage(html,url);
     if (image?.image!=='https://www.theatlantic.com/photo.jpg' || image.imageCaption!=='Original photograph. Credit: Author / Agency.')
         throw new Error('Preserve the complete original image credit');
-    return {passed:3};
+    const cases=[
+        {html:'<title>Access denied</title><p>Please verify you are human.</p>',paywall:false},
+        {html:'<article><p>Please sign in to continue reading.</p></article>',paywall:false},
+        {html:'<article><p>Cet article est réservé aux abonnés.</p></article>',paywall:true},
+        {html:'<script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":false}</script><article><p>Short preview.</p></article>',paywall:true},
+        {html:html.replace(prose,prose.repeat(3)).replace('<article>','<script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":false}</script><article>'),paywall:false},
+    ];
+    for (const entry of cases) {
+        const blocked=[];
+        await crawl({...original,url},blocked,undefined,async()=>({url,status:200,html:entry.html}));
+        if (blocked.includes('theatlantic.com')!==entry.paywall)
+            throw new Error('Only an identified paywall may block the domain; public full text and security challenges must not');
+    }
+    return {passed:3+cases.length};
 }
 
 export function runImageCaptionChecks() {
@@ -77,5 +90,9 @@ export function runImageCaptionChecks() {
     const captioned='<article><figure><img data-src="/photo.jpg"><figcaption>Original photograph. Photo: Author / Agency.</figcaption></figure></article>';
     check(extractArticleImage(missing+captioned,url)?.imageCaption==='Original photograph. Photo: Author / Agency.','Recover the captioned article photograph when its social thumbnail has no caption');
     check(extractArticleImage(captioned,url)?.image==='https://scroll.in/photo.jpg','A captioned article photograph remains usable without social metadata');
+    const hero=extractArticleImage(missing+'<article><h1>Writing and suspicion</h1><figure class="featured-image"><img src="/hero.jpg"></figure></article>',url);
+    check(hero?.image==='https://scroll.in/hero.jpg' && hero.imageCaption.includes('Writing and suspicion') && hero.imageCaption.includes('scroll.in'),'An uncaptioned article photograph precedes a generic social thumbnail and identifies its source');
+    check(extractArticleImage(missing,url)?.image==='https://images.example/uncaptioned.jpg','A social image remains usable with source attribution when no article photograph exists');
+    check(extractArticleImage('<meta property="og:image" content="javascript:alert(1)">',url)===null,'Unsafe image protocols remain forbidden');
     return {passed};
 }

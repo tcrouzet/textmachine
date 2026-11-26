@@ -540,7 +540,8 @@ test('the writing target blocks generation until enough readable sources exist a
     p.generate=()=>assert.fail('Do not call AI below the configured article threshold');
     await assert.rejects(p.writeNewsletter(),/9.*10/);
     assert.deepEqual(JSON.parse(contents.get(p.dataPath)),data);
-    assert.equal(contents.size,1);
+    assert.equal(contents.size,2);
+    assert.ok(contents.has('Data/brouillon-sources-'+p.newsletter.day()+'.md'));
     data.articles.push({...entries[0],id:10,title:'Tenth source',url:'https://example.com/tenth'});
     data.nextId=11;
     contents.set(p.dataPath,JSON.stringify(data));
@@ -556,7 +557,7 @@ test('selection receives only readable eligible articles and the requested writi
     const {p,contents,entries,seen}=await newsletterFixture();
     p.settings.commentedArticles=10;
     p.settings.excludedSources='excluded.example';
-    await p.app.vault.create('Data/text-machine-2000-01-01.md','# Earlier edition');
+    await p.app.vault.create('Data/text-machine-2000-01-01.md','# Earlier edition\n[Published](https://example.com/excluded-4)');
     const readable=Array.from({length:9},(_,i)=>({...entries[0],id:i+1,title:'Source '+i,url:'https://publisher-'+(i%2)+'.example/source-'+i}));
     const other=[{content:' \n '},{status:'forbidden'},{url:'https://example.com/article.pdf'},
         {url:'https://excluded.example/article'},{usedAt:'2000-01-01'},
@@ -608,16 +609,17 @@ test('deleting consecutive newsletters recovers sources without crossing a survi
     const folder=files.get('Data');
     const remove=path=>{files.delete(path);contents.delete(path);folder.children=folder.children.filter(file=>file.path!==path);};
     const oldest=await p.app.vault.create('Data/text-machine-2026-11-02-2.md','# Surviving edition');
-    const previous=await p.app.vault.create('Data/text-machine-2026-11-03.md','# Previous edition');
-    const yesterday=await p.app.vault.create('Data/text-machine-2026-11-04.md','# Yesterday');
+    const previousText='# Previous edition\n'+articles.slice(5,10).map(article=>'[Source]('+article.url+')').join('\n');
+    const previous=await p.app.vault.create('Data/text-machine-2026-11-03.md',previousText);
+    const yesterday=await p.app.vault.create('Data/text-machine-2026-11-04.md','# Yesterday\n'+articles.slice(0,5).map(article=>'[Source]('+article.url+')').join('\n'));
     await p.app.vault.create('Data/text-machine-2026-11-05.md','# Today to regenerate');
     await p.app.vault.create('Data/brouillon-2026-11-04.md','# Draft');
-    await p.app.vault.create('Data/text-machine-2026-11-06.md','# Future edition');
+    await p.app.vault.create('Data/text-machine-2026-11-06.md','# Future edition\n[Future source]('+articles[0].url+')');
     const generate=p.generate;
     p.generate=async()=>assert.fail('A missing edition must not cross a surviving later edition');
     remove(previous.path);
     assert.equal(await p.writeNewsletter(),null);
-    await p.app.vault.create(previous.path,'# Previous edition');
+    await p.app.vault.create(previous.path,previousText);
     remove(yesterday.path);
     await assert.rejects(p.writeNewsletter(),/5.*10/);
     assert.deepEqual(JSON.parse(contents.get(p.dataPath)),before);
@@ -632,6 +634,41 @@ test('deleting consecutive newsletters recovers sources without crossing a survi
     assert.equal(contents.get(oldest.path),'# Surviving edition');
     assert.equal((await p.writeNewsletter()).path,note.path);
     assert.equal(seen.at(-1).articles.length,10);
+});
+
+test('unused sources since the last real edition reach selection despite erroneous usage dates and missing drafts',async()=>{
+    const {p,contents,entries,seen}=await newsletterFixture();
+    p.newsletter={...p.newsletter,day:()=> '2026-11-26'};
+    p.settings.commentedArticles=3;p.settings.imageMode='none';
+    const sources=[{...entries[0],usedAt:'2026-11-24'},
+        {...entries[1],usedAt:'2026-11-24'},
+        {...entries[0],id:4,title:'Unused yesterday',url:'https://third.example/yesterday',usedAt:'2026-11-25'},
+        {...entries[0],id:5,title:'New today',url:'https://fourth.example/today'},
+        {...entries[0],id:6,title:'Unpublished brief candidate',url:'https://blocked.example/article',status:'forbidden',content:'',usedAt:'2026-11-24'}];
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:7,articles:sources}));
+    const published='Data/text-machine-2026-11-24.md';
+    const previous='# Last published edition\n\n[Published source]('+sources[0].url+')';
+    await p.app.vault.create(published,previous);
+    const generate=p.generate;
+    let selections=0;
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+        if (context?.instructions==='Runtime selection') {
+            selections++;
+            assert.deepEqual(context.articles.map(article=>article.id),[2,4,5]);
+        }
+        if (system.startsWith('Runtime brief')) return JSON.stringify({titles:[{id:6,title:null,category:null}]});
+        return generate(connection,system,input,...rest);
+    };
+    const note=await p.writeNewsletter();
+    assert.equal(note.path,'Data/text-machine-2026-11-26.md');
+    assert.deepEqual(seen[0].articles.map(article=>article.id),[2,4,5]);
+    assert.equal(selections,1);
+    const saved=JSON.parse(contents.get(p.dataPath)).articles;
+    assert.deepEqual(saved.map(article=>article.usedAt),['2026-11-24','2026-11-26','2026-11-26','2026-11-26','']);
+    assert.equal(contents.get(published),previous);
+    assert.ok(!contents.get(note.path).includes(sources[0].url));
+    assert.ok(!contents.get(note.path).includes(sources[4].url));
 });
 
 test('without any older newsletter all dated sources can return, and a failed run keeps their dates',async()=>{
@@ -685,7 +722,42 @@ test('today’s note is regenerated from used articles and new articles without 
     assert.equal(seen[1].previousNewsletters.length,0);
     assert.equal(JSON.parse(contents.get(p.dataPath)).articles[3].usedAt,p.newsletter.day());
 });
-test('a saved edition consumes every available article and the next day starts with new arrivals only',async()=>{
+test('daily selection persists across regenerated text and is renewed for new sources or selection criteria',async()=>{
+    const {p,contents,entries,seen}=await newsletterFixture();
+    p.settings.imageMode='none';
+    const generate=p.generate,read=p.app.vault.adapter.read;
+    let selections=0,selectionPrompt='first',expectCache=false;
+    p.app.vault.adapter.read=async path=>path.endsWith('/prompts/sélection.md')
+        ? (await read(path)).replace('"Runtime selection"','"Runtime selection","revision":"'+selectionPrompt+'"') : read(path);
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+        if (context?.instructions==='Runtime selection') selections++;
+        if (context?.instructions==='Runtime titles' && expectCache)
+            assert.fail('A cached selection must also survive loss of in-memory title approvals');
+        return generate(connection,system,input,...rest);
+    };
+    await p.writeNewsletter();
+    const cachePath='Data/selection-text-machine-'+p.newsletter.day()+'.json';
+    const cached=contents.get(cachePath);
+    assert.deepEqual(JSON.parse(cached).selection,{selected:[1,2],brief:[],discard:[]});
+    p.titleChecks.clear();
+    expectCache=true;
+    await p.writeNewsletter();
+    assert.equal(selections,1);assert.equal(contents.get(cachePath),cached);
+    assert.deepEqual(seen.at(-1).articles.map(article=>article.id),[1,2]);
+    selectionPrompt='second';expectCache=false;
+    await p.writeNewsletter();
+    assert.equal(selections,2);assert.notEqual(contents.get(cachePath),cached);
+    const data=JSON.parse(contents.get(p.dataPath));
+    data.nextId=5;data.articles.push({...entries[0],id:4,title:'New source',url:'https://third.example/article'});
+    contents.set(p.dataPath,JSON.stringify(data));
+    await p.writeNewsletter();
+    assert.equal(selections,3);
+    assert.deepEqual(JSON.parse(contents.get(cachePath)).selection.selected,[1,2,4]);
+    assert.deepEqual(seen.at(-1).articles.map(article=>article.id),[1,2,4]);
+});
+
+test('a saved edition consumes its published articles and the next day starts with new arrivals only',async()=>{
     const {p,contents,entries,seen}=await newsletterFixture();
     const generate=p.generate,selections=[];
     p.newsletter={...p.newsletter,day:()=> '2026-11-04'};
@@ -701,7 +773,7 @@ test('a saved edition consumes every available article and the next day starts w
     assert.ok(first.articles.every(article=>!Object.hasOwn(article,'used')));
     assert.deepEqual(first.articles.slice(0,2).map(article=>article.usedAt),['2026-11-04','2026-11-04']);
     assert.equal((await p.writeNewsletter()).path,note.path);
-    assert.deepEqual(selections,[[1,2],[1,2]]);
+    assert.deepEqual(selections,[[1,2]]);
     p.newsletter={...p.newsletter,day:()=> '2026-11-05'};
     p.generate=async()=>{throw new Error('Consumed sources cannot start a new edition');};
     assert.equal(await p.writeNewsletter(),null);
@@ -751,7 +823,7 @@ test('large source collections are selected in bounded batches before one global
     assert.deepEqual(seen[0].articles.map(row=>row.id),[1,2]);
     const saved=JSON.parse(contents.get(p.dataPath));
     assert.deepEqual(saved.articles.map(row=>({...row,usedAt:''})),articles.map(row=>({...row,usedAt:''})));
-    assert.ok(saved.articles.every(row=>row.usedAt===p.newsletter.day()));
+    assert.deepEqual(saved.articles.map(row=>row.usedAt),articles.map(row=>[1,2].includes(row.id) ? p.newsletter.day() : ''));
 });
 
 test('oversized individual sources and a selection that never reduces preserve notes and articles',async()=>{
@@ -1076,6 +1148,7 @@ test('a press review from one publication cannot replace the saved edition or co
         };
         p.generateIllustration=()=>assert.fail('Do not illustrate a rejected RP');
         await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t('newsletterMultiplePublications'));
+        assert.ok(contents.get('Data/brouillon-sources-'+p.newsletter.day()+'.md').includes(p.i18n.t('newsletterMultiplePublications')));
         assert.equal(contents.get(path),'# Previous edition');
         assert.equal(contents.get(p.dataPath),before);
         assert.equal(selections,failure==='selection' ? 2 : 1);
@@ -1083,7 +1156,7 @@ test('a press review from one publication cannot replace the saved edition or co
     }
 });
 
-test('the brief includes blocked sources, secondary selections and every selected article omitted by the writer',async()=>{
+test('the brief includes blocked sources and every secondary source assigned by selection',async()=>{
     const {p,contents,entries}=await newsletterFixture();
     p.settings.imageMode='none';
     const source=(id,title,extra={})=>({...entries[0],id,title,url:'https://example.com/story-'+id,...extra});
@@ -1094,7 +1167,7 @@ test('the brief includes blocked sources, secondary selections and every selecte
     const generate=p.generate;let translated=[];
     p.generate=async(connection,system,input,...rest)=>{
         let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
-        if (context?.instructions==='Runtime selection') return JSON.stringify({selected:[11,12,17],brief:[13],discard:[14]});
+        if (context?.instructions==='Runtime selection') return JSON.stringify({selected:[11,12],brief:[13,17],discard:[14]});
         if (context?.instructions==='My runtime prompt') return JSON.stringify({paragraphs:[
             'A major literary development changes publishing practices. The [source](https://example.com/story-11) reports the facts.',
             'The [other publication](https://other.example/story-12) adds another finding.'],used:[11,12]});
@@ -1123,7 +1196,7 @@ test('the brief includes blocked sources, secondary selections and every selecte
     for (const id of [11,14,16]) assert.ok(!brief.includes('https://example.com/story-'+id));
     const saved=JSON.parse(contents.get(p.dataPath)).articles;
     assert.deepEqual(saved.map(row=>row.title),rows.map(row=>row.title));
-    assert.ok(saved.every(row=>row.usedAt===p.newsletter.day()));
+    assert.deepEqual(saved.map(row=>row.usedAt),rows.map(row=>[11,12,13,15,17].includes(row.id) ? p.newsletter.day() : ''));
     assert.equal(saved.find(row=>row.id===15).status,'forbidden');
 });
 
@@ -1147,7 +1220,10 @@ test('empty selections and empty writer responses cannot create or replace an ed
         p.generateIllustration=()=>assert.fail('Do not illustrate an edition without an article');
         await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t('newsletterNotEnoughRelevantSources',{count:0,minimum:2}));
         assert.equal(writing,decline ? 1 : 0);
-        assert.deepEqual(contents,before);
+        const draftPath='Data/brouillon-sources-'+p.newsletter.day()+'.md';
+        assert.ok(contents.has(draftPath));
+        const after=new Map(contents);after.delete(draftPath);
+        assert.deepEqual(after,before);
         assert.equal(p.aiController,null);
     }
 });
@@ -1175,8 +1251,93 @@ test('the configured minimum blocks short collections, selections and actual cit
         };
         p.generateIllustration=()=>assert.fail('Do not illustrate an edition below the minimum');
         await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t(stage==='collection' ? 'newsletterNotEnoughSources' : 'newsletterNotEnoughRelevantSources',{count:2,minimum:3}));
-        assert.deepEqual(contents,before);
+        const draftPath='Data/brouillon-sources-'+p.newsletter.day()+'.md';
+        assert.ok(contents.has(draftPath));
+        const after=new Map(contents);after.delete(draftPath);
+        assert.deepEqual(after,before);
         assert.equal(p.aiController,null);
+    }
+});
+
+test('an insufficient selection reports the examined pool and distinguishes retained, brief and rejected sources',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.settings.commentedArticles=3;
+    const data=JSON.parse(contents.get(p.dataPath));
+    data.articles.push({...entries[0],id:4,title:'Secondary source',url:'https://third.example/article'});data.nextId=5;
+    contents.set(p.dataPath,JSON.stringify(data));
+    const generate=p.generate,updates=[];
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+        if (context?.instructions==='Runtime selection') return JSON.stringify({selected:[1,2],brief:[4],discard:[]});
+        return generate(connection,system,input,...rest);
+    };
+    await assert.rejects(p.writeNewsletter(message=>updates.push(message)),error=>error.code==='RP_ARTICLE_MINIMUM');
+    const summary='3 texts examined: 2 selected for the press review, 1 for the brief, 0 rejected.';
+    assert.ok(updates.includes('3 full texts available for source selection.'));
+    assert.ok(updates.includes(summary));
+    const draft=contents.get('Data/brouillon-sources-'+p.newsletter.day()+'.md');
+    assert.ok(draft.includes(summary));
+    assert.ok(!draft.includes('Secondary source'));
+});
+
+test('an insufficient collection opens the available texts without presenting unfiltered blocked sources as selected',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.settings.commentedArticles=3;p.settings.authorFeeds='';
+    const sources=[{...entries[0],title:'A [novel]'},entries[1],
+        {...entries[0],id:4,title:'Blocked source',url:'https://blocked.example/article',status:'forbidden',content:'Unverified content must not appear'}];
+    const data={version:1,nextId:5,articles:sources};
+    contents.set(p.dataPath,JSON.stringify(data));
+    const opened=[];
+    p.app.workspace.getLeaf=()=>({openFile:async file=>opened.push(file.path)});
+    p.getAIConnection=()=>assert.fail('Source drafts do not require an AI model');
+    p.generate=()=>assert.fail('Source drafts do not call AI');
+    p.request=()=>assert.fail('Source drafts do not fetch external sources');
+    const draftPath='Data/brouillon-sources-'+p.newsletter.day()+'.md';
+    await assert.rejects(p.writeNewsletter(),/2.*3/);
+    assert.equal(contents.get(draftPath),'> Available texts before selection : '+p.i18n.t('newsletterNotEnoughSources',{count:2,minimum:3})+'\n\n'
+        +'## Texts proposed for the press review\n\n'
+        +'- [A \\[novel\\]](<https://example.com/used>) — Full text\n'
+        +'- [another](<https://other.example/another>) — Full text\n');
+    assert.equal(contents.get(p.dataPath),JSON.stringify(data));
+    assert.equal(contents.size,2);
+    sources[0].title='Updated title';contents.set(p.dataPath,JSON.stringify(data));
+    await assert.rejects(p.writeNewsletter(),/2.*3/);
+    assert.ok(contents.get(draftPath).includes('- [Updated title]'));
+    assert.equal(contents.get(p.dataPath),JSON.stringify(data));
+    assert.deepEqual(opened,[draftPath,draftPath]);
+    assert.equal(contents.size,2);
+});
+
+test('source drafts contain only the main selection, never unchecked brief candidates or blocked titles',async()=>{
+    for (const selected of [[],[7],[1,2]]) {
+        const {p,contents,entries}=await newsletterFixture();
+        p.settings.commentedArticles=3;p.settings.authorFeeds='';
+        const sources=[entries[0],entries[1],
+            {...entries[0],id:4,title:'Stay woke!',url:'https://culture.example/woke'},
+            {...entries[0],id:5,title:'By Sword and Fire',url:'https://review.example/sword'},
+            {...entries[0],id:6,title:'Jilly Cooper and plagiarism',url:'https://plagiarism.example/cooper'},
+            {...entries[0],id:7,title:'Consultation citoyenne sur les IA et la culture',url:'https://idboox.example/consultation'},
+            {...entries[0],id:8,title:'Guardian cartoon',url:'https://blocked.example/cartoon',status:'forbidden',content:''},
+            {...entries[0],id:9,title:'Impact Group Announces AI',url:'https://blocked.example/impact',status:'forbidden',content:''}];
+        const before=JSON.stringify({version:1,nextId:10,articles:sources});
+        contents.set(p.dataPath,before);
+        p.generate=async(_connection,_system,input)=>{
+            const context=JSON.parse(input);
+            if (context.instructions==='Runtime titles') {
+                assert.deepEqual(context.articles.map(article=>article.id),[4,5,6,7,8,9]);
+                return JSON.stringify({selected:[4,5,6,7,8,9],brief:[],discard:[]});
+            }
+            assert.equal(context.instructions,'Runtime selection');
+            return JSON.stringify({selected,brief:context.articles.filter(article=>!selected.includes(article.id)).map(article=>article.id),discard:[]});
+        };
+        await assert.rejects(p.writeNewsletter(),error=>error.code==='RP_ARTICLE_MINIMUM');
+        const draft=contents.get('Data/brouillon-sources-'+p.newsletter.day()+'.md');
+        assert.ok(draft.startsWith('> Source selection : '));
+        for (const source of sources) assert.equal(draft.includes('<'+source.url+'>'),selected.includes(source.id),source.title);
+        assert.equal((draft.match(/ — Full text/g) || []).length,selected.length);
+        assert.ok(!draft.includes('No full text'));
+        assert.equal(contents.get(p.dataPath),before);
+        assert.ok(!contents.has('Data/text-machine-'+p.newsletter.day()+'.md'));
     }
 });
 
@@ -1194,7 +1355,7 @@ test('brief filtering must classify every supplied article even when rejecting o
     p.generateIllustration=()=>assert.fail('Do not generate an image after a missing brief title');
     await assert.rejects(p.writeNewsletter(),/Translation.*incomplete or invalid/);
     assert.equal(contents.get(p.dataPath),before);
-    assert.equal(contents.size,1);
+    assert.deepEqual([...contents.keys()].sort(),[p.dataPath,'Data/selection-text-machine-'+p.newsletter.day()+'.json'].sort());
 });
 
 test('overlong introductions are retried only at publication and the retired verifier is never called',async()=>{
@@ -1490,12 +1651,13 @@ test('failed body revisions save the original article while cancellation still p
     }
 });
 
-test('without author feeds or optional history variables no context is fetched',async()=>{
+test('published notes are checked for usage without sending optional history or fetching author feeds',async()=>{
     const {p,contents,seen} = await newsletterFixture();
     p.settings.authorFeeds='';
     const old = await p.app.vault.create('Data/text-machine-2000-01-01.md','# Old newsletter');
     const read = p.app.vault.read;
-    p.app.vault.read = async file=>{assert.notEqual(file,old);return read(file);};
+    const checked=[];
+    p.app.vault.read = async file=>{checked.push(file.path);return read(file);};
     const readResource = p.app.vault.adapter.read;
     p.app.vault.adapter.read = async path=>path.endsWith('/prompts/writer.md')
         ? '{"instructions":"My runtime prompt","articles":{{ articles }},"language":"{{language}}"}' : readResource(path);
@@ -1503,6 +1665,7 @@ test('without author feeds or optional history variables no context is fetched',
     p.settings.newsletterLanguage = 'español';
     const note = await p.writeNewsletter();
     assert.ok(contents.get(note.path).startsWith('# A new newsletter'));
+    assert.ok(checked.includes(old.path));
     assert.equal(seen[0].language,'español');
     assert.ok(!Object.hasOwn(seen[0],'previousNewsletters'));
     assert.ok(!Object.hasOwn(seen[0],'recentPosts'));
@@ -1534,6 +1697,41 @@ test('selection receives history even when only its prompt requests it, excludin
     assert.deepEqual(seen[0].articles.map(article=>article.id),[1,2]);
     assert.ok(!Object.hasOwn(seen[0],'previousNewsletters'));
     assert.equal(contents.get(oldPath),'# Earlier coverage of the Orélien affair');
+});
+
+test('selection sees older coverage beyond five editions and saves only a draft when excluding it leaves too few sources',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.settings.commentedArticles=3;p.settings.imageMode='none';
+    const older='Data/text-machine-2000-01-01.md';
+    await p.app.vault.create(older,'# The Orélien affair has already been covered');
+    for (let i=1;i<=6;i++) await p.app.vault.create('Data/text-machine-2000-02-0'+i+'.md','# Other coverage '+i);
+    const data=JSON.parse(contents.get(p.dataPath));
+    data.articles.push({...entries[0],id:4,title:'Another comment on the Orélien affair',url:'https://third.example/article'});
+    data.nextId=5;contents.set(p.dataPath,JSON.stringify(data));
+    const read=p.app.vault.adapter.read;
+    p.app.vault.adapter.read=async path=>path.endsWith('/prompts/sélection.md')
+        ? '{"instructions":"Runtime selection","previousNewsletters":{{previousNewsletters}},"articles":{{articles}}}' : read(path);
+    const generate=p.generate;
+    let selections=0;
+    p.generate=async(connection,system,input,...rest)=>{
+        let context;try {context=JSON.parse(input);} catch { /* Publisher receives prose. */ }
+        if (context?.instructions==='Runtime selection') {
+            selections++;
+            assert.equal(context.previousNewsletters.length,7);
+            assert.ok(context.previousNewsletters.some(note=>note.name==='text-machine-2000-01-01.md' && note.content===contents.get(older)));
+            return JSON.stringify({selected:[1,2],brief:[],discard:[4]});
+        }
+        if (context?.instructions==='My runtime prompt') assert.fail('Do not write filler after excluding an already covered topic');
+        return generate(connection,system,input,...rest);
+    };
+    const before=new Map(contents);
+    await assert.rejects(p.writeNewsletter(),error=>error.code==='RP_ARTICLE_MINIMUM');
+    const draftPath='Data/brouillon-sources-'+p.newsletter.day()+'.md';
+    assert.ok(contents.get(draftPath).includes('2'));
+    assert.ok(!contents.get(draftPath).includes('Another comment on the Orélien affair'));
+    const after=new Map(contents);after.delete(draftPath);
+    assert.deepEqual(after,before);
+    assert.equal(selections,1);
 });
 
 test('the configured Substack is fetched by the plugin and its posts are inserted in the prompt',async()=>{
@@ -1966,7 +2164,7 @@ test('the missing-label prompt resumes only after a label choice or explicit Gma
         };
         await p.openTextMachine('Data');
         const dialog=p.runDialog;
-        dialog.contentEl={empty(){},createEl(){return {hidden:false,setText(){}};}};
+        dialog.contentEl={addClass(name){assert.equal(name,'text-machine-run');},empty(){},createEl(){return {hidden:false,setText(){}};}};
         dialog.render();
         assert.ok(options.some(option=>option.value==='__disconnect__' && option.label===p.i18n.t('noGmailLabel')));
         assert.ok(options.some(option=>option.value==='Label_1'));
@@ -2047,7 +2245,7 @@ test('folder setup, source exclusions and data controls remain available without
     };
     p.openTextMachine('Data');
     const dialog=p.runDialog;
-    dialog.contentEl={empty(){messages.length=0;buttons.length=0;},createEl(_tag,options){if(options?.text) messages.push(options.text);return {setText(){}};}};
+    dialog.contentEl={addClass(name){assert.equal(name,'text-machine-run');},empty(){messages.length=0;buttons.length=0;},createEl(_tag,options){if(options?.text) messages.push(options.text);return {setText(){}};}};
     dialog.render();
     assert.ok(buttons.includes('Create folder'));
     assert.ok(!buttons.includes('Connect Gmail'));
@@ -2475,7 +2673,7 @@ test('a review requesting three commented articles cannot be written from only t
         return generate(connection,system,input,...rest);
     };
     await assert.rejects(p.writeNewsletter(),/2.*3/);
-    assert.equal([...contents.keys()].filter(path=>path.endsWith('.md')).length,0);
+    assert.deepEqual([...contents.keys()].filter(path=>path.endsWith('.md')),['Data/brouillon-sources-'+p.newsletter.day()+'.md']);
 });
 
 test('changing the title prompt rechecks cached approvals before the next selection',async()=>{
@@ -2617,7 +2815,7 @@ test('HTTP 404 pages are excluded from the newsletter while paywalls remain in b
     const legacy=extra(6,'https://paywall.example/deleted','404');
     contents.set(p.dataPath,JSON.stringify({version:1,nextId:7,articles:[...entries,missing,paywall,legacy]}));
     const calls=[];
-    p.loadPage=async url=>{calls.push(url);return {url,status:url===missing.url ? 404 : 403,html:''};};
+    p.loadPage=async url=>{calls.push(url);return {url,status:url===missing.url ? 404 : 402,html:''};};
     await p.crawlArticles();
     await p.crawlArticles();
     assert.deepEqual(calls,[missing.url,paywall.url]);
@@ -2755,10 +2953,11 @@ test('forbidden articles cannot satisfy the threshold and debug sends only their
     p.request = async()=>{throw new Error('No feed needed');};
     p.loadPage = async()=>{throw new Error('Forbidden sources must not be loaded');};
     await assert.rejects(p.writeNewsletter(),/0.*2/);
-    assert.equal(contents.size,1);
+    assert.equal(contents.size,2);
+    assert.ok(contents.has('Data/brouillon-sources-'+p.newsletter.day()+'.md'));
     p.settings.debug=true;
     await assert.rejects(p.writeNewsletter(),/0.*2/);
-    assert.equal(contents.size,1);
+    assert.equal(contents.size,2);
     contents.set(p.dataPath,JSON.stringify({version:1,nextId:5,articles:[entries[0],entries[1],original]}));
     const note=await p.writeNewsletter();
     assert.ok(contents.get(note.path).includes('L’IA transforme l’écriture'));
@@ -2795,6 +2994,22 @@ test('mixed editions translate brief titles separately from the writer and prese
     assert.equal(saved.title,blocked.title);
     assert.equal(saved.status,'forbidden');
     assert.equal(saved.usedAt,p.newsletter.day());
+});
+
+test('a source omitted from the rendered newsletter is never marked used even when the AI kept it in brief',async()=>{
+    const {p,contents,entries}=await newsletterFixture();
+    p.settings.imageMode='none';
+    const blocked={...entries[0],id:4,title:'Brief source',url:'https://blocked.example/article',status:'forbidden',content:''};
+    const data=JSON.parse(contents.get(p.dataPath));data.articles.push(blocked);data.nextId=5;
+    contents.set(p.dataPath,JSON.stringify(data));
+    const read=p.app.vault.adapter.read;
+    p.app.vault.adapter.read=async path=>path.endsWith('/models/newsletter.md')
+        ? '# {{title}}\n\n{{#editorial}}{{paragraphs_before_image}}\n\n{{paragraphs_after_image}}{{/editorial}}' : read(path);
+    const note=await p.writeNewsletter();
+    assert.ok(!contents.get(note.path).includes(blocked.url));
+    const saved=JSON.parse(contents.get(p.dataPath)).articles;
+    assert.deepEqual(saved.filter(article=>[1,2].includes(article.id)).map(article=>article.usedAt),[p.newsletter.day(),p.newsletter.day()]);
+    assert.equal(saved.find(article=>article.id===4).usedAt,'');
 });
 
 test('brief translation failures and cancellation preserve the saved edition and article timestamps',async()=>{
@@ -2847,7 +3062,7 @@ test('debug uses a separate Codex schema for brief titles alongside a complete m
     }};
     p.generate=withStages(p, async()=>{throw new Error('Cloud API must not be called');});
     const note=await p.writeNewsletter();
-    assert.equal(calls,5);assert.equal(briefs,1);
+    assert.equal(calls,6);assert.equal(briefs,1);
     assert.ok(contents.get(note.path).includes('First paragraph.'));
     assert.ok(contents.get(note.path).includes('* [Translated title](https://blocked.example/story)'));
 });
@@ -2859,7 +3074,10 @@ test('debug cannot create a brief-only edition from inaccessible sources without
     const before=new Map(contents);
     p.generate=()=>assert.fail('No writing or brief generation without readable sources');
     await assert.rejects(p.writeNewsletter(),error=>error.message===p.i18n.t('newsletterNotEnoughSources',{count:0,minimum:2}));
-    assert.deepEqual(contents,before);
+    const draftPath='Data/brouillon-sources-'+p.newsletter.day()+'.md';
+    assert.ok(contents.has(draftPath));
+    const after=new Map(contents);after.delete(draftPath);
+    assert.deepEqual(after,before);
 });
 
 test('disabled illustrations skip generation, keys, prompts and cached images',async()=>{
@@ -2881,7 +3099,7 @@ test('disabled illustrations skip generation, keys, prompts and cached images',a
     }
 });
 
-test('extracted illustrations require an original caption and link to the final publisher on the image',async()=>{
+test('extracted illustrations preserve captions or identify their source and link the image to the publisher',async()=>{
     for (const caption of ['', ' \n ', 'Original photograph. Author / Agency.']) {
         const {p,contents}=await newsletterFixture();
         p.settings.imageMode='extracted';
@@ -2889,10 +3107,27 @@ test('extracted illustrations require an original caption and link to the final 
         p.loadPage=async()=>({status:200,url:'https://www.theatlantic.com/books/source/',html:'social metadata'});
         p.crawler={...p.crawler,extractArticleImage:()=>({image:'https://images.example/social.jpg',imageCaption:caption})};
         const note=await p.writeNewsletter(),text=contents.get(note.path);
-        if (caption.trim()) assert.ok(text.includes('[!['+caption+'](https://images.example/social.jpg)](https://www.theatlantic.com/books/source/)'));
-        else assert.ok(!text.includes('!['));
+        const label=caption.trim() || p.crawler.imageSourceCaption('used','https://www.theatlantic.com/books/source/');
+        assert.ok(text.includes('[!['+label+'](https://images.example/social.jpg)](https://www.theatlantic.com/books/source/)'));
         assert.ok(!text.includes('[theatlantic.com](https://www.theatlantic.com/books/source/)'));
         assert.ok(!text.includes('![used]'));assert.ok(!text.includes('![another]'));
+    }
+});
+
+test('collected images survive an unavailable source even without an original caption',async()=>{
+    const {p,contents}=await newsletterFixture();
+    p.settings.imageMode='extracted';
+    const data=JSON.parse(contents.get(p.dataPath));
+    for (const article of data.articles.slice(0,2)) {
+        article.image='https://images.example/'+article.id+'.jpg';
+        article.imageCaption='';
+    }
+    contents.set(p.dataPath,JSON.stringify(data));
+    p.loadPage=async()=>{throw new Error('Source temporarily unavailable');};
+    const note=await p.writeNewsletter(),markdown=contents.get(note.path);
+    for (const article of data.articles.slice(0,2)) {
+        const caption=p.crawler.imageSourceCaption(article.title,article.url);
+        assert.ok(markdown.includes('[!['+caption+']('+article.image+')]('+article.url+')'));
     }
 });
 
@@ -3519,4 +3754,60 @@ test('failed RSS writes never acknowledge URLs as processed',async()=>{
     p.app.vault.process=process;
     assert.equal(await p.importFeeds(),1);
     assert.ok(JSON.parse(contents.get(p.dataPath)).rssSeen.urls.length>0);
+});
+
+test('struck sources become used, invalidate selection and stay excluded through repeated regeneration',async()=>{
+    const {p,contents,entries,seen}=await newsletterFixture();
+    p.settings.imageMode='none';
+    const extra={...entries[0],id:4,title:'Replacement',url:'https://replacement.example/article'};
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:5,articles:[entries[0],entries[1],extra]}));
+    const note=await p.writeNewsletter();
+    const oldKey=JSON.parse(contents.get('Data/selection-text-machine-'+p.newsletter.day()+'.json')).key;
+    contents.set(note.path,'# Edited newsletter\n\n~~Remove [Source]('+entries[0].url+').~~\n\nKeep [Source]('+entries[1].url+').');
+    await p.writeNewsletter();
+    assert.deepEqual(seen.at(-1).articles.map(row=>row.id),[2,4]);
+    assert.equal(JSON.parse(contents.get(p.dataPath)).articles[0].usedAt,p.newsletter.day());
+    assert.equal(JSON.parse(contents.get(p.dataPath)).articles[0].status,'');
+    const cache=JSON.parse(contents.get('Data/selection-text-machine-'+p.newsletter.day()+'.json'));
+    assert.notEqual(cache.key,oldKey);
+    assert.deepEqual(cache.excluded,[entries[0].url]);
+    assert.ok(!contents.get(note.path).includes(entries[0].url));
+    await p.writeNewsletter();
+    assert.deepEqual(seen.at(-1).articles.map(row=>row.id),[2,4]);
+});
+
+test('brief generation sees older publications even without a history placeholder in customized prompts',async()=>{
+    const {p,entries,contents}=await newsletterFixture();
+    p.settings.imageMode='none';
+    const old='# Previous\n\n[An interview](https://original.example/interview)';
+    await p.app.vault.create('Data/text-machine-2000-01-01.md',old);
+    const source={...entries[0],id:4,url:'https://republished.example/interview',status:'forbidden',content:''};
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:5,articles:[...entries,source]}));
+    const generate=p.generate;let checked=false;
+    p.generate=async(connection,system,input,...rest)=>{
+        if(system.startsWith('Runtime brief')) {
+            assert.ok(system.includes(old.replace(/\n/g,'\\n')));
+            assert.ok(system.includes('the same interview'));
+            checked=true;
+            return JSON.stringify({titles:[{id:4,title:null,category:null}]});
+        }
+        return generate(connection,system,input,...rest);
+    };
+    const note=await p.writeNewsletter();
+    assert.equal(checked,true);
+    assert.ok(!contents.get(note.path).includes(source.url));
+    assert.equal(JSON.parse(contents.get(p.dataPath)).articles.find(row=>row.id===4).usedAt,'');
+});
+
+test('a source struck in a previous edition remains used and excluded when its URL is absent from the final note',async()=>{
+    const {p,contents,entries,seen}=await newsletterFixture();
+    p.settings.imageMode='none';
+    p.newsletter={...p.newsletter,day:()=> '2026-11-26'};
+    await p.app.vault.create('Data/text-machine-2026-11-25.md','# Previous edition without the removed article');
+    await p.app.vault.create('Data/selection-text-machine-2026-11-25.json',JSON.stringify({excluded:[entries[0].url]}));
+    const extra={...entries[0],id:4,title:'Replacement',url:'https://replacement.example/article'};
+    contents.set(p.dataPath,JSON.stringify({version:1,nextId:5,articles:[{...entries[0],usedAt:'2026-11-25'},entries[1],extra]}));
+    await p.writeNewsletter();
+    assert.deepEqual(seen.at(-1).articles.map(row=>row.id),[2,4]);
+    assert.equal(JSON.parse(contents.get(p.dataPath)).articles[0].usedAt,'2026-11-25');
 });

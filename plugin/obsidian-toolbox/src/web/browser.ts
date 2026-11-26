@@ -136,14 +136,34 @@ async function retrievePage(url: string, signal: AbortSignal | undefined, isBloc
     if (signal?.aborted) throw new Error(messages.cancelled());
     if (isPdf(url)) return {status:415,url,html:'',contentType:'application/pdf'};
     if (isBlocked(url)) return {status:404,url,html:''};
-    const start=Date.now();
-    const direct=await directFetch(url,signal,isBlocked);
-    observe?.('http',direct,Date.now()-start);
-    if (isPdf(direct.url,direct.contentType) || (direct.status>=200 && direct.status<300 && direct.html && extractPage(direct.html,direct.url).content)) return direct;
-    const browserStart=Date.now();
-    const page=await loadPage(url,signal,isBlocked,BrowserWindow);
-    observe?.('browser',page,Date.now()-browserStart);
-    return page.failure && direct.status===404 && !direct.failure ? direct : page;
+    const controller=new AbortController();
+    let timer: number | undefined, abort: (()=>void) | undefined;
+    // Destroying a hidden browser may leave its navigation promise pending.
+    const deadline=new Promise<Page>((resolve,reject)=>{
+        abort=()=>{reject(new Error(messages.cancelled()));controller.abort();};
+        signal?.addEventListener('abort',abort,{once:true});
+        timer=window.setTimeout(()=>{
+            resolve({status:408,url,html:'',failure:'ETIMEDOUT'});
+            controller.abort();
+        },40000);
+    });
+    try {
+        const read=async()=>{
+            const start=Date.now();
+            const direct=await directFetch(url,controller.signal,isBlocked);
+            observe?.('http',direct,Date.now()-start);
+            if (isPdf(direct.url,direct.contentType) || (direct.status>=200 && direct.status<300 && direct.html && extractPage(direct.html,direct.url).content)) return direct;
+            const browserStart=Date.now();
+            const page=await loadPage(url,controller.signal,isBlocked,BrowserWindow);
+            observe?.('browser',page,Date.now()-browserStart);
+            return page.failure && direct.status===404 && !direct.failure ? direct : page;
+        };
+        return await Promise.race([read(),deadline]);
+    } finally {
+        if (timer!==undefined) window.clearTimeout(timer);
+        if (abort) signal?.removeEventListener('abort',abort);
+        controller.abort();
+    }
 }
 
 async function loadPage(url: string, signal: AbortSignal | undefined, isBlocked: (url: string)=>boolean, BrowserWindow: BrowserWindowConstructor): Promise<Page> {
@@ -183,7 +203,11 @@ async function loadPage(url: string, signal: AbortSignal | undefined, isBlocked:
     web.on('did-navigate', (_event, _url, responseCode) => {
         if (responseCode > 0) status = responseCode;
     });
-    const close = () => { if (!win.isDestroyed()) win.destroy(); };
+    const close = () => {
+        window.clearTimeout(timer);
+        signal?.removeEventListener('abort',close);
+        if (!win.isDestroyed()) win.destroy();
+    };
     signal?.addEventListener('abort', close, {once:true});
     const timer = window.setTimeout(()=>{timedOut=true;close();}, 25000);
     try {
@@ -207,8 +231,6 @@ async function loadPage(url: string, signal: AbortSignal | undefined, isBlocked:
         return pdfUrl ? pdfPage(pdfUrl) : {status:status >= 400 ? status : 404, url:web.isDestroyed() ? url : web.getURL() || url, html:'',contentType,
             failure:timedOut ? 'ETIMEDOUT' : failureCode(caught)};
     } finally {
-        window.clearTimeout(timer);
-        signal?.removeEventListener('abort', close);
         close();
     }
 }

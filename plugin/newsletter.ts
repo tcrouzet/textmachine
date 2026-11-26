@@ -22,45 +22,85 @@ export interface Newsletter extends Editorial {
 }
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((item: unknown)=>typeof item==='string');
 
-function referenceInstructions(articles: Article[], sources: string) {
+function referenceArticles(articles: Article[], sources: string) {
     const domains=new Set(sources.split(/[\s,;]+/).filter(Boolean).flatMap(source=>{
         try {const domain=domainOf(source);return domain.includes('.') ? [domain] : [];}
         catch {return [];}
     }));
-    if (!domains.size) return '';
-    const ids=articles.filter(article=>{
+    return articles.filter(article=>{
         try {return domains.has(domainOf(article.url));} catch {return false;}
-    }).map(article=>article.id);
+    });
+}
+
+function referenceInstructions(articles: Article[], sources: string) {
+    const ids=referenceArticles(articles,sources).map(article=>article.id);
     return ids.length ? '\n\n'+t('referenceSourcesContract',{ids:ids.join(', ')}) : '';
+}
+
+function prioritizeReferences(selection: ReturnType<typeof parseSelection>, sources: string) {
+    const preferred=referenceArticles([...selection.selected,...selection.brief],sources);
+    if (!preferred.length) return selection;
+    const candidates=[...preferred,...selection.selected.filter(article=>!preferred.includes(article))];
+    const selected=candidates.slice(0,selection.selected.length);
+    if (selected.length>1 && publicationCount(selected)<2) {
+        const other=candidates.find(article=>publicationCount([selected[0],article])>1);
+        if (other) selected[selected.length-1]=other;
+    }
+    const ids=new Set(selected.map(article=>article.id));
+    return {...selection,selected,brief:[...selection.selected,...selection.brief].filter(article=>!ids.has(article.id))};
+}
+
+function struckArticles(notes: string[]) {
+    const urls=new Set<string>();
+    for (const note of notes) {
+        const links=markdownLinks(note);
+        for (const match of note.matchAll(/(?<!\\)~~([\s\S]+?)~~/g)) {
+            const fragments=[match[1],...links.filter(link=>link.from<match.index+match[0].length && link.to>match.index)
+                .map(link=>note.slice(link.from,link.to))];
+            const text=fragments.join('\n').replace(/~~/g,'');
+            for (const link of extractLinks({payload:{},labelIds:[],bodies:[{type:'text/plain',text}]})) urls.add(link.url);
+        }
+    }
+    return [...urls];
 }
 
 function day(date = new Date()) {
     return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
 
-function availableForEdition(article: Article, date: string, lastEdition: string) {
+function citationUrl(value: string) {
+    const url=new URL(value);
+    if ((url.hostname==='arxiv.org' || url.hostname.endsWith('.arxiv.org')) && url.pathname.startsWith('/pdf/')) {
+        url.pathname=url.pathname.replace(/^\/pdf\//,'/abs/').replace(/\.pdf$/i,'');
+    }
+    return url.href;
+}
+
+function availableForEdition(article: Article, date: string, lastEdition: string, published?: ReadonlySet<string>) {
+    if (published?.has(articleKeys({url:citationUrl(article.url),title:''}).urlKey)) return false;
     return !article.usedAt || article.usedAt===date || (/^\d{4}-\d{2}-\d{2}$/.test(article.usedAt)
-        && article.usedAt>lastEdition && article.usedAt<date);
+        && (article.usedAt>lastEdition || (published!==undefined && article.usedAt===lastEdition)) && article.usedAt<date);
 }
 
-function availableArticles(text: string, exclusions = '', date = day(), todayNotes: string[] = [], lastEdition = date) {
+function availableArticles(text: string, exclusions = '', date = day(), todayNotes: string[] = [], lastEdition = date, published?: ReadonlySet<string>) {
     return parseData(text).articles.filter(article => article.content.trim() && articleUrl(article.url,article.title) && !isPdf(article.url) && !isShortUrl(article.url) && !isExcluded(article,exclusions)
-        && article.status === '' && (availableForEdition(article,date,lastEdition)
-            || (article.usedAt==='unknown' && todayNotes.some(note=>note.includes(']('+article.url+')') || note.includes(']('+article.url+' ')))));
+        && article.status === '' && (availableForEdition(article,date,lastEdition,published)
+            || (article.usedAt==='unknown' && !published?.has(articleKeys({url:citationUrl(article.url),title:''}).urlKey)
+                && todayNotes.some(note=>note.includes(']('+article.url+')') || note.includes(']('+article.url+' ')))));
 }
 
-function briefArticles(text: string, exclusions = '', date = day(), lastEdition = date) {
-    return parseData(text).articles.filter(article=>article.status === 'forbidden' && availableForEdition(article,date,lastEdition)
-        && articleUrl(article.url,article.title) && !isShortUrl(article.url) && !isExcluded(article,exclusions));
+function briefArticles(text: string, exclusions = '', date = day(), lastEdition = date, published?: ReadonlySet<string>) {
+    return parseData(text).articles.filter(article=>article.status === 'forbidden' && articleUrl(article.url,article.title)
+        && !isShortUrl(article.url) && !isExcluded(article,exclusions) && availableForEdition(article,date,lastEdition,published));
 }
 
-function briefRequest(prompt: string, articles: Article[], language: string) {
+function briefRequest(prompt: string, articles: Article[], language: string, previous: {name: string;content: string}[] = []) {
     if (!prompt.trim()) throw new Error(t('newsletterBriefPromptEmpty'));
     const schema = structuredClone(briefSchema);
     const titles = schema.properties.titles;
     Object.assign(titles,{minItems:articles.length,maxItems:articles.length});
     Object.assign(titles.items.properties.id,{enum:articles.map(article=>article.id)});
-    return {system:renderPrompt(prompt,{language})+'\n\n'+JSON.stringify({jsonSchema:schema}),
+    return {system:renderPrompt(prompt,{language})+(previous.length ? '\n\n'+t('briefHistoryContract')+'\n'+JSON.stringify(previous) : '')+'\n\n'+JSON.stringify({jsonSchema:schema}),
         input:JSON.stringify(articles.map(({id,title,url,status,content})=>({id,title:articleTitle({url,title}),
             ...(status==='' && content.trim() ? {context:content.slice(0,2000)} : {})}))),schema};
 }
@@ -106,7 +146,7 @@ function selectionRequest(prompt: string, articles: Article[], language: string,
     for (const key of ['selected','brief','discard'] as const) Object.assign(schema.properties[key].items,{enum:ids});
     const editorial=articles.filter(article=>isEditorialSource(article.source)).map(article=>article.id);
     const priority=editorial.length ? '\n\n'+t('editorialSourcesContract',{ids:editorial.join(', ')}) : '';
-    return {input:articleInput(prompt,articles,language,{commentedArticles:String(commentedArticles),now:new Date().toString(),previousNewsletters:JSON.stringify(previous),AuthorFeed:JSON.stringify(feed),recentPosts:JSON.stringify(feed)}),system:t('selectionContract')+'\n\n'+t('commentedArticlesContract',{count:commentedArticles})+referenceInstructions(articles,referenceSources)+priority+'\n\n'+JSON.stringify({jsonSchema:schema}),schema};
+    return {input:articleInput(prompt,articles,language,{commentedArticles:String(commentedArticles),now:new Date().toString(),previousNewsletters:JSON.stringify(previous),AuthorFeed:JSON.stringify(feed),recentPosts:JSON.stringify(feed)}),system:t('selectionContract')+'\n\n'+t('selectionCountContract',{count:commentedArticles})+referenceInstructions(articles,referenceSources)+priority+'\n\n'+JSON.stringify({jsonSchema:schema}),schema};
 }
 
 async function selectArticles(articles: Article[], build: (articles: Article[])=>ReturnType<typeof selectionRequest>,
@@ -202,7 +242,8 @@ function parseWriter(text: string, articles: Article[], minimum = 2) {
         throw Object.assign(new Error(t('newsletterMultiplePublications')),{code:'RP_TOO_FEW_SOURCES'});
     const linked=new Set(extractLinks({payload:{},labelIds:[],bodies:[{type:'text/plain',text:editorial.paragraphs.join('\n\n')}]}).map(link=>articleKeys(link).urlKey));
     const commented=used.filter(article=>linked.has(articleKeys(article).urlKey));
-    if (commented.length<minimum) throw new Error(t('newsletterNotEnoughRelevantSources',{count:commented.length,minimum}));
+    const required=Math.max(minimum,articles.length);
+    if (commented.length<required) throw Object.assign(new Error(t('newsletterNotEnoughRelevantSources',{count:commented.length,minimum:required})),{code:'RP_ARTICLE_MINIMUM'});
     return {...editorial,used};
 }
 
@@ -271,9 +312,10 @@ function writerRequest(prompt: string, articles: Article[], previous: {name: str
         AuthorFeed:JSON.stringify(feed),
     };
     const editorialSchema = structuredClone(writerSchema);
+    Object.assign(editorialSchema.properties.used,{minItems:articles.length,maxItems:articles.length});
     Object.assign(editorialSchema.properties.used.items,{enum:articles.map(article=>article.id)});
     return {
-        system:t('writerContract')+'\n\n'+t('commentedArticlesContract',{count:commentedArticles}) + referenceInstructions(articles,referenceSources) + '\n\n' + JSON.stringify({jsonSchema:editorialSchema}),schema:editorialSchema,
+        system:t('writerContract')+'\n\n'+t('commentedArticlesContract',{count:Math.max(commentedArticles,articles.length)}) + referenceInstructions(articles,referenceSources) + '\n\n' + JSON.stringify({jsonSchema:editorialSchema}),schema:editorialSchema,
         input:articleInput(prompt,articles,language,values),
     };
 }
@@ -294,10 +336,7 @@ function renderNewsletter(template: string, result: Newsletter, brief: (Pick<Art
         paragraphs_after_image:paragraphs.slice(2).join('\n\n'),
     };
     const briefRows = brief.map(article=>{
-        const url=new URL(article.url);
-        if ((url.hostname==='arxiv.org' || url.hostname.endsWith('.arxiv.org')) && url.pathname.startsWith('/pdf/')) {
-            url.pathname=url.pathname.replace(/^\/pdf\//,'/abs/').replace(/\.pdf$/i,'');
-        }
+        const url=new URL(citationUrl(article.url));
         const domain=url.hostname.replace(/^www\./,'');
         return {title:escape(articleTitle(article)),url:link(url.href),source:escape(domain),source_url:link(url.protocol+'//'+domain+'/'),category:escape(article.category?.trim() || ''),
             full_text:article.status==='' && article.content?.trim() ? '⊞' : ''};
@@ -338,13 +377,14 @@ function renderNewsletter(template: string, result: Newsletter, brief: (Pick<Art
 
 function applyStatuses(text: string, snapshot: Article[], result: Pick<Newsletter,'used' | 'discard'>, date = day(), brief: Article[] = []) {
     const data = parseData(text);
-    const original = new Map([...snapshot,...brief].map(article => [article.id,article]));
+    const original = new Map([...brief,...snapshot].map(article => [article.id,article]));
     const generated = result.used.length>0 || brief.length>0, discarded = new Set(result.discard);
+    const published = new Set([...result.used,...brief.map(article=>article.url)]);
     for (const article of data.articles) {
         const before = original.get(article.id);
         if (!before || article.url !== before.url || article.status !== before.status || article.usedAt !== before.usedAt
             || article.content !== before.content || article.title !== before.title) continue;
-        if (generated) article.usedAt = date;
+        if (generated) article.usedAt = published.has(article.url) ? date : '';
         else if (discarded.has(article.url) && !article.usedAt) article.status = 'discard';
     }
     return JSON.stringify(data,null,2) + '\n';
@@ -426,4 +466,4 @@ function readFeed(xml: string, limit = 5, base = '', accept?: (entry: Pick<FeedE
     });
 }
 
-export {day, availableArticles, briefArticles, briefRequest, parseBrief, titleRequest, selectionRequest, selectArticles, parseSelection, isAuthorSource, assertNoAuthorSources, parseEditorial, parseWriter, publicationCount, publisherRequest, parsePublisher, verificationRequest, parseVerification, renderPrompt, writerRequest, renderNewsletter, applyStatuses, feedUrl, feedUrls, readFeed, preview};
+export {day, citationUrl, struckArticles, prioritizeReferences, availableArticles, briefArticles, briefRequest, parseBrief, titleRequest, selectionRequest, selectArticles, parseSelection, isAuthorSource, assertNoAuthorSources, parseEditorial, parseWriter, publicationCount, publisherRequest, parsePublisher, verificationRequest, parseVerification, renderPrompt, writerRequest, renderNewsletter, applyStatuses, feedUrl, feedUrls, readFeed, preview};

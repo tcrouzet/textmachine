@@ -12,7 +12,7 @@
   "properties": {
     "selected": {
       "type": "array",
-      "description": "IDs des articles apportant des faits, expériences ou analyses précises sur le rapport entre IA et littérature. Une mention accessoire ou une opinion générale sur l’IA ne suffit pas. Classer par intérêt décroissant pour la pratique littéraire et par solidité des sources ; favoriser les sources de référence et les publications reconnues. Vise le nombre demandé, avec au moins deux publications distinctes. Liste vide si aucune RP substantielle à plusieurs voix n’est possible.",
+      "description": "IDs des meilleurs articles pertinents pour la RP, dans l’ordre du classement éditorial, selon le nombre demandé. Le sujet central doit être le rapport entre l’IA et la littérature ; une mention accessoire ne suffit pas. Retourner moins seulement si le corpus pertinent est insuffisant.",
       "items": {
         "type": "integer",
         "minimum": 1
@@ -20,7 +20,7 @@
     },
     "brief": {
       "type": "array",
-      "description": "IDs des nouvelles secondaires avec un apport réel sur l’IA et la littérature. Exclure aussi d’ici les entretiens littéraires raccrochés à l’IA par une opinion générale, sans information substantielle.",
+      "description": "IDs des autres articles pertinents, après avoir retenu les meilleurs pour la RP selon le nombre demandé. Même exigence de pertinence ; les mentions accessoires et les sujets hors thème sont exclus.",
       "items": {
         "type": "integer",
         "minimum": 1
